@@ -52,7 +52,9 @@ incremental change.
 - openspec/             specs (source of truth) + changes
 
 ## Current status
-Phase 0 scaffold complete. Next features in order:
-1. LLM wrapper + handle_message + web chat (SSE)
-2. Telegram channel (long-poll, chat-id allowlist)
-3. Day-end summary job → generated_reviews → Telegram
+Phase 0 complete (2026-07-20). Next features in order:
+1. Feature 1 — LLM wrapper + handle_message + auth + web chat (SSE)
+2. Feature 2 — Telegram channel (long-poll, chat-id allowlist)
+3. Feature 3 — Day-end summary job → generated_reviews → Telegram
+
+Architecture reference: docs/ARCHITECTURE.md
