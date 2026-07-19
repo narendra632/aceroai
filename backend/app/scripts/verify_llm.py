@@ -17,7 +17,9 @@ def main() -> None:
     resp = client.chat.completions.create(
         model=settings.model_chat,
         messages=[{"role": "user", "content": "Reply with exactly: scaffold llm ok"}],
-        max_tokens=10,
+        # thinking models (gemini 3.x) spend budget on reasoning before any
+        # visible text — a tiny cap yields content=None
+        max_tokens=2000,
     )
     print(resp.choices[0].message.content)
 
