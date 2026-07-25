@@ -1,1 +1,69 @@
 @import "tailwindcss";
+
+/* Claude-inspired warm palette. @theme tokens become utilities (bg-paper,
+   text-ink, border-line, …). Dark mode overrides the CSS vars below. */
+@theme {
+  --color-paper: #faf9f5;
+  --color-surface: #ffffff;
+  --color-surface-2: #f2efe6;
+  --color-ink: #232019;
+  --color-muted: #6b6353;
+  --color-faint: #9a927f;
+  --color-line: #e8e2d5;
+  --color-clay: #c15f3c;
+  --color-clay-strong: #a94f30;
+  --color-user: #eae4d7;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: #1f1e1b;
+    --color-surface: #292824;
+    --color-surface-2: #232220;
+    --color-ink: #ece9e1;
+    --color-muted: #a49d8e;
+    --color-faint: #776f60;
+    --color-line: #38352f;
+    --color-clay: #d97757;
+    --color-clay-strong: #e08a6c;
+    --color-user: #33322d;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background-color: var(--color-clay);
+  animation: blink 1s step-start infinite;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise {
+  animation: rise 0.18s ease-out;
+}

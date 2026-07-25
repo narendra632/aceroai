@@ -1,33 +1,34 @@
 import { useEffect, useState } from "react";
 
-const API = import.meta.env.VITE_API_URL;
+import ChatLayout from "./components/ChatLayout";
+import LoginScreen from "./components/LoginScreen";
+import * as api from "./lib/api";
 
 export default function App() {
-  const [status, setStatus] = useState<"checking" | "ok" | "down">("checking");
+  const [email, setEmail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API}/health`)
-      .then((r) => r.json())
-      .then((d) => setStatus(d.status === "ok" ? "ok" : "down"))
-      .catch(() => setStatus("down"));
+    api.me().then((e) => {
+      setEmail(e);
+      setLoading(false);
+    });
   }, []);
 
-  return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center gap-4">
-      <h1 className="text-3xl font-semibold tracking-tight">aceroai</h1>
-      <p className="flex items-center gap-2 text-sm text-zinc-400">
-        <span
-          className={`h-2.5 w-2.5 rounded-full ${
-            status === "ok"
-              ? "bg-emerald-400"
-              : status === "down"
-                ? "bg-red-500"
-                : "bg-amber-400"
-          }`}
-        />
-        API: {status}
-      </p>
-      <p className="text-xs text-zinc-500">Scaffold only — real UI lands with the chat feature.</p>
-    </main>
-  );
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted">Loading…</div>
+    );
+  }
+
+  if (!email) {
+    return <LoginScreen onLogin={setEmail} />;
+  }
+
+  async function handleLogout() {
+    await api.logout();
+    setEmail(null);
+  }
+
+  return <ChatLayout email={email} onLogout={handleLogout} />;
 }
