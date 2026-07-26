@@ -1,35 +1,87 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* Claude-inspired warm palette. @theme tokens become utilities (bg-paper,
-   text-ink, border-line, …). Dark mode overrides the CSS vars below. */
-@theme {
-  --color-paper: #faf9f5;
-  --color-surface: #ffffff;
-  --color-surface-2: #f2efe6;
-  --color-ink: #232019;
-  --color-muted: #6b6353;
-  --color-faint: #9a927f;
-  --color-line: #e8e2d5;
-  --color-clay: #c15f3c;
-  --color-clay-strong: #a94f30;
-  --color-user: #eae4d7;
+/* dark mode is driven by a `.dark` class on <html> (set by the theme toggle /
+   the no-flash script in index.html), so shadcn `dark:` variants stay in sync. */
+@custom-variant dark (&:is(.dark *));
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+/* Warm, Claude-inspired palette expressed through shadcn's semantic tokens.
+   Light in :root, dark under .dark. */
+:root {
+  --radius: 0.8rem;
+
+  --background: #faf9f5;
+  --foreground: #232019;
+  --card: #ffffff;
+  --card-foreground: #232019;
+  --popover: #ffffff;
+  --popover-foreground: #232019;
+  --primary: #c15f3c;
+  --primary-foreground: #ffffff;
+  --secondary: #f2efe6;
+  --secondary-foreground: #2c2820;
+  --muted: #f2efe6;
+  --muted-foreground: #6b6353;
+  --accent: #eae4d7;
+  --accent-foreground: #2c2820;
+  --destructive: #b3402a;
+  --border: #e8e2d5;
+  --input: #e4ddce;
+  --ring: #c15f3c;
+
+  --faint: #9a927f;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-paper: #1f1e1b;
-    --color-surface: #292824;
-    --color-surface-2: #232220;
-    --color-ink: #ece9e1;
-    --color-muted: #a49d8e;
-    --color-faint: #776f60;
-    --color-line: #38352f;
-    --color-clay: #d97757;
-    --color-clay-strong: #e08a6c;
-    --color-user: #33322d;
-  }
+.dark {
+  --background: #1f1e1b;
+  --foreground: #ece9e1;
+  --card: #292824;
+  --card-foreground: #ece9e1;
+  --popover: #292824;
+  --popover-foreground: #ece9e1;
+  --primary: #d97757;
+  --primary-foreground: #201410;
+  --secondary: #302f2a;
+  --secondary-foreground: #ece9e1;
+  --muted: #302f2a;
+  --muted-foreground: #a49d8e;
+  --accent: #37362f;
+  --accent-foreground: #ece9e1;
+  --destructive: #e0674a;
+  --border: #38352f;
+  --input: #3d3a33;
+  --ring: #d97757;
+
+  --faint: #7d7666;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-faint: var(--faint);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 html,
@@ -39,12 +91,13 @@ body,
 }
 
 body {
-  background-color: var(--color-paper);
-  color: var(--color-ink);
+  background-color: var(--background);
+  color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
+/* streaming caret */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
@@ -53,17 +106,39 @@ body {
   content: "";
   display: inline-block;
   width: 0.5ch;
-  height: 1em;
+  height: 1.05em;
   margin-left: 1px;
   vertical-align: text-bottom;
-  background-color: var(--color-clay);
+  border-radius: 1px;
+  background-color: var(--primary);
   animation: blink 1s step-start infinite;
 }
 
+/* message entrance */
 @keyframes rise {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.rise {
-  animation: rise 0.18s ease-out;
+.rise { animation: rise 0.18s ease-out; }
+
+/* caret trailing live-rendered markdown while streaming */
+.streaming > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.5ch;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background-color: var(--primary);
+  animation: blink 1s step-start infinite;
 }
+
+/* "thinking" three-dot pulse */
+@keyframes thinking {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+.think-dot { animation: thinking 1.2s ease-in-out infinite; }
+.think-dot:nth-child(2) { animation-delay: 0.15s; }
+.think-dot:nth-child(3) { animation-delay: 0.3s; }

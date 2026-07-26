@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import ChatLayout from "./components/ChatLayout";
 import LoginScreen from "./components/LoginScreen";
 import * as api from "./lib/api";
@@ -15,20 +16,22 @@ export default function App() {
     });
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-muted">Loading…</div>
-    );
-  }
-
-  if (!email) {
-    return <LoginScreen onLogin={setEmail} />;
-  }
-
   async function handleLogout() {
     await api.logout();
     setEmail(null);
   }
 
-  return <ChatLayout email={email} onLogout={handleLogout} />;
+  return (
+    <TooltipProvider delayDuration={200}>
+      {loading ? (
+        <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+          Loading…
+        </div>
+      ) : email ? (
+        <ChatLayout email={email} onLogout={handleLogout} />
+      ) : (
+        <LoginScreen onLogin={setEmail} />
+      )}
+    </TooltipProvider>
+  );
 }

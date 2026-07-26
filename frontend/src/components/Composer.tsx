@@ -1,21 +1,29 @@
 import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
+import { ArrowUp, Square } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 
 export default function Composer({
   onSend,
+  onStop,
   busy,
 }: {
   onSend: (text: string) => void;
+  onStop: () => void;
   busy: boolean;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  // auto-grow the textarea up to a cap
+  // auto-grow up to a cap; keep overflow hidden until the cap is reached so no
+  // scrollbar shows for short input
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    const next = Math.min(el.scrollHeight, 200);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > 200 ? "auto" : "hidden";
   }, [text]);
 
   function submit() {
@@ -33,7 +41,7 @@ export default function Composer({
   }
 
   return (
-    <div className="border-t border-line bg-paper px-4 py-3">
+    <div className="border-t border-border bg-background px-4 py-3">
       <div className="mx-auto flex w-full max-w-2xl items-end gap-2">
         <textarea
           ref={ref}
@@ -42,16 +50,29 @@ export default function Composer({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Message aceroai…"
-          className="max-h-52 flex-1 resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-ink outline-none focus:border-clay"
+          className="max-h-52 flex-1 resize-none overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
         />
-        <button
-          onClick={submit}
-          disabled={busy || !text.trim()}
-          aria-label="Send"
-          className="grid h-11 w-11 flex-none place-items-center rounded-full bg-clay text-white transition hover:bg-clay-strong disabled:opacity-40"
-        >
-          ↑
-        </button>
+        {busy ? (
+          <Button
+            onClick={onStop}
+            size="icon-lg"
+            variant="secondary"
+            aria-label="Stop generating"
+            className="rounded-full"
+          >
+            <Square className="fill-current" />
+          </Button>
+        ) : (
+          <Button
+            onClick={submit}
+            disabled={!text.trim()}
+            size="icon-lg"
+            aria-label="Send message"
+            className="rounded-full"
+          >
+            <ArrowUp />
+          </Button>
+        )}
       </div>
       <p className="mx-auto mt-1.5 hidden max-w-2xl text-center text-xs text-faint sm:block">
         Enter to send · Shift+Enter for a new line

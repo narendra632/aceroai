@@ -74,12 +74,14 @@ function parseFrame(frame: string): ChatEvent | null {
 export async function* streamChat(
   message: string,
   sessionId: string | null,
+  signal?: AbortSignal,
 ): AsyncGenerator<ChatEvent> {
   const res = await fetch(`${API}/api/chat`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, session_id: sessionId }),
+    signal,
   });
   if (!res.ok || !res.body) throw new Error("chat request failed");
 

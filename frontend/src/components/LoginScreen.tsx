@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 
-import * as api from "../lib/api";
+import { Button } from "@/components/ui/button";
+import * as api from "@/lib/api";
 
 export default function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
   const [email, setEmail] = useState("");
@@ -21,17 +22,14 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rise">
+    <main className="flex min-h-screen items-center justify-center px-4">
+      <div className="rise w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-semibold tracking-tight">aceroai</h1>
-          <p className="mt-1 text-sm text-muted">Your personal chief-of-staff.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Your personal chief-of-staff.</p>
         </div>
-        <form
-          onSubmit={submit}
-          className="rounded-2xl border border-line bg-surface p-6 shadow-sm"
-        >
-          <label className="block text-sm font-medium text-muted" htmlFor="email">
+        <form onSubmit={submit} className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <label className="block text-sm font-medium text-muted-foreground" htmlFor="email">
             Email
           </label>
           <input
@@ -41,9 +39,9 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="mt-1 mb-4 w-full rounded-lg border border-line bg-paper px-3 py-2.5 text-ink outline-none focus:border-clay"
+            className="mt-1 mb-4 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
-          <label className="block text-sm font-medium text-muted" htmlFor="password">
+          <label className="block text-sm font-medium text-muted-foreground" htmlFor="password">
             Password
           </label>
           <input
@@ -53,16 +51,12 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2.5 text-ink outline-none focus:border-clay"
+            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
-          {error && <p className="mt-3 text-sm text-clay-strong">{error}</p>}
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-5 min-h-11 w-full rounded-lg bg-clay px-4 py-2.5 font-medium text-white transition hover:bg-clay-strong disabled:opacity-60"
-          >
+          {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+          <Button type="submit" disabled={busy} size="lg" className="mt-5 w-full">
             {busy ? "Signing in…" : "Sign in"}
-          </button>
+          </Button>
         </form>
       </div>
     </main>
