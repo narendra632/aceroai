@@ -52,9 +52,11 @@ incremental change.
 - openspec/             specs (source of truth) + changes
 
 ## Current status
-Phase 0 complete (2026-07-20). Next features in order:
-1. Feature 1 — LLM wrapper + handle_message + auth + web chat (SSE)
-2. Feature 2 — Telegram channel (long-poll, chat-id allowlist)
-3. Feature 3 — Day-end summary job → generated_reviews → Telegram
+Feature 1 complete (2026-07-26): LLM wrapper + one-brain handle_message +
+JWT-cookie auth + SSE web chat, with a multi-session React + shadcn/ui UI
+(markdown, smooth streaming, light/dark). Specs archived under openspec/specs/.
+Next features in order:
+1. Feature 2 — Telegram channel (long-poll, chat-id allowlist)
+2. Feature 3 — Day-end summary job → generated_reviews → Telegram
 
 Architecture reference: docs/ARCHITECTURE.md

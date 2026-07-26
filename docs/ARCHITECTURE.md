@@ -18,22 +18,20 @@ checks, tooling, and this document.
 ## 2. System diagram
 
 ```
-  browser SPA (frontend/, Vite+React, :5173)      Telegram user
-      │  GET /health  (today)                          │
-      │  POST /api/chat over SSE (planned — Feature 1) │ long-poll (planned — Feature 2)
+  browser SPA (frontend/, Vite+React+shadcn, :5173)   Telegram user
+      │  auth login + POST /api/chat over SSE (built)  │ long-poll (planned — Feature 2)
       ▼                                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │ FastAPI app — backend/app/main.py (:8000)                        │
-│   api/    HTTP routes: auth, chat SSE, tasks, journal            │
-│           (planned — Feature 1)                                  │
+│   api/    auth + chat SSE (built); tasks, journal (planned)      │
 │   channels/telegram.py  thin poller  (planned — Feature 2)       │
 └───────────────┬──────────────────────────────────────────────────┘
                 ▼
-   core/handler.handle_message  — the one brain (planned — Feature 1)
+   core/handler.handle_message  — the one brain (built)
                 │
-   core/composer — context builder, reads docs/SOUL.md (planned — Feature 1)
+   core/composer — context builder, reads docs/SOUL.md (built)
                 │
-   core/llm — thin AsyncOpenAI wrapper (planned — Feature 1)
+   core/llm — thin AsyncOpenAI wrapper (built)
                 ▼
    Gemini via OpenAI-compatible endpoint  (base_url + key + model from .env)
 ────────────────────────────────────────────────────────────────────
@@ -58,7 +56,7 @@ checks, tooling, and this document.
 | `.gitignore` | Ignores `.env`, venvs, caches, `node_modules/`, `dist/` |
 | `.pre-commit-config.yaml` | ruff (--fix), ruff-format, gitleaks secret scan |
 | `docker-compose.yml` | `db` (pgvector:pg17, loopback-only, healthcheck) + `api` (prod image, DATABASE_URL host override to `db`) |
-| `docs/SOUL.md` | Assistant persona ("Acero") — read by core/composer at every context build (planned — Feature 1) |
+| `docs/SOUL.md` | Assistant persona ("Acero") — read by core/composer at every context build (built) |
 | `docs/ARCHITECTURE.md` | This file |
 | `.github/copilot-instructions.md` | Points GitHub Copilot at AGENTS.md |
 | `.github/workflows/ci.yml` | CI: uv sync → ruff check → ruff format --check → pytest |
@@ -82,10 +80,12 @@ checks, tooling, and this document.
 | `app/config.py` | `Settings(BaseSettings)` — every runtime knob, loaded from `.env` |
 | `app/main.py` | FastAPI app: CORS for the SPA origin, `/health`, lifespan hook (telegram poller + scheduler start here in Features 2/3) |
 | `app/core/security.py` | bcrypt hash/verify + JWT create/decode (HS256, 30-day TTL) |
-| `app/core/` (rest) | `llm.py`, `composer.py`, `handler.py` (planned — Feature 1) |
+| `app/core/llm.py` | Thin `AsyncOpenAI` streaming wrapper (`stream_chat`) — built (Feature 1) |
+| `app/core/composer.py` | Context builder: `SOUL.md` + recent history — built (Feature 1) |
+| `app/core/handler.py` | `handle_message` — the one brain — built (Feature 1) |
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` dependency |
 | `app/db/models.py` | The 7 ORM models (typed `Mapped[]` style) |
-| `app/api/` | Empty package — HTTP routes land here (planned — Feature 1) |
+| `app/api/` | `deps.py` (auth guard), `auth.py`, `chat.py`, `schemas.py` — built (Feature 1) |
 | `app/channels/` | Empty package — telegram long-poller (planned — Feature 2) |
 | `app/jobs/` | Empty package — APScheduler + review jobs (planned — Feature 3) |
 | `app/scripts/create_user.py` | One-time interactive CLI to seed the single user |
@@ -213,15 +213,15 @@ diffs with ruff+pytest after; ask when unsure.
 
 ## 8. Status & next
 
-**Phase 0 is complete** (2026-07-20): schema applied (7 tables + pgvector),
-user seeded, `/health` green from the SPA, LLM round-trip proven
-(`scaffold llm ok`), pre-commit + CI + OpenSpec in place. Queued next, in
-order (per AGENTS.md):
+**Phase 0 complete** (2026-07-20) and **Feature 1 complete** (2026-07-26):
+`core/llm` + `core/composer` + `core/handler` (the one brain), JWT-cookie auth,
+SSE streaming chat, and a Claude-inspired multi-session React UI (shadcn/ui,
+markdown, smooth streaming, light/dark). Specs live in `openspec/specs/auth`
+and `openspec/specs/web-chat`. Queued next, in order (per AGENTS.md):
 
-1. **Feature 1** — `core/llm.py` + `core/handler.handle_message` + auth
-   (JWT cookie login) + web chat over SSE.
-2. **Feature 2** — Telegram channel: long-poller, chat-id allowlist.
-3. **Feature 3** — Day-end summary job → `generated_reviews` → Telegram.
+1. **Feature 2** — Telegram channel: long-poller, chat-id allowlist (reuses
+   `handle_message` unchanged — the one-brain payoff).
+2. **Feature 3** — Day-end summary job → `generated_reviews` → Telegram.
 
 Later phases: semantic memory over journals (embeddings + pgvector), habits,
 investments.
