@@ -1,16 +1,29 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, chat
+from app.channels import telegram
 from app.config import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Feature 2/3: telegram poller + APScheduler start here
-    yield
+    # Telegram poller runs only when a token is configured (Feature 3: scheduler here too)
+    poller = None
+    if settings.telegram_bot_token:
+        poller = asyncio.create_task(telegram.run_poller())
+    try:
+        yield
+    finally:
+        if poller is not None:
+            poller.cancel()
+            try:
+                await poller
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="aceroai", lifespan=lifespan)

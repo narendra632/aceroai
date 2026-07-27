@@ -60,7 +60,7 @@ future Telegram channel reuses the exact same brain.
 | `app/db/models.py` | The 7 ORM tables (typed `Mapped[]` style) |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
 | `app/scripts/verify_llm.py` | End-to-end provider smoke test (never prints the key) |
-| `app/channels/` | *(planned — Feature 2)* Telegram long-poller |
+| `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` (built, Feature 2) |
 | `app/jobs/` | *(planned — Feature 3)* APScheduler + review jobs |
 | `alembic/` | Migrations; `versions/…_001_core_tables.py` = schema + pgvector |
 | `tests/` | `conftest.py` (fake LLM + scoped data), `test_auth.py`, `test_chat.py` |
@@ -84,3 +84,18 @@ httpOnly cookie** (`samesite=lax`, 30-day). Protected routes depend on
 `get_current_user`, which decodes that cookie and 401s if it is missing or
 invalid. `logout` clears the cookie; `me` returns the current email. The cookie
 is httpOnly so browser JavaScript can never read the token.
+
+## Telegram channel
+
+`channels/telegram.py` long-polls the Telegram Bot API (`getUpdates`) and routes
+each authorized message through the **same** `handle_message` — the channel is a
+thin adapter with no chat logic (golden rule 1). It replies with `sendMessage`
+(one complete message, not token-streamed). The poller starts in the app
+lifespan **only when `TELEGRAM_BOT_TOKEN` is set**, so runs without it are
+unaffected. Long-polling is outbound, so **no hosting is needed** to test — run
+the backend locally and message the bot from your phone.
+
+Setup: get a token from **@BotFather**, put it in `.env` as `TELEGRAM_BOT_TOKEN`,
+restart the backend, then send **`/start`** to the bot once — the first `/start`
+links your chat to your account (trust-on-first-use); afterward only that chat is
+served.

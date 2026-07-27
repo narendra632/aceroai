@@ -19,12 +19,12 @@ checks, tooling, and this document.
 
 ```
   browser SPA (frontend/, Vite+React+shadcn, :5173)   Telegram user
-      │  auth login + POST /api/chat over SSE (built)  │ long-poll (planned — Feature 2)
+      │  auth login + POST /api/chat over SSE (built)  │ long-poll (built — Feature 2)
       ▼                                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │ FastAPI app — backend/app/main.py (:8000)                        │
 │   api/    auth + chat SSE (built); tasks, journal (planned)      │
-│   channels/telegram.py  thin poller  (planned — Feature 2)       │
+│   channels/telegram.py  thin poller  (built — Feature 2)         │
 └───────────────┬──────────────────────────────────────────────────┘
                 ▼
    core/handler.handle_message  — the one brain (built)
@@ -86,7 +86,7 @@ checks, tooling, and this document.
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` dependency |
 | `app/db/models.py` | The 7 ORM models (typed `Mapped[]` style) |
 | `app/api/` | `deps.py` (auth guard), `auth.py`, `chat.py`, `schemas.py` — built (Feature 1) |
-| `app/channels/` | Empty package — telegram long-poller (planned — Feature 2) |
+| `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` — built (Feature 2) |
 | `app/jobs/` | Empty package — APScheduler + review jobs (planned — Feature 3) |
 | `app/scripts/create_user.py` | One-time interactive CLI to seed the single user |
 | `app/scripts/verify_llm.py` | End-to-end provider wiring smoke test (never prints the key) |
@@ -213,15 +213,15 @@ diffs with ruff+pytest after; ask when unsure.
 
 ## 8. Status & next
 
-**Phase 0 complete** (2026-07-20) and **Feature 1 complete** (2026-07-26):
-`core/llm` + `core/composer` + `core/handler` (the one brain), JWT-cookie auth,
-SSE streaming chat, and a Claude-inspired multi-session React UI (shadcn/ui,
-markdown, smooth streaming, light/dark). Specs live in `openspec/specs/auth`
-and `openspec/specs/web-chat`. Queued next, in order (per AGENTS.md):
+**Phase 0**, **Feature 1** (web chat), and **Feature 2** (Telegram) are complete.
+Feature 1: `core/llm` + `core/composer` + `core/handler` (the one brain),
+JWT-cookie auth, SSE streaming chat, Claude-inspired multi-session React UI
+(shadcn/ui, markdown, smooth streaming, light/dark). Feature 2: a thin
+`channels/telegram.py` long-poller routing through the *same* `handle_message`.
+Specs live in `openspec/specs/{auth,web-chat,telegram}`. Queued next:
 
-1. **Feature 2** — Telegram channel: long-poller, chat-id allowlist (reuses
-   `handle_message` unchanged — the one-brain payoff).
-2. **Feature 3** — Day-end summary job → `generated_reviews` → Telegram.
+1. **Feature 3** — Day-end summary job → `generated_reviews` → Telegram
+   (APScheduler in the app lifespan, fires in `users.timezone`).
 
 Later phases: semantic memory over journals (embeddings + pgvector), habits,
 investments.
