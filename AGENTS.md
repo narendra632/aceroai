@@ -52,11 +52,20 @@ incremental change.
 - openspec/             specs (source of truth) + changes
 
 ## Current status
-Features 1 & 2 complete. Feature 1 (2026-07-26): LLM wrapper + one-brain
-handle_message + JWT-cookie auth + SSE web chat, multi-session React + shadcn/ui
-UI. Feature 2 (2026-07-28): thin channels/telegram.py long-poller routed through
-the same handle_message (allowlist via users.telegram_chat_id, /start linking).
-Specs archived under openspec/specs/{auth,web-chat,telegram}. Next:
-1. Feature 3 — Day-end summary job → generated_reviews → Telegram
+Features 1 & 2 plus cross-session memory & adaptive reasoning are complete.
+Feature 1 (2026-07-26): LLM wrapper + one-brain handle_message + JWT-cookie auth +
+SSE web chat, multi-session React + shadcn/ui UI. Feature 2 (2026-07-28): thin
+channels/telegram.py long-poller routed through the same handle_message (allowlist
+via users.telegram_chat_id, /start linking). Memory & reasoning (2026-07-31):
+durable facts extracted, embedded (pgvector/HNSW, migration 002), and semantically
+recalled into context; adaptive reasoning (per-request effort: web "think harder"
+toggle + Telegram /think + a task-routing hook); plus retry/backoff, error
+hygiene, and an input cap. Specs archived under
+openspec/specs/{auth,web-chat,telegram,memory}.
+
+Roadmap in docs/ROADMAP.md. Next up (agreed): hosting + CI/CD (backend on an
+always-on VM + Vercel), then the UI feature set (journal/tasks, investments,
+knowledge visualization), then MCP-powered capabilities. (The day-end summary
+job lands once hosting is live.)
 
 Architecture reference: docs/ARCHITECTURE.md
