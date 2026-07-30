@@ -29,7 +29,7 @@ def test_authorized_message_routed_and_replied(monkeypatch):
     async def send(cid, text):
         sent.append((cid, text))
 
-    async def fake_hm(db, user, text, channel, session_id):
+    async def fake_hm(db, user, text, channel, session_id, reasoning_effort=None):
         assert channel == "telegram"
         yield ("delta", "Hello ")
         yield ("delta", "there.")
@@ -73,11 +73,45 @@ def test_error_event_reported(monkeypatch):
     async def send(cid, text):
         sent.append((cid, text))
 
-    async def fake_hm(db, user, text, channel, session_id):
+    async def fake_hm(db, user, text, channel, session_id, reasoning_effort=None):
         yield ("error", "boom")
 
     _run(_msg(111, "hi"), send, monkeypatch, FakeUser(111), handler=fake_hm)
     assert "boom" in sent[-1][1]
+
+
+def test_think_command_routes_deep_reasoning(monkeypatch):
+    sent: list[tuple[int, str]] = []
+    captured: dict = {}
+
+    async def send(cid, text):
+        sent.append((cid, text))
+
+    async def fake_hm(db, user, text, channel, session_id, reasoning_effort=None):
+        captured["text"] = text
+        captured["effort"] = reasoning_effort
+        yield ("delta", "ok")
+        yield ("done", "mid")
+
+    _run(_msg(111, "/think why is the sky blue"), send, monkeypatch, FakeUser(111), handler=fake_hm)
+    assert captured["effort"] == tg.settings.reasoning_effort_deep
+    assert captured["text"] == "why is the sky blue"  # the /think prefix is stripped
+
+
+def test_bare_think_prompts_and_skips_handler(monkeypatch):
+    sent: list[tuple[int, str]] = []
+    called = {"hm": False}
+
+    async def send(cid, text):
+        sent.append((cid, text))
+
+    async def fake_hm(*args, **kwargs):
+        called["hm"] = True
+        yield ("done", "x")
+
+    _run(_msg(111, "/think"), send, monkeypatch, FakeUser(111), handler=fake_hm)
+    assert called["hm"] is False
+    assert "think" in sent[-1][1].lower()
 
 
 def test_non_text_update_ignored(monkeypatch):

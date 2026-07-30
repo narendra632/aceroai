@@ -213,15 +213,23 @@ diffs with ruff+pytest after; ask when unsure.
 
 ## 8. Status & next
 
-**Phase 0**, **Feature 1** (web chat), and **Feature 2** (Telegram) are complete.
+**Phase 0**, **Feature 1** (web chat), **Feature 2** (Telegram), and
+**cross-session memory + adaptive reasoning** (2026-07-31) are complete.
 Feature 1: `core/llm` + `core/composer` + `core/handler` (the one brain),
 JWT-cookie auth, SSE streaming chat, Claude-inspired multi-session React UI
 (shadcn/ui, markdown, smooth streaming, light/dark). Feature 2: a thin
 `channels/telegram.py` long-poller routing through the *same* `handle_message`.
-Specs live in `openspec/specs/{auth,web-chat,telegram}`. Queued next:
+Memory: `core/memory.py` extracts durable facts, embeds them
+(`profile_facts.embedding` via pgvector/HNSW, migration 002), and semantically
+recalls the most relevant into every session; reasoning effort is chosen
+per request (web "think harder" toggle + Telegram `/think` + a task-routing hook).
+Specs live in `openspec/specs/{auth,web-chat,telegram,memory}`.
 
-1. **Feature 3** — Day-end summary job → `generated_reviews` → Telegram
-   (APScheduler in the app lifespan, fires in `users.timezone`).
+Queued next (see `ROADMAP.md` for the full sequence):
 
-Later phases: semantic memory over journals (embeddings + pgvector), habits,
-investments.
+1. **Hosting + CI/CD** — backend on an always-on VM (+ Postgres/pgvector) and the
+   frontend on Vercel; this unlocks scheduled/proactive features.
+2. **UI feature set** — journal/tasks, investments, knowledge visualization
+   (as the frontend becomes a PWA/Capacitor app with push notifications).
+3. **MCP-powered capabilities**, and the **day-end summary job**
+   (`generated_reviews`, APScheduler in `users.timezone`) once hosting is live.

@@ -105,9 +105,20 @@ async def handle_update(update: dict, send) -> None:
             )
             return
 
+        # Explicit "think harder": "/think <message>" routes to deeper reasoning.
+        effort: str | None = None
+        if text.startswith("/think"):
+            text = text[len("/think") :].strip()
+            effort = settings.reasoning_effort_deep
+            if not text:
+                await send(chat_id, "Add a message after /think and I'll think harder about it.")
+                return
+
         session_id = await run_in_threadpool(_latest_session, db, user)
         parts: list[str] = []
-        async for event, data in handle_message(db, user, text, "telegram", session_id):
+        async for event, data in handle_message(
+            db, user, text, "telegram", session_id, reasoning_effort=effort
+        ):
             if event == "delta":
                 parts.append(data)
             elif event == "error":

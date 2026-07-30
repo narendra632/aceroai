@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
 from app.core.security import hash_password
-from app.db.models import ChatSession, Message, User
+from app.db.models import ChatSession, Message, ProfileFact, User
 from app.db.session import SessionLocal
 from app.main import app
 
@@ -28,6 +28,7 @@ def _purge(db):
         if sids:
             db.execute(delete(Message).where(Message.session_id.in_(sids)))
         db.execute(delete(ChatSession).where(ChatSession.user_id == u.id))
+        db.execute(delete(ProfileFact).where(ProfileFact.user_id == u.id))
     db.execute(delete(User).where(User.email.in_(_ALL_TEST_EMAILS)))
     db.commit()
 
@@ -57,16 +58,39 @@ def user(db):
     return u
 
 
+def fake_embed_vec(text: str) -> list[float]:
+    """Deterministic pseudo-embedding of the right dimension for tests — no network."""
+    from app.config import settings
+
+    vec = [0.0] * settings.embed_dim
+    for i, ch in enumerate(text):
+        vec[(i * 7 + ord(ch)) % settings.embed_dim] += 1.0
+    return vec
+
+
 @pytest.fixture(autouse=True)
 def fake_llm(monkeypatch):
-    async def _fake(messages, model=None, max_tokens=8192, usage=None):
+    async def _fake_stream(
+        messages, model=None, max_tokens=8192, usage=None, reasoning_effort=None
+    ):
         if usage is not None:
             usage["tokens_in"] = 5
             usage["tokens_out"] = 3
         for tok in ["Hello", ", ", "there", "."]:
             yield tok
 
-    monkeypatch.setattr("app.core.llm.stream_chat", _fake)
+    async def _fake_embed(texts):
+        return [fake_embed_vec(t) for t in texts]
+
+    async def _fake_complete(messages, model=None, max_tokens=8192, reasoning_effort=None):
+        return "[]"  # no facts by default; memory tests override this
+
+    monkeypatch.setattr("app.core.llm.stream_chat", _fake_stream)
+    monkeypatch.setattr("app.core.llm.embed", _fake_embed)
+    monkeypatch.setattr("app.core.llm.complete", _fake_complete)
+    # Keep handler-driven tests deterministic — no background extraction tasks.
+    # Memory tests call extract_and_store directly, bypassing this switch.
+    monkeypatch.setattr("app.config.settings.memory_extraction_enabled", False)
 
 
 @pytest.fixture

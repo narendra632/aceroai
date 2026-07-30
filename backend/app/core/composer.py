@@ -28,7 +28,21 @@ def _read_persona() -> str:
         return _FALLBACK_PERSONA
 
 
-def build_context(db: Session, session_id: uuid.UUID) -> list[dict]:
+def _facts_block(facts: list[str]) -> str:
+    lines = "\n".join(f"- {f}" for f in facts)
+    return (
+        "What you know about the user, recalled from earlier conversations "
+        f"(most relevant first):\n{lines}"
+    )
+
+
+def build_context(db: Session, session_id: uuid.UUID, facts: list[str] | None = None) -> list[dict]:
+    """Assemble model input: SOUL.md persona, then the semantically-recalled
+    profile facts (when any), then the session's recent messages in order.
+
+    `facts` are recalled by the handler (an async embedding step) and passed in,
+    so this stays a pure, synchronous DB read.
+    """
     rows = (
         db.execute(
             select(Message)
@@ -40,6 +54,8 @@ def build_context(db: Session, session_id: uuid.UUID) -> list[dict]:
         .all()
     )
     context: list[dict] = [{"role": "system", "content": _read_persona()}]
+    if facts:
+        context.append({"role": "system", "content": _facts_block(facts)})
     for m in reversed(rows):
         if m.role in ("user", "assistant"):
             context.append({"role": m.role, "content": m.content})

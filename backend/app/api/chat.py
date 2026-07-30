@@ -7,6 +7,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import get_current_user
 from app.api.schemas import MessageIn, MessageOut, SessionOut
+from app.config import settings
 from app.core.handler import handle_message
 from app.db.models import ChatSession, Message, User
 from app.db.session import get_db
@@ -32,8 +33,13 @@ async def chat(
     if body.session_id is not None:
         _owned_session(db, body.session_id, user)
 
+    # Explicit user control: "think harder" routes this turn to deeper reasoning.
+    effort = settings.reasoning_effort_deep if body.deep else None
+
     async def events():
-        async for event, data in handle_message(db, user, body.message, "web", body.session_id):
+        async for event, data in handle_message(
+            db, user, body.message, "web", body.session_id, reasoning_effort=effort
+        ):
             yield {"event": event, "data": data}
 
     return EventSourceResponse(events())
