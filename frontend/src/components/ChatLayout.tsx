@@ -48,7 +48,7 @@ export default function ChatLayout({
     abortRef.current?.abort();
   }
 
-  async function send(text: string) {
+  async function send(text: string, deep = false) {
     if (busy) return;
     setBusy(true);
     setThinking(true);
@@ -67,7 +67,7 @@ export default function ChatLayout({
     };
 
     try {
-      for await (const ev of api.streamChat(text, currentId, controller.signal)) {
+      for await (const ev of api.streamChat(text, currentId, controller.signal, deep)) {
         if (ev.event === "session") {
           setCurrentId(ev.data);
         } else if (ev.event === "delta") {

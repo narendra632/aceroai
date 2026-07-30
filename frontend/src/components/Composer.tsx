@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Brain, Square } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -8,11 +8,12 @@ export default function Composer({
   onStop,
   busy,
 }: {
-  onSend: (text: string) => void;
+  onSend: (text: string, deep: boolean) => void;
   onStop: () => void;
   busy: boolean;
 }) {
   const [text, setText] = useState("");
+  const [deep, setDeep] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   // auto-grow up to a cap; keep overflow hidden until the cap is reached so no
@@ -29,7 +30,7 @@ export default function Composer({
   function submit() {
     const value = text.trim();
     if (!value || busy) return;
-    onSend(value);
+    onSend(value, deep);
     setText("");
   }
 
@@ -52,6 +53,17 @@ export default function Composer({
           placeholder="Message aceroai…"
           className="max-h-52 flex-1 resize-none overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
         />
+        <Button
+          onClick={() => setDeep((d) => !d)}
+          size="icon-lg"
+          variant={deep ? "default" : "secondary"}
+          aria-pressed={deep}
+          aria-label="Think harder (deeper reasoning)"
+          title="Think harder — deeper reasoning, a little slower"
+          className="rounded-full"
+        >
+          <Brain />
+        </Button>
         {busy ? (
           <Button
             onClick={onStop}
@@ -75,7 +87,7 @@ export default function Composer({
         )}
       </div>
       <p className="mx-auto mt-1.5 hidden max-w-2xl text-center text-xs text-faint sm:block">
-        Enter to send · Shift+Enter for a new line
+        {deep ? "Think harder is on — replies reason more deeply" : "Enter to send · Shift+Enter for a new line"}
       </p>
     </div>
   );

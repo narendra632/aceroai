@@ -2,9 +2,11 @@ import datetime as dt
 import uuid
 
 import sqlalchemy as sa
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.config import settings
 from app.db.session import Base
 
 now = sa.func.now()
@@ -115,6 +117,8 @@ class ProfileFact(Base):
     superseded_by: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("profile_facts.id"))
     valid_from: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+    # Semantic memory: fact embedding for pgvector similarity search (migration 002).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(settings.embed_dim))
 
 
 class GeneratedReview(Base):

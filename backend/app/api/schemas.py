@@ -12,6 +12,7 @@ class LoginIn(BaseModel):
 class MessageIn(BaseModel):
     message: str
     session_id: uuid.UUID | None = None
+    deep: bool = False  # explicit "think harder": route this turn to deeper reasoning
 
 
 class SessionOut(BaseModel):

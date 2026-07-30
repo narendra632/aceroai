@@ -75,12 +75,14 @@ export async function* streamChat(
   message: string,
   sessionId: string | null,
   signal?: AbortSignal,
+  deep = false,
 ): AsyncGenerator<ChatEvent> {
   const res = await fetch(`${API}/api/chat`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    // `deep` = explicit "think harder": ask the backend for deeper reasoning.
+    body: JSON.stringify({ message, session_id: sessionId, deep }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error("chat request failed");
