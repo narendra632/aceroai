@@ -1,0 +1,70 @@
+# Production stack for the aceroai backend (see docs/DEPLOY.md).
+# Only Caddy is public (80/443); the API and DB stay on the internal network.
+# Run:  docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: agent
+    # modest memory footprint for the 1 GB e2-micro
+    command: ["postgres", "-c", "shared_buffers=128MB"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+    # no `ports:` — the DB is reachable only on the internal docker network
+
+  # One-shot: apply migrations, then exit. api waits for this to finish.
+  migrate:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://agent:${POSTGRES_PASSWORD}@db:5432/agent
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    restart: "no"
+
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://agent:${POSTGRES_PASSWORD}@db:5432/agent
+      SOUL_PATH: /docs/SOUL.md
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./docs:/docs:ro   # real SOUL.md persona (image has no docs/)
+    expose:
+      - "8000"            # internal only; Caddy proxies to it
+    restart: unless-stopped
+    # uses the Dockerfile CMD (uvicorn, no --reload)
+
+  caddy:
+    image: caddy:2
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}   # e.g. acero.duckdns.org
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

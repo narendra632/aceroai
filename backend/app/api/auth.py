@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import COOKIE_NAME, get_current_user
 from app.api.schemas import LoginIn
+from app.config import settings
 from app.core.security import TOKEN_TTL_DAYS, create_access_token, verify_password
 from app.db.models import User
 from app.db.session import get_db
@@ -26,8 +27,10 @@ def login(body: LoginIn, response: Response, db: Session = Depends(get_db)) -> d
         token,
         max_age=COOKIE_MAX_AGE,
         httponly=True,
-        samesite="lax",
-        secure=False,  # localhost dev over http; set True behind https
+        # dev: Lax/insecure over http. prod: SameSite=None; Secure so the cookie is
+        # sent cross-site from the Vercel frontend (see app.config).
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
         path="/",
     )
     return {"email": user.email}
@@ -35,7 +38,13 @@ def login(body: LoginIn, response: Response, db: Session = Depends(get_db)) -> d
 
 @router.post("/logout")
 def logout(response: Response) -> dict:
-    response.delete_cookie(COOKIE_NAME, path="/")
+    # Match the set attributes so the browser reliably clears the cookie.
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
+    )
     return {"ok": True}
 
 

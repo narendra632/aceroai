@@ -11,20 +11,26 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.models import Message
 
 # backend/app/core/composer.py -> parents[3] is the repo root.
-SOUL_PATH = Path(__file__).resolve().parents[3] / "docs" / "SOUL.md"
+_DEFAULT_SOUL_PATH = Path(__file__).resolve().parents[3] / "docs" / "SOUL.md"
 HISTORY_LIMIT = 20
 
 _FALLBACK_PERSONA = "You are Acero, a concise, warm personal assistant."
 
 
+def _persona_path() -> Path:
+    # In prod the image has no docs/, so the deploy sets SOUL_PATH to a mounted copy.
+    return Path(settings.soul_path) if settings.soul_path else _DEFAULT_SOUL_PATH
+
+
 def _read_persona() -> str:
     try:
-        return SOUL_PATH.read_text(encoding="utf-8").strip()
+        return _persona_path().read_text(encoding="utf-8").strip()
     except OSError:
-        # docs/ is not copied into the production image; fall back gracefully.
+        # last-resort fallback so chat never breaks on a missing persona file.
         return _FALLBACK_PERSONA
 
 
