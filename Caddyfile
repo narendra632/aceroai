@@ -1,0 +1,8 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+# SITE_ADDRESS comes from .env (your DuckDNS host, e.g. acero.duckdns.org).
+# Caddy obtains + renews the certificate automatically once the domain resolves
+# to this server and ports 80/443 are open.
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy api:8000
+}

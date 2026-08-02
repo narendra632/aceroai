@@ -1,5 +1,9 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The built-in dev secret. Production refuses to start while JWT_SECRET is this
+# (see app.main), so a real deployment can never ship with the sample key.
+DEV_JWT_SECRET = "dev-not-secret-override-in-env"
+
 
 class Settings(BaseSettings):
     # ".env" resolves when running from repo root / docker;
@@ -7,7 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
 
     database_url: str = "postgresql+psycopg://agent:agent@localhost:5432/agent"
-    jwt_secret: str = "dev-not-secret-override-in-env"
+    jwt_secret: str = DEV_JWT_SECRET
 
     # provider swap = change base_url + api_key + models in .env. no code changes.
     llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -37,6 +41,16 @@ class Settings(BaseSettings):
     app_timezone: str = "Asia/Kolkata"
     frontend_origin: str = "http://localhost:5173"
     telegram_bot_token: str = ""
+
+    # --- production ---
+    app_env: str = "dev"  # "prod" enables the startup secret check
+    # The auth cookie. In prod behind HTTPS with a cross-site frontend (Vercel),
+    # set cookie_secure=true and cookie_samesite="none" so the browser sends it.
+    cookie_secure: bool = False
+    cookie_samesite: str = "lax"
+    # Absolute path to SOUL.md when docs/ isn't alongside the code (prod image);
+    # empty = use the repo-relative path. The prod compose mounts docs and sets it.
+    soul_path: str = ""
 
 
 settings = Settings()
