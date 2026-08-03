@@ -132,8 +132,9 @@ def test_build_context_injects_facts_after_persona(db, user):
 
     ctx = composer.build_context(db, session.id, facts=["User likes tea"])
     assert ctx[0]["role"] == "system"  # persona
-    assert ctx[1]["role"] == "system"  # facts block
-    assert "User likes tea" in ctx[1]["content"]
+    assert ctx[1]["role"] == "system"  # current date/time
+    assert ctx[2]["role"] == "system"  # facts block
+    assert "User likes tea" in ctx[2]["content"]
 
 
 def test_build_context_omits_facts_when_none(db, user):
@@ -143,4 +144,4 @@ def test_build_context_omits_facts_when_none(db, user):
     db.refresh(session)
 
     ctx = composer.build_context(db, session.id, facts=None)
-    assert len(ctx) == 1  # just the persona; no messages, no facts block
+    assert len(ctx) == 2  # persona + current date/time; no messages, no facts block

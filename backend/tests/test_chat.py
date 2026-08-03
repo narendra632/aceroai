@@ -73,11 +73,13 @@ def test_history_endpoint(auth_client):
 def test_reasoning_effort_forwarded(auth_client, monkeypatch):
     captured: dict = {}
 
-    async def recorder(messages, model=None, max_tokens=8192, usage=None, reasoning_effort=None):
+    async def recorder(
+        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
+    ):
         captured["effort"] = reasoning_effort
-        yield "ok"
+        yield "delta", "ok"
 
-    monkeypatch.setattr("app.core.llm.stream_chat", recorder)
+    monkeypatch.setattr("app.core.llm.stream_with_tools", recorder)
     auth_client.post("/api/chat", json={"message": "hi"})
     assert captured["effort"] == settings.reasoning_effort_chat
 
@@ -85,22 +87,26 @@ def test_reasoning_effort_forwarded(auth_client, monkeypatch):
 def test_deep_flag_routes_high_reasoning(auth_client, monkeypatch):
     captured: dict = {}
 
-    async def recorder(messages, model=None, max_tokens=8192, usage=None, reasoning_effort=None):
+    async def recorder(
+        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
+    ):
         captured["effort"] = reasoning_effort
-        yield "ok"
+        yield "delta", "ok"
 
-    monkeypatch.setattr("app.core.llm.stream_chat", recorder)
+    monkeypatch.setattr("app.core.llm.stream_with_tools", recorder)
     auth_client.post("/api/chat", json={"message": "hi", "deep": True})
     assert captured["effort"] == settings.reasoning_effort_deep
 
 
 def test_provider_error_reported_without_leaking(auth_client, monkeypatch):
-    async def boom(messages, model=None, max_tokens=8192, usage=None, reasoning_effort=None):
+    async def boom(
+        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
+    ):
         if False:
-            yield ""  # make this an async generator
+            yield "delta", ""  # make this an async generator
         raise RuntimeError("SECRET internal provider detail")
 
-    monkeypatch.setattr("app.core.llm.stream_chat", boom)
+    monkeypatch.setattr("app.core.llm.stream_with_tools", boom)
     events = _parse_sse(auth_client.post("/api/chat", json={"message": "hi"}).text)
 
     errors = [d for e, d in events if e == "error"]

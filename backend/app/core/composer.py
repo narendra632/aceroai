@@ -5,8 +5,10 @@ Later features extend this one function (profile facts, tasks); routes and
 channels never change. This is where "what the model sees" is decided.
 """
 
+import datetime as dt
 import uuid
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +36,13 @@ def _read_persona() -> str:
         return _FALLBACK_PERSONA
 
 
+def _now_block() -> str:
+    # Give the model the current date/time so it can resolve relative dates like
+    # "Friday" or "tomorrow" when creating tasks.
+    now = dt.datetime.now(ZoneInfo(settings.app_timezone))
+    return f"Current date and time: {now:%A %Y-%m-%d %H:%M} ({settings.app_timezone})."
+
+
 def _facts_block(facts: list[str]) -> str:
     lines = "\n".join(f"- {f}" for f in facts)
     return (
@@ -59,7 +68,10 @@ def build_context(db: Session, session_id: uuid.UUID, facts: list[str] | None = 
         .scalars()
         .all()
     )
-    context: list[dict] = [{"role": "system", "content": _read_persona()}]
+    context: list[dict] = [
+        {"role": "system", "content": _read_persona()},
+        {"role": "system", "content": _now_block()},
+    ]
     if facts:
         context.append({"role": "system", "content": _facts_block(facts)})
     for m in reversed(rows):

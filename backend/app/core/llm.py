@@ -108,6 +108,98 @@ async def stream_chat(
             await asyncio.sleep(_backoff(attempt))
 
 
+def _accumulate_tool_call(acc: dict[int, dict], fragment) -> None:
+    """Merge a streamed tool-call fragment into the per-index accumulator. The SDK
+    streams a tool call across chunks: an id/name once, then argument text in pieces."""
+    slot = acc.setdefault(fragment.index, {"id": None, "name": None, "arguments": ""})
+    if fragment.id:
+        slot["id"] = fragment.id
+    if fragment.function:
+        if fragment.function.name:
+            slot["name"] = fragment.function.name
+        if fragment.function.arguments:
+            slot["arguments"] += fragment.function.arguments
+
+
+def _finalize_tool_calls(acc: dict[int, dict]) -> list[dict]:
+    # In call order, keeping only complete calls (those that named a function);
+    # synthesize an id if the provider omitted one and default empty args to "{}".
+    calls: list[dict] = []
+    for i in sorted(acc):
+        slot = acc[i]
+        if not slot["name"]:
+            continue
+        calls.append(
+            {
+                "id": slot["id"] or f"call_{i}",
+                "name": slot["name"],
+                "arguments": slot["arguments"] or "{}",
+            }
+        )
+    return calls
+
+
+async def stream_with_tools(
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    model: str | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    usage: dict | None = None,
+    reasoning_effort: str | None = None,
+) -> AsyncIterator[tuple[str, object]]:
+    """Stream one model turn as `(kind, payload)` events. `kind` is either:
+
+    - `"delta"` → `payload` is a text chunk of the assistant's visible reply;
+    - `"tool_calls"` → `payload` is a `list[dict]` of `{id, name, arguments}` the
+      model wants executed (yielded once, at the end of the turn).
+
+    A plain chat turn yields only `"delta"` events (same behavior as `stream_chat`).
+    When `tools` is None, no tool calls are ever produced (used to force a final
+    text answer). Retries transient errors only before anything is produced.
+    """
+    tool_kwargs = {"tools": tools} if tools else {}
+    attempts = settings.llm_max_retries + 1
+    for attempt in range(attempts):
+        produced = False
+        acc: dict[int, dict] = {}
+        try:
+            stream = await _get_client().chat.completions.create(
+                model=model or settings.model_chat,
+                messages=messages,
+                max_tokens=max_tokens,
+                stream=True,
+                stream_options={"include_usage": True},
+                **tool_kwargs,
+                **_reasoning_kwargs(reasoning_effort),
+            )
+            async for chunk in stream:
+                if usage is not None and getattr(chunk, "usage", None):
+                    usage["tokens_in"] = chunk.usage.prompt_tokens
+                    usage["tokens_out"] = chunk.usage.completion_tokens
+                for choice in chunk.choices:
+                    delta = choice.delta
+                    if not delta:
+                        continue
+                    if delta.content:
+                        produced = True
+                        yield "delta", delta.content
+                    if getattr(delta, "tool_calls", None):
+                        produced = True
+                        for frag in delta.tool_calls:
+                            _accumulate_tool_call(acc, frag)
+            calls = _finalize_tool_calls(acc)
+            if calls:
+                yield "tool_calls", calls
+            return
+        except _RETRYABLE as exc:
+            if produced or attempt == attempts - 1:
+                raise
+            log.warning(
+                "stream_with_tools transient error (attempt %d): %s; retrying", attempt + 1, exc
+            )
+            await asyncio.sleep(_backoff(attempt))
+
+
 async def complete(
     messages: list[dict],
     model: str | None = None,
