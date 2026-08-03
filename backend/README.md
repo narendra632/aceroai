@@ -44,20 +44,56 @@ POST /api/chat  ->  get_current_user (cookie -> user)
 The route is pure transport; all conversation logic lives in the handler so a
 future Telegram channel reuses the exact same brain.
 
+## Tasks, journal & assistant tools
+
+Tasks and journal entries have both a **REST API** (for the UI) and **assistant
+tools** (for chat) — and both go through **one service layer** (`app/services/`),
+so a task created by tapping "＋" and one created by the assistant are identical
+and validated the same way.
+
+**How the assistant acts.** Each chat turn hands the model a set of tools
+(`app/core/tools.py`). If it answers with text, that streams as before. If it
+returns a **tool call**, `handle_message` runs it via the services, feeds the
+result back, and loops — until the model gives a final answer:
+
+```
+message ─► handle_message ─► llm.stream_with_tools (messages + tool defs)
+             ▲                        │
+             │              text? ────┴──► stream to client (done)
+             │              tool_calls? ─► emit `tool` (UI: "working…")
+             └── append result ◄── tools.execute(db, user.id, name, args)
+```
+
+Guardrails: the loop is capped at `TOOLS_MAX_ITERS` (then a forced text answer);
+tools are **user-scoped by construction** (the model never supplies a user id, and
+any record id is verified to belong to the caller); and `tools.execute` never
+raises — a bad id/args/error returns a structured result the model recovers from.
+The action policy (act on clear requests, offer on vague ones, confirm destructive
+ones) lives in `../docs/SOUL.md`.
+
+Endpoints: `GET/POST /api/tasks`, `PATCH/DELETE /api/tasks/{id}`,
+`POST /api/tasks/{id}/complete`; `GET/POST /api/journal`,
+`PATCH/DELETE /api/journal/{id}`. All are owner-scoped; service-layer domain
+errors map to `404` / `400` in `main.py`.
+
 ## File guide
 
 | Path | Role |
 |---|---|
 | `app/main.py` | FastAPI app: CORS, router includes, `/health`, lifespan hook |
 | `app/config.py` | `Settings` — every env-driven knob (DB, JWT, LLM, timezone) |
-| `app/core/llm.py` | Thin `AsyncOpenAI` streaming wrapper (`stream_chat`) |
-| `app/core/composer.py` | Builds model context: `SOUL.md` persona + recalled facts + recent messages |
-| `app/core/handler.py` | `handle_message` — the one brain; yields SSE events |
+| `app/core/llm.py` | `AsyncOpenAI` wrapper: `stream_chat`, `stream_with_tools` (function-calling), `complete`, `embed` |
+| `app/core/composer.py` | Builds model context: `SOUL.md` persona + current date/time + recalled facts + recent messages |
+| `app/core/handler.py` | `handle_message` — the one brain; the bounded tool-use loop; yields SSE events |
+| `app/core/tools.py` | Assistant tools (create/list/update/complete task, add/list journal) + fault-tolerant dispatch |
 | `app/core/memory.py` | Cross-session memory: extract → embed → store facts (pgvector) → semantic recall |
 | `app/core/security.py` | bcrypt hashing + JWT create/decode (HS256, 30-day) |
-| `app/api/deps.py` | `get_current_user` — auth guard reading the cookie |
+| `app/services/` | Single source of truth for `tasks` + `journal` logic (used by both the API and the tools) |
+| `app/api/deps.py` | `get_current_user` — auth guard (Bearer header or cookie) |
 | `app/api/auth.py` | `POST /api/auth/login` · `/logout` · `GET /api/auth/me` |
 | `app/api/chat.py` | `POST /api/chat` (SSE) · session list · history (owner-checked) |
+| `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` (owner-scoped) |
+| `app/api/journal.py` | `/api/journal` CRUD (owner-scoped) |
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/db/session.py` | Engine, `SessionLocal`, `Base`, `get_db` dependency |
 | `app/db/models.py` | The 7 ORM tables (typed `Mapped[]` style) |
@@ -66,7 +102,7 @@ future Telegram channel reuses the exact same brain.
 | `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` (built, Feature 2) |
 | `app/jobs/` | *(planned — Feature 3)* APScheduler + review jobs |
 | `alembic/` | Migrations; `…_001_core_tables.py` = schema + pgvector; `…_002_fact_embeddings.py` = `profile_facts.embedding` + HNSW |
-| `tests/` | `conftest.py` (fake LLM/embeddings + scoped data), `test_auth.py`, `test_chat.py`, `test_memory.py`, `test_telegram.py` |
+| `tests/` | `conftest.py` (fake LLM/embeddings + scoped data), `test_auth.py`, `test_chat.py`, `test_memory.py`, `test_telegram.py`, `test_services_*`, `test_api_journal_tasks.py`, `test_tools_loop.py` |
 | `Dockerfile` | Production image (`uv sync --frozen --no-dev`) |
 
 ## Config & secrets

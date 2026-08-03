@@ -52,7 +52,8 @@ incremental change.
 - openspec/             specs (source of truth) + changes
 
 ## Current status
-Features 1 & 2, cross-session memory & adaptive reasoning, and hosting are complete.
+Features 1 & 2, cross-session memory & adaptive reasoning, hosting, and
+tasks+journal (with assistant tools) are complete.
 Feature 1 (2026-07-26): LLM wrapper + one-brain handle_message + JWT-cookie auth +
 SSE web chat, multi-session React + shadcn/ui UI. Feature 2 (2026-07-28): thin
 channels/telegram.py long-poller routed through the same handle_message (allowlist
@@ -69,8 +70,15 @@ CI/CD auto-deploys on push to main (tests → build image → GHCR → SSH pull 
 VM). Cross-site cookie was blocked by browser privacy protections, so auth uses a
 Bearer token in localStorage (Authorization header). See docs/DEPLOY.md.
 
-Roadmap in docs/ROADMAP.md. Next up (agreed): the UI feature set (journal/tasks,
-investments, knowledge visualization), then MCP-powered capabilities. (The day-end
-summary job can land now that hosting is live.)
+Tasks & journal (2026-08-03): shared app/services/ layer is the single source of
+truth for the REST API (/api/tasks, /api/journal) and the assistant's tools
+(app/core/tools.py). handle_message runs a bounded, user-scoped, fault-tolerant
+tool-use loop (function-calling) so the assistant creates/reads/updates tasks &
+journal from chat on web and Telegram; frontend gains a Chat/Tasks/Journal nav
+shell. Deferred: journal semantic search (embedding) and PWA/push.
+
+Roadmap in docs/ROADMAP.md. Next up (agreed): the rest of the UI feature set
+(investments — ask for his .md files; knowledge visualization) + PWA/push, then
+MCP-powered capabilities. (The day-end summary job can land now that hosting is live.)
 
 Architecture reference: docs/ARCHITECTURE.md

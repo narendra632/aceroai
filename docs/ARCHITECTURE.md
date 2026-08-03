@@ -214,8 +214,9 @@ diffs with ruff+pytest after; ask when unsure.
 ## 8. Status & next
 
 **Phase 0**, **Feature 1** (web chat), **Feature 2** (Telegram),
-**cross-session memory + adaptive reasoning** (2026-07-31), and **hosting +
-CI/CD** (2026-08-03) are complete.
+**cross-session memory + adaptive reasoning** (2026-07-31), **hosting +
+CI/CD** (2026-08-03), and **tasks + journal with assistant tools** (2026-08-03)
+are complete.
 Feature 1: `core/llm` + `core/composer` + `core/handler` (the one brain),
 JWT-cookie auth, SSE streaming chat, Claude-inspired multi-session React UI
 (shadcn/ui, markdown, smooth streaming, light/dark). Feature 2: a thin
@@ -224,6 +225,15 @@ Memory: `core/memory.py` extracts durable facts, embeds them
 (`profile_facts.embedding` via pgvector/HNSW, migration 002), and semantically
 recalls the most relevant into every session; reasoning effort is chosen
 per request (web "think harder" toggle + Telegram `/think` + a task-routing hook).
+Tasks & journal: a shared service layer (`app/services/`) is the single source of
+truth for both the REST API (`/api/tasks`, `/api/journal`) and the assistant's
+**tools** (`app/core/tools.py`). `handle_message` runs a bounded, user-scoped,
+fault-tolerant **tool-use loop** (function-calling): the model streams text or
+calls tools, which execute via the services and feed results back until it answers
+— identical on web and Telegram (the one brain). Frontend gains a nav shell with
+Chat/Tasks/Journal views. Urgency is derived at read time; the journal embedding
+(semantic search) and PWA/push remain deferred.
+
 Hosting: backend runs on a Google Cloud always-free e2-micro under Docker (Caddy
 auto-HTTPS via a DuckDNS subdomain → api → Postgres/pgvector; 2 GB swap); frontend
 on Vercel. CI/CD (`.github/workflows/ci.yml`) auto-deploys on push to main: tests →
@@ -234,7 +244,8 @@ cross-site cookie was blocked by browser third-party-cookie protections). Runboo
 
 Queued next (see `ROADMAP.md` for the full sequence):
 
-1. **UI feature set** — journal/tasks, investments, knowledge visualization
-   (as the frontend becomes a PWA/Capacitor app with push notifications).
+1. **UI feature set (cont.)** — investments (Narendra has research `.md` files —
+   ask for them first) and a knowledge-visualization view over `profile_facts`.
+   Also PWA/Capacitor packaging + push notifications (deferred from this change).
 2. **MCP-powered capabilities**, and the **day-end summary job**
    (`generated_reviews`, APScheduler in `users.timezone`) — now unblocked by hosting.

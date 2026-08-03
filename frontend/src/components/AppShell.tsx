@@ -6,23 +6,24 @@ import { useSmoothReveal } from "@/hooks/useSmoothReveal";
 import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
 import Composer from "./Composer";
+import JournalView from "./JournalView";
 import MessageList from "./MessageList";
 import type { UIMessage } from "./MessageBubble";
-import Sidebar from "./Sidebar";
+import Sidebar, { type View } from "./Sidebar";
+import TasksView from "./TasksView";
 
-export default function ChatLayout({
-  email,
-  onLogout,
-}: {
-  email: string;
-  onLogout: () => void;
-}) {
+export default function AppShell({ email, onLogout }: { email: string; onLogout: () => void }) {
+  const [view, setView] = useState<View>("chat");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Chat state lives here (not in a child) so switching to Tasks/Journal and back
+  // never loses the open conversation or an in-flight stream.
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [thinking, setThinking] = useState(false);
+  const [working, setWorking] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const reveal = useSmoothReveal();
   const abortRef = useRef<AbortController | null>(null);
@@ -31,8 +32,14 @@ export default function ChatLayout({
     api.listSessions().then(setSessions);
   }, []);
 
+  function navigate(v: View) {
+    setView(v);
+    setSidebarOpen(false);
+  }
+
   async function openSession(id: string) {
     setSidebarOpen(false);
+    setView("chat");
     setCurrentId(id);
     const msgs = await api.getMessages(id);
     setMessages(msgs.map((m) => ({ role: m.role as UIMessage["role"], content: m.content })));
@@ -40,6 +47,7 @@ export default function ChatLayout({
 
   function newChat() {
     setSidebarOpen(false);
+    setView("chat");
     setCurrentId(null);
     setMessages([]);
   }
@@ -52,16 +60,17 @@ export default function ChatLayout({
     if (busy) return;
     setBusy(true);
     setThinking(true);
+    setWorking(null);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     reveal.begin();
 
     const controller = new AbortController();
     abortRef.current = controller;
-    let gotFirst = false;
 
     const finalize = (content: string) => {
       if (content) setMessages((prev) => [...prev, { role: "assistant", content }]);
       setThinking(false);
+      setWorking(null);
       setBusy(false);
       abortRef.current = null;
     };
@@ -70,11 +79,13 @@ export default function ChatLayout({
       for await (const ev of api.streamChat(text, currentId, controller.signal, deep)) {
         if (ev.event === "session") {
           setCurrentId(ev.data);
+        } else if (ev.event === "tool") {
+          // the assistant is running a tool (create a task, log a journal entry, …)
+          setThinking(true);
+          setWorking("Working…");
         } else if (ev.event === "delta") {
-          if (!gotFirst) {
-            gotFirst = true;
-            setThinking(false);
-          }
+          setThinking(false);
+          setWorking(null);
           reveal.push(ev.data);
         } else if (ev.event === "done") {
           reveal.finish(finalize);
@@ -82,32 +93,38 @@ export default function ChatLayout({
           return;
         } else if (ev.event === "error") {
           reveal.cancel();
-          setMessages((prev) => [...prev, { role: "assistant", content: `⚠ ${ev.data}`, error: true }]);
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `⚠ ${ev.data}`, error: true },
+          ]);
           setThinking(false);
+          setWorking(null);
           setBusy(false);
           abortRef.current = null;
           return;
         }
       }
-      // stream ended without an explicit done (e.g., aborted): keep partial text
+      // stream ended without an explicit done (e.g. aborted): keep partial text
       finalize(reveal.cancel());
       api.listSessions().then(setSessions);
     } catch {
-      // aborted by the user, or network error — keep whatever was revealed
       finalize(reveal.cancel());
       api.listSessions().then(setSessions);
     }
   }
 
-  const streaming = busy ? { thinking, text: reveal.text } : null;
+  const streaming = busy ? { thinking, text: reveal.text, label: working ?? undefined } : null;
+  const title = view === "chat" ? "aceroai" : view === "tasks" ? "Tasks" : "Journal";
 
   return (
     <div className="flex h-full">
       <Sidebar
         email={email}
+        view={view}
         sessions={sessions}
         currentId={currentId}
         open={sidebarOpen}
+        onNavigate={navigate}
         onSelect={openSession}
         onNewChat={newChat}
         onClose={() => setSidebarOpen(false)}
@@ -124,11 +141,19 @@ export default function ChatLayout({
           >
             <Menu />
           </Button>
-          <span className="font-semibold tracking-tight">aceroai</span>
+          <span className="font-semibold tracking-tight">{title}</span>
         </header>
 
-        <MessageList messages={messages} streaming={streaming} />
-        <Composer onSend={send} onStop={stop} busy={busy} />
+        {view === "chat" ? (
+          <>
+            <MessageList messages={messages} streaming={streaming} />
+            <Composer onSend={send} onStop={stop} busy={busy} />
+          </>
+        ) : view === "tasks" ? (
+          <TasksView />
+        ) : (
+          <JournalView />
+        )}
       </div>
     </div>
   );

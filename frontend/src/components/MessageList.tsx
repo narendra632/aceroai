@@ -4,7 +4,7 @@ import Markdown from "./Markdown";
 import MessageBubble, { type UIMessage } from "./MessageBubble";
 import ThinkingDots from "./ThinkingDots";
 
-type StreamState = { thinking: boolean; text: string } | null;
+type StreamState = { thinking: boolean; text: string; label?: string } | null;
 
 function AssistantAvatar() {
   return (
@@ -50,7 +50,10 @@ export default function MessageList({
             <AssistantAvatar />
             <div className="min-w-0 flex-1 pt-0.5">
               {streaming.thinking ? (
-                <ThinkingDots />
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <ThinkingDots />
+                  {streaming.label && <span>{streaming.label}</span>}
+                </div>
               ) : (
                 <div className="streaming">
                   <Markdown content={streaming.text} />

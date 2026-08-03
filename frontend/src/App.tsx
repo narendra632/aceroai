@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
-import ChatLayout from "./components/ChatLayout";
+import AppShell from "./components/AppShell";
 import LoginScreen from "./components/LoginScreen";
 import * as api from "./lib/api";
 
@@ -28,7 +28,7 @@ export default function App() {
           Loading…
         </div>
       ) : email ? (
-        <ChatLayout email={email} onLogout={handleLogout} />
+        <AppShell email={email} onLogout={handleLogout} />
       ) : (
         <LoginScreen onLogin={setEmail} />
       )}
