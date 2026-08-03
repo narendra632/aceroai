@@ -159,20 +159,67 @@ free -h                                       # confirm memory headroom
 
 ## Stage 2 — CI/CD (after Stage 1 works)
 
-Goal: push to `main` → GitHub builds the image → the VM pulls & restarts.
+Goal: **push to `main` → tests run → GitHub builds the image → the VM pulls &
+restarts**, with no SSH-by-hand. The frontend already auto-deploys (Vercel); this
+gives the backend the same.
 
-1. **Switch to prebuilt images**: in `docker-compose.prod.yml`, change `api` and
-   `migrate` from `build: ./backend` to
-   `image: ghcr.io/narendra632/aceroai-backend:latest`.
-2. **GitHub secrets** (repo → Settings → Secrets → Actions): `DEPLOY_HOST` (VM IP),
-   `DEPLOY_USER`, `DEPLOY_SSH_KEY` (a private key whose public half is in the VM's
-   `~/.ssh/authorized_keys`).
-3. Add `.github/workflows/deploy.yml` **in Stage 2** (once the VM + secrets exist,
-   so it doesn't fail on every push before then): it builds + pushes the image to
-   GHCR, then SSHes to the VM and runs
-   `docker compose -f docker-compose.prod.yml pull && up -d`.
-4. On the VM once: `docker login ghcr.io` (a GitHub PAT with `read:packages`) so it
-   can pull the private image.
+**How it works (already coded):**
+- `docker-compose.prod.yml` — `api` and `migrate` now carry both an
+  `image: ghcr.io/narendra632/aceroai-backend:latest` **and** `build: ./backend`,
+  so CI builds+pushes that image and the VM only *pulls* it (a 1 GB VM builds
+  poorly; GitHub's runners don't). A local `up --build` still works.
+- `.github/workflows/ci.yml` — after the `backend` (test) job is green, a `deploy`
+  job runs **only on a push to `main`** (never on PRs). It builds the image, pushes
+  it to **GHCR** (GitHub's private container registry), then SSHes to the VM and runs
+  `git pull` → `docker compose pull` → `up -d`. Migrations run automatically inside
+  `up -d` (the `migrate` service). The VM authenticates to GHCR with a **short-lived
+  token** piped over SSH — no permanent registry password is stored on the box.
+
+**What you set up once (manual):**
+
+**1. Make a deploy SSH key** (CI → VM). On your laptop (Git Bash) or GCP Cloud
+Shell — the comment **must** be your VM username (run `whoami` in the VM's SSH to
+check; usually your Google account name):
+
+```bash
+ssh-keygen -t ed25519 -C "YOUR_VM_USERNAME" -f deploy_key -N ""
+cat deploy_key.pub      # the PUBLIC half
+cat deploy_key          # the PRIVATE half (keep secret)
+```
+
+**2. Give the VM the public half** — the GCP-correct way (survives reboots; a
+key pasted straight into `authorized_keys` can be wiped by Google's guest agent):
+Console → **Compute Engine → VM instances → click the VM → Edit → SSH Keys → Add
+item** → paste the whole `deploy_key.pub` line → **Save**. (GCP reads the username
+from the key's comment, which is why step 1's `-C` must match.)
+
+**3. Add three GitHub repo secrets** — repo → **Settings → Secrets and variables →
+Actions → New repository secret**:
+
+| Secret | Value |
+|---|---|
+| `DEPLOY_HOST` | the VM's static external IP (`136.117.137.254`) |
+| `DEPLOY_USER` | your VM username (the `whoami` / key comment from step 1) |
+| `DEPLOY_SSH_KEY` | the **entire** `deploy_key` file — the private half, incl. the `-----BEGIN/END-----` lines |
+
+*(You do **not** need a GHCR secret — the workflow's built-in `GITHUB_TOKEN` both
+pushes the image and, piped over SSH, lets the VM pull it.)*
+
+**4. Allow the token to publish packages** — repo → **Settings → Actions →
+General → Workflow permissions** → ensure **Read and write permissions** is
+selected (lets `GITHUB_TOKEN` push to GHCR).
+
+**5. First run.** Push any commit to `main` (or re-run the latest workflow).
+Watch repo → **Actions**: `backend` runs the tests, then `deploy` builds, pushes,
+and updates the VM. Verify: `curl https://acero.duckdns.org/health` still returns
+`{"status":"ok"}`, and on the VM `docker compose -f docker-compose.prod.yml ps`
+shows the api container recently recreated. The image appears under repo →
+**Packages** (private by default).
+
+> **Rollback:** every build is also tagged `…:<git-sha>`. To roll back, SSH in and
+> `docker compose -f docker-compose.prod.yml` won't help directly (it tracks
+> `:latest`), so pull the good SHA and retag, or just revert the commit on `main`
+> and let CI redeploy — the simplest path.
 
 ---
 

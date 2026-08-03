@@ -34,3 +34,54 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
+
+  # Stage 2 CD: only after `backend` (tests) is green, and only for a real push to
+  # main — never on PRs. Builds the image on GitHub (the 1 GB VM can't build well),
+  # pushes it to GHCR, then SSHes to the VM to pull + restart. Migrations run inside
+  # the compose (`migrate` service) as part of `up -d`.
+  deploy:
+    needs: backend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # let GITHUB_TOKEN push/pull the GHCR image
+    concurrency:
+      group: deploy-prod      # never run two deploys at once
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/aceroai-backend:latest
+            ghcr.io/${{ github.repository_owner }}/aceroai-backend:${{ github.sha }}
+
+      - name: Deploy on the VM over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # GITHUB_TOKEN is short-lived (expires when this run ends), so the VM never
+          # stores a long-lived registry credential.
+          script: |
+            set -e
+            cd ~/aceroai
+            git pull --ff-only
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker logout ghcr.io
+            docker image prune -f

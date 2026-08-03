@@ -21,6 +21,9 @@ services:
 
   # One-shot: apply migrations, then exit. api waits for this to finish.
   migrate:
+    # CI/CD builds & pushes this image (see .github/workflows/ci.yml); the VM only
+    # pulls it. `build:` stays so a local `up --build` still works without CI.
+    image: ghcr.io/narendra632/aceroai-backend:latest
     build: ./backend
     env_file: .env
     environment:
@@ -32,6 +35,7 @@ services:
     restart: "no"
 
   api:
+    image: ghcr.io/narendra632/aceroai-backend:latest
     build: ./backend
     env_file: .env
     environment:

@@ -80,3 +80,10 @@ not included yet — they'll be chosen against the first data screen (Feature 3)
 
 `VITE_API_URL` (in `.env.development`) points at the backend, default
 `http://localhost:8000`. No secrets live here.
+
+## Deploying
+
+Hosted on **Vercel** (Root Directory `frontend`, framework Vite), which
+auto-deploys on every push to `main`. Set `VITE_API_URL` in the Vercel project to
+the backend's HTTPS URL (the DuckDNS subdomain). Full runbook:
+[`../docs/DEPLOY.md`](../docs/DEPLOY.md).

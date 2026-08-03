@@ -34,13 +34,13 @@
 
 ## 5. Stage 2 — CI/CD (after Stage 1 works)
 
-- [ ] 5.1 `.github/workflows/deploy.yml`: on push to `main` (needs CI green) → build the backend image → push to **GHCR**
-- [ ] 5.2 Deploy step: SSH to the VM (key + host in **GitHub Actions secrets**) → `docker compose -f docker-compose.prod.yml pull && up -d` → run migrations
-- [ ] 5.3 `docker-compose.prod.yml`: switch `api` from `build:` to the GHCR `image:` tag
-- [ ] 5.4 Trigger a deploy; confirm the change lands automatically and the app stays up
+- [x] 5.1 `deploy` job in `.github/workflows/ci.yml`: on push to `main`, gated by `needs: backend` (CI green) → build the backend image → push to **GHCR** (tagged `:latest` + `:<sha>`)
+- [x] 5.2 Deploy step: SSH to the VM (key + host in **GitHub Actions secrets**) → `git pull` → `docker compose -f docker-compose.prod.yml pull && up -d` (migrations run via the `migrate` service); VM authed to GHCR with the short-lived `GITHUB_TOKEN`, not a stored PAT
+- [x] 5.3 `docker-compose.prod.yml`: `api` + `migrate` carry the GHCR `image:` tag (kept `build:` for local `up --build`)
+- [ ] 5.4 Trigger a deploy; confirm the change lands automatically and the app stays up *(needs the 3 GH secrets + VM key set up first — runbook Stage 2)*
 
 ## 6. Docs
 
-- [ ] 6.1 `docs/DEPLOY.md`: the full runbook (stages 1 & 2), with the swap/RAM notes and the $ budget-alert step
-- [ ] 6.2 `backend/README.md` + `frontend/README.md`: short "Deploying" pointers to DEPLOY.md and the env vars
-- [ ] 6.3 Update `docs/ROADMAP.md` (hosting done) and `AGENTS.md`/`ARCHITECTURE.md` status
+- [x] 6.1 `docs/DEPLOY.md`: the full runbook (stages 1 & 2), with the swap/RAM notes and the $ budget-alert step
+- [x] 6.2 `backend/README.md` + `frontend/README.md`: short "Deploying" pointers to DEPLOY.md and the env vars
+- [x] 6.3 Update `docs/ROADMAP.md` (hosting done) and `AGENTS.md`/`ARCHITECTURE.md` status

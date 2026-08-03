@@ -213,8 +213,9 @@ diffs with ruff+pytest after; ask when unsure.
 
 ## 8. Status & next
 
-**Phase 0**, **Feature 1** (web chat), **Feature 2** (Telegram), and
-**cross-session memory + adaptive reasoning** (2026-07-31) are complete.
+**Phase 0**, **Feature 1** (web chat), **Feature 2** (Telegram),
+**cross-session memory + adaptive reasoning** (2026-07-31), and **hosting +
+CI/CD** (2026-08-03) are complete.
 Feature 1: `core/llm` + `core/composer` + `core/handler` (the one brain),
 JWT-cookie auth, SSE streaming chat, Claude-inspired multi-session React UI
 (shadcn/ui, markdown, smooth streaming, light/dark). Feature 2: a thin
@@ -223,13 +224,17 @@ Memory: `core/memory.py` extracts durable facts, embeds them
 (`profile_facts.embedding` via pgvector/HNSW, migration 002), and semantically
 recalls the most relevant into every session; reasoning effort is chosen
 per request (web "think harder" toggle + Telegram `/think` + a task-routing hook).
-Specs live in `openspec/specs/{auth,web-chat,telegram,memory}`.
+Hosting: backend runs on a Google Cloud always-free e2-micro under Docker (Caddy
+auto-HTTPS via a DuckDNS subdomain → api → Postgres/pgvector; 2 GB swap); frontend
+on Vercel. CI/CD (`.github/workflows/ci.yml`) auto-deploys on push to main: tests →
+build image → push to GHCR → SSH to the VM → `compose pull && up -d` (migrations
+run via the `migrate` service). Auth is a Bearer token in localStorage (the
+cross-site cookie was blocked by browser third-party-cookie protections). Runbook:
+`docs/DEPLOY.md`. Specs live in `openspec/specs/{auth,web-chat,telegram,memory,deployment}`.
 
 Queued next (see `ROADMAP.md` for the full sequence):
 
-1. **Hosting + CI/CD** — backend on an always-on VM (+ Postgres/pgvector) and the
-   frontend on Vercel; this unlocks scheduled/proactive features.
-2. **UI feature set** — journal/tasks, investments, knowledge visualization
+1. **UI feature set** — journal/tasks, investments, knowledge visualization
    (as the frontend becomes a PWA/Capacitor app with push notifications).
-3. **MCP-powered capabilities**, and the **day-end summary job**
-   (`generated_reviews`, APScheduler in `users.timezone`) once hosting is live.
+2. **MCP-powered capabilities**, and the **day-end summary job**
+   (`generated_reviews`, APScheduler in `users.timezone`) — now unblocked by hosting.

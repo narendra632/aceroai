@@ -8,37 +8,24 @@
 ## Done
 
 - **Phase 0** — scaffold: schema, config, security, `/health`, CI, OpenSpec workflow.
-- **Feature 1 — Web chat** — the "one brain" (`handle_message`), auth (JWT cookie),
-  SSE streaming, multi-session history, polished responsive Claude-inspired UI.
+- **Feature 1 — Web chat** — the "one brain" (`handle_message`), auth, SSE
+  streaming, multi-session history, polished responsive Claude-inspired UI.
 - **Feature 2 — Telegram channel** — thin adapter reusing the one brain;
   `/start` trust-on-first-use linking; chat-id allowlist.
+- **Cross-session memory + adaptive reasoning** — per-request reasoning effort
+  (fast by default; "think harder" toggle on web, `/think` on Telegram, task
+  routing for jobs); durable facts extracted from chats, **embedded (pgvector +
+  HNSW)**, and **semantically recalled** into every new session.
+- **Hosting + CI/CD** — backend live on a Google Cloud always-free `e2-micro`
+  (Docker: Caddy + api + Postgres/pgvector, auto-HTTPS via DuckDNS), frontend on
+  Vercel. **Stage 2 CD:** a push to `main` that passes tests builds the image on
+  GitHub → GHCR → SSH-deploys to the VM automatically. Auth is a Bearer token
+  (localStorage) because the cross-site cookie was blocked by browser privacy
+  protections — see [`ARCHITECTURE.md`](ARCHITECTURE.md) / the memory note.
 
 ## Now
 
-- **Cross-session memory + adaptive reasoning** *(current OpenSpec change)*
-  - **Adaptive reasoning:** the model's "thinking" budget is chosen *per request*
-    — chat is fast (low) by default; **explicit user control** ("think harder"
-    toggle on web, `/think` on Telegram) and **task routing** (any caller can pass
-    an effort; future jobs like reviews use `high`) dial it up. Fixes the 5–7s
-    first-token latency. *(A fully-automatic router model that classifies each
-    message is deferred until billing — it costs an extra call per message.)*
-  - **Cross-session memory (with pgvector):** start using the `profile_facts`
-    table — extract durable facts about Narendra from conversations, **embed them
-    (pgvector + HNSW)**, and **semantically recall** the most relevant ones into
-    every new session, so Acero remembers him across chats instead of starting
-    blank. *(This is the first real "cognition" layer, and where pgvector starts
-    doing real work; today the assistant only sees the current session's last 20
-    messages.)*
-
-## Next (planned, in order)
-
-1. **Hosting + CI/CD** — deploy the backend (always-on VM; leaning Google Cloud
-   always-free `e2-micro` running backend + Postgres/pgvector in Docker) and the
-   frontend (Vercel), and wire continuous deploy. This is the phase where the
-   scheduled/proactive features become possible (a job only fires if the server
-   is running).
-
-2. **UI feature set** — the app grows a real product surface. Motivation: the
+- **UI feature set** *(next OpenSpec change)* — the app grows a real product surface. Motivation: the
    frontend will be wrapped as a **PWA / Capacitor app with push notifications**,
    which is intended to eventually **make the Telegram channel obsolete** (native
    notifications instead of a bot).
@@ -52,10 +39,12 @@
      Acero has learned about Narendra, using a visualization library, so he can
      *see his knowledge graph grow* over time.
 
-3. **MCP-powered real-world capabilities** — expose the tools Narendra actually
+## Next (planned, in order)
+
+1. **MCP-powered real-world capabilities** — expose the tools Narendra actually
    uses through MCP so Acero can act in the real world, not just chat.
 
-4. **Beyond** — additional features as they come up; this list grows over time.
+2. **Beyond** — additional features as they come up; this list grows over time.
 
 ## Future considerations (not scheduled)
 

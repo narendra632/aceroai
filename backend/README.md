@@ -147,3 +147,12 @@ Setup: get a token from **@BotFather**, put it in `.env` as `TELEGRAM_BOT_TOKEN`
 restart the backend, then send **`/start`** to the bot once — the first `/start`
 links your chat to your account (trust-on-first-use); afterward only that chat is
 served.
+
+## Deploying
+
+Production runs under Docker (`docker-compose.prod.yml`: Caddy auto-HTTPS + api +
+Postgres/pgvector) on a Google Cloud e2-micro, fronted by a DuckDNS subdomain. A
+push to `main` that passes CI auto-deploys (build → GHCR → SSH pull on the VM).
+Prod env vars: `APP_ENV=prod`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE=none`,
+`SOUL_PATH=/docs/SOUL.md`, `SITE_ADDRESS`, `FRONTEND_ORIGIN`. Full runbook:
+[`../docs/DEPLOY.md`](../docs/DEPLOY.md).
