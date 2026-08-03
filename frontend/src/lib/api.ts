@@ -4,6 +4,19 @@
 
 const API = import.meta.env.VITE_API_URL as string;
 
+// The auth token is stored client-side and sent as an Authorization header. This
+// works cross-site in every browser (a cross-site cookie is blocked by browser
+// privacy protections when the frontend and API are on different domains).
+const TOKEN_KEY = "aceroai_token";
+export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
+const setToken = (t: string | null) =>
+  t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
+
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 export type Session = {
   id: string;
   title: string | null;
@@ -20,11 +33,15 @@ export type ChatMessage = {
 
 export type ChatEvent = { event: string; data: string };
 
-function req(path: string, init?: RequestInit): Promise<Response> {
+function req(path: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${API}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(init.headers ?? {}),
+    },
   });
 }
 
@@ -39,11 +56,14 @@ export async function login(email: string, password: string): Promise<string> {
     body: JSON.stringify({ email, password }),
   });
   if (!r.ok) throw new Error("Invalid email or password");
-  return (await r.json()).email;
+  const data = await r.json();
+  setToken(data.token);
+  return data.email;
 }
 
 export async function logout(): Promise<void> {
   await req("/api/auth/logout", { method: "POST" });
+  setToken(null);
 }
 
 export async function listSessions(): Promise<Session[]> {
@@ -80,7 +100,7 @@ export async function* streamChat(
   const res = await fetch(`${API}/api/chat`, {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     // `deep` = explicit "think harder": ask the backend for deeper reasoning.
     body: JSON.stringify({ message, session_id: sessionId, deep }),
     signal,

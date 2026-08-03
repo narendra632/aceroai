@@ -33,7 +33,9 @@ def login(body: LoginIn, response: Response, db: Session = Depends(get_db)) -> d
         secure=settings.cookie_secure,
         path="/",
     )
-    return {"email": user.email}
+    # Also return the token so a cross-site frontend (different domain from the API)
+    # can send it as an Authorization header — browsers block the cross-site cookie.
+    return {"email": user.email, "token": token}
 
 
 @router.post("/logout")
