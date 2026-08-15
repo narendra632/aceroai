@@ -1,4 +1,14 @@
-import { BookOpen, ListTodo, LogOut, MessageSquare, Moon, Plus, Sun, X } from "lucide-react";
+import {
+  BookOpen,
+  ListTodo,
+  LogOut,
+  MessageSquare,
+  Moon,
+  Plus,
+  Settings as SettingsIcon,
+  Sun,
+  X,
+} from "lucide-react";
 import type { ComponentType } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -6,12 +16,13 @@ import { useTheme } from "@/hooks/useTheme";
 import type { Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export type View = "chat" | "tasks" | "journal";
+export type View = "chat" | "tasks" | "journal" | "settings";
 
 const NAV: { view: View; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { view: "chat", label: "Chat", icon: MessageSquare },
   { view: "tasks", label: "Tasks", icon: ListTodo },
   { view: "journal", label: "Journal", icon: BookOpen },
+  { view: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
 type Props = {

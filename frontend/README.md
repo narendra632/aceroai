@@ -1,7 +1,7 @@
 # frontend — aceroai web app
 
-The web client for aceroai: a Claude-inspired, mobile-first app with three views —
-**Chat**, **Tasks**, and **Journal**. React 19 + Vite + Tailwind v4, with
+The web client for aceroai: a Claude-inspired, mobile-first app with four views —
+**Chat**, **Tasks**, **Journal**, and **Settings**. React 19 + Vite + Tailwind v4, with
 **shadcn/ui** components and **lucide** icons. It talks to the FastAPI backend,
 streams replies with a smooth typewriter reveal, renders markdown, and keeps you
 logged in with a bearer token.
@@ -34,7 +34,7 @@ blocked by browsers. (Trade-off + the single-domain alternative: see
 `../docs/DEPLOYMENT-EXPLAINED.md`.)
 
 **Navigation.** `AppShell` holds the current view and a single sidebar (docked on
-desktop, a drawer on mobile) with **Chat / Tasks / Journal**. Chat state lives in
+desktop, a drawer on mobile) with **Chat / Tasks / Journal / Settings**. Chat state lives in
 the shell so switching views never drops an open conversation or an in-flight
 stream. `TasksView` and `JournalView` are self-contained CRUD screens over
 `/api/tasks` and `/api/journal`; the assistant can also drive both from Chat, and
@@ -74,6 +74,7 @@ persist it.
 | `src/components/Sidebar.tsx` | Chat/Tasks/Journal nav + (in chat) session list; theme, sign out; mobile drawer |
 | `src/components/TasksView.tsx` | Tasks screen: quick-add, complete, priority, due, delete |
 | `src/components/JournalView.tsx` | Journal screen: dated entries, mood, tags |
+| `src/components/SettingsView.tsx` | Pick AI provider + chat/think-harder models; read-only pinned memory model |
 | `src/components/MessageList.tsx` | Transcript + live streaming bubble + "working…" + empty state |
 | `src/components/MessageBubble.tsx` | One message (markdown + copy for assistant) |
 | `src/components/Markdown.tsx` | Safe markdown renderer |

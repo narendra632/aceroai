@@ -52,8 +52,8 @@ incremental change.
 - openspec/             specs (source of truth) + changes
 
 ## Current status
-Features 1 & 2, cross-session memory & adaptive reasoning, hosting, and
-tasks+journal (with assistant tools) are complete.
+Features 1 & 2, cross-session memory & adaptive reasoning, hosting,
+tasks+journal (with assistant tools), and the multi-provider LLM layer are complete.
 Feature 1 (2026-07-26): LLM wrapper + one-brain handle_message + JWT-cookie auth +
 SSE web chat, multi-session React + shadcn/ui UI. Feature 2 (2026-07-28): thin
 channels/telegram.py long-poller routed through the same handle_message (allowlist
@@ -76,6 +76,15 @@ truth for the REST API (/api/tasks, /api/journal) and the assistant's tools
 tool-use loop (function-calling) so the assistant creates/reads/updates tasks &
 journal from chat on web and Telegram; frontend gains a Chat/Tasks/Journal nav
 shell. Deferred: journal semantic search (embedding) and PWA/push.
+
+Model providers (2026-08-16): core/llm.py is a facade over core/providers/, each using
+its NATIVE SDK — google-genai on Agent Platform via ADC (Cloud Billing, so Cloud credits
+apply) and the openai SDK. Native because Gemini's per-call thought_signature can't
+survive the OpenAI-compat schema, which breaks multi-turn tool calls. Provider + models
+are per-user (migration 003) chosen in the Settings view; resolved in the one brain so
+Telegram inherits them. Embeddings are PINNED separately (switching chat provider must
+never change them, or stored profile_facts vectors become meaningless). Billing errors
+are no longer reported as rate limits.
 
 Roadmap in docs/ROADMAP.md. Next up (agreed): the rest of the UI feature set
 (investments — ask for his .md files; knowledge visualization) + PWA/push, then

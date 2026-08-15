@@ -76,24 +76,71 @@ Endpoints: `GET/POST /api/tasks`, `PATCH/DELETE /api/tasks/{id}`,
 `PATCH/DELETE /api/journal/{id}`. All are owner-scoped; service-layer domain
 errors map to `404` / `400` in `main.py`.
 
+## Model providers
+
+`core/llm.py` is a **facade**; the real work is in `core/providers/`, where each
+provider is used through its **own native SDK** — not a compatibility shim, so no
+provider's capabilities are degraded. They all satisfy one small contract
+(`base.py`) that emits the events the handler already consumes:
+
+```
+("delta", str)        a chunk of visible text
+("tool_calls", list)  tools to run, once at the end of the turn
+```
+
+| Provider | SDK | Auth | Billing |
+|---|---|---|---|
+| `google` | `google-genai` → **Agent Platform (Vertex)** | **ADC** — no API key | Google **Cloud Billing** (Cloud credits apply) |
+| `openai` | `openai` | `OPENAI_API_KEY` | OpenAI account |
+
+**Why native for Google:** Gemini attaches a `thought_signature` to every function
+call that must be returned on the next turn. The OpenAI-compatible schema has
+nowhere to carry it, so it is dropped and **multi-turn tool calls fail** — exactly
+what our assistant does. The provider echoes the model's own turn back
+(`_provider_raw`), and disables the SDK's *automatic* function calling so our own
+bounded, user-scoped tool loop stays in charge.
+
+**Credentials (Google):** `gcloud auth application-default login` locally; in
+production the GCE VM's attached service account supplies ADC through the metadata
+server — **no key file, no secret in `.env`**. It needs `roles/aiplatform.user`.
+
+**Choosing provider + model:** per user, stored on `users` (migration 003) and
+edited in the app's **Settings** screen. `services/user_settings.resolve()` is the
+single source of truth (user value → configured default), and because the handler
+calls it, **Telegram honors the same choice with no channel code**.
+
+**Embeddings are pinned** (`EMBED_PROVIDER`/`EMBED_MODEL`/`EMBED_DIM`) and never
+follow the chat provider: every stored `profile_facts` vector came from one model,
+and vectors from a different model are not comparable — recall would silently
+return nonsense. Changing them is a deliberate re-embed migration.
+
+**Errors** are classified by cause (`TransientError`, `RateLimitError`,
+`BillingError`), so an unpaid balance is never reported as a "rate limit".
+
+Adding a provider = implement `base.Provider`, register it in
+`providers/__init__.py`, add it to `MODEL_CATALOG`. Nothing above `llm.py` changes,
+and the conformance suite in `tests/test_providers.py` holds it to the contract.
+
 ## File guide
 
 | Path | Role |
 |---|---|
 | `app/main.py` | FastAPI app: CORS, router includes, `/health`, lifespan hook |
 | `app/config.py` | `Settings` — every env-driven knob (DB, JWT, LLM, timezone) |
-| `app/core/llm.py` | `AsyncOpenAI` wrapper: `stream_chat`, `stream_with_tools` (function-calling), `complete`, `embed` |
+| `app/core/llm.py` | Facade over the providers: `stream_with_tools`, `complete`, `embed` + shared retry/backoff |
+| `app/core/providers/` | One contract (`base.py`), two **native** implementations: `google.py` (google-genai / Agent Platform) and `openai_provider.py` |
 | `app/core/composer.py` | Builds model context: `SOUL.md` persona + current date/time + recalled facts + recent messages |
 | `app/core/handler.py` | `handle_message` — the one brain; the bounded tool-use loop; yields SSE events |
 | `app/core/tools.py` | Assistant tools (create/list/update/complete task, add/list journal) + fault-tolerant dispatch |
 | `app/core/memory.py` | Cross-session memory: extract → embed → store facts (pgvector) → semantic recall |
 | `app/core/security.py` | bcrypt hashing + JWT create/decode (HS256, 30-day) |
-| `app/services/` | Single source of truth for `tasks` + `journal` logic (used by both the API and the tools) |
+| `app/services/` | Single source of truth for `tasks`, `journal`, and `user_settings` (used by the API *and* the tools/handler) |
 | `app/api/deps.py` | `get_current_user` — auth guard (Bearer header or cookie) |
 | `app/api/auth.py` | `POST /api/auth/login` · `/logout` · `GET /api/auth/me` |
 | `app/api/chat.py` | `POST /api/chat` (SSE) · session list · history (owner-checked) |
 | `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` (owner-scoped) |
 | `app/api/journal.py` | `/api/journal` CRUD (owner-scoped) |
+| `app/api/settings.py` | `GET/PATCH /api/settings` — provider + model selection |
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/db/session.py` | Engine, `SessionLocal`, `Base`, `get_db` dependency |
 | `app/db/models.py` | The 7 ORM tables (typed `Mapped[]` style) |

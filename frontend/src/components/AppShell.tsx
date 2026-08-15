@@ -9,6 +9,7 @@ import Composer from "./Composer";
 import JournalView from "./JournalView";
 import MessageList from "./MessageList";
 import type { UIMessage } from "./MessageBubble";
+import SettingsView from "./SettingsView";
 import Sidebar, { type View } from "./Sidebar";
 import TasksView from "./TasksView";
 
@@ -114,7 +115,12 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
   }
 
   const streaming = busy ? { thinking, text: reveal.text, label: working ?? undefined } : null;
-  const title = view === "chat" ? "aceroai" : view === "tasks" ? "Tasks" : "Journal";
+  const TITLES: Record<View, string> = {
+    chat: "aceroai",
+    tasks: "Tasks",
+    journal: "Journal",
+    settings: "Settings",
+  };
 
   return (
     <div className="flex h-full">
@@ -141,7 +147,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           >
             <Menu />
           </Button>
-          <span className="font-semibold tracking-tight">{title}</span>
+          <span className="font-semibold tracking-tight">{TITLES[view]}</span>
         </header>
 
         {view === "chat" ? (
@@ -151,8 +157,10 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           </>
         ) : view === "tasks" ? (
           <TasksView />
-        ) : (
+        ) : view === "journal" ? (
           <JournalView />
+        ) : (
+          <SettingsView />
         )}
       </div>
     </div>

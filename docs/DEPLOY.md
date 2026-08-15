@@ -223,6 +223,46 @@ shows the api container recently recreated. The image appears under repo →
 
 ---
 
+## Switching the LLM to Agent Platform (Vertex)
+
+The backend reaches Gemini through **Agent Platform**, billed via **Google Cloud
+Billing** — so Google Cloud credits pay for it (the prepaid AI Studio balance is a
+different, unrelated pot). Auth is **Application Default Credentials**, so there is
+**no API key on the server**.
+
+**One-time, in the Cloud console:**
+1. Enable the **Agent Platform / Vertex AI API** on the project.
+2. Give the **VM's service account** the **`roles/aiplatform.user`** role
+   (IAM → find the VM's service account → Edit → Add role). This is what lets the
+   backend authenticate with no key file: ADC resolves through the VM's metadata
+   server automatically.
+3. Set a **budget alert** on the billing account, so an exhausted credit shows up as a
+   warning rather than as failed chats.
+
+**In the server `.env`** (you edit it; never committed):
+```
+LLM_PROVIDER=google
+GOOGLE_CLOUD_PROJECT=<your project id>
+GOOGLE_CLOUD_LOCATION=global
+MODEL_CHAT=gemini-3.5-flash
+MODEL_HEAVY=gemini-3.1-pro-preview
+# OPENAI_API_KEY=            # optional — set it to offer OpenAI in Settings too
+```
+`LLM_API_KEY` is no longer needed for Google.
+
+**Verify from the VM** after `docker compose ... up -d`:
+```bash
+docker compose -f docker-compose.prod.yml exec api \
+  uv run python -c "import google.auth; c,p=google.auth.default(); print('ADC ok, project:', p)"
+curl https://acero.duckdns.org/health
+```
+Then send a real message and ask the assistant to add a task.
+
+**Rollback:** set `LLM_PROVIDER` back (with the previous key config) and restart.
+
+**Local development** uses the same code path with your own identity:
+`gcloud auth application-default login`.
+
 ## Operations
 
 - **Logs**: `docker compose -f docker-compose.prod.yml logs -f api`
