@@ -183,6 +183,102 @@ def test_openai_strips_provider_raw_before_sending():
     assert cleaned == [{"role": "assistant", "content": "x"}]
 
 
+def _bad_request(param: str):
+    """A real openai 400 complaining that `param` is unsupported."""
+    import httpx
+    import openai
+
+    body = {
+        "error": {
+            "message": f"Unsupported parameter: '{param}' is not supported with this model.",
+            "type": "invalid_request_error",
+            "param": param,
+            "code": "unsupported_parameter",
+        }
+    }
+    response = httpx.Response(400, request=httpx.Request("POST", "https://api.openai.com/v1"))
+    return openai.BadRequestError("unsupported", response=response, body=body)
+
+
+def test_openai_renames_max_tokens_for_newer_models(monkeypatch):
+    """gpt-5.x rejects max_tokens and wants max_completion_tokens; older hosts want the
+    legacy name. We send the modern form and adapt to whatever the API says."""
+    seen: list[dict] = []
+
+    async def create(**kwargs):
+        seen.append(kwargs)
+        if "max_completion_tokens" in kwargs:
+            raise _bad_request("max_completion_tokens")  # legacy host
+        return "ok"
+
+    provider = OpenAIProvider()
+    client = pytypes.SimpleNamespace(
+        chat=pytypes.SimpleNamespace(completions=pytypes.SimpleNamespace(create=create))
+    )
+    monkeypatch.setattr(provider, "_get", lambda: client)
+
+    assert asyncio.run(provider._create(model="m", messages=[])) == "ok"
+    assert "max_completion_tokens" in seen[0]  # modern name tried first
+    assert seen[1]["max_tokens"] == seen[0]["max_completion_tokens"]  # renamed, not lost
+
+
+def test_openai_drops_reasoning_effort_when_model_rejects_it(monkeypatch):
+    """Older models (e.g. gpt-4o) 400 on reasoning_effort — drop it and continue."""
+    seen: list[dict] = []
+
+    async def create(**kwargs):
+        seen.append(kwargs)
+        if "reasoning_effort" in kwargs:
+            raise _bad_request("reasoning_effort")
+        return "ok"
+
+    provider = OpenAIProvider()
+    client = pytypes.SimpleNamespace(
+        chat=pytypes.SimpleNamespace(completions=pytypes.SimpleNamespace(create=create))
+    )
+    monkeypatch.setattr(provider, "_get", lambda: client)
+
+    assert asyncio.run(provider._create(model="m", messages=[], reasoning_effort="low")) == "ok"
+    assert "reasoning_effort" not in seen[-1]
+
+
+def test_openai_reads_param_from_message_when_body_is_empty(monkeypatch):
+    """The SDK doesn't always populate the structured body — the message still names
+    the parameter, and we must still adapt (this is what the live API actually sent)."""
+    import httpx
+    import openai
+
+    from app.core.providers.openai_provider import _unsupported_param
+
+    response = httpx.Response(400, request=httpx.Request("POST", "https://api.openai.com/v1"))
+    exc = openai.BadRequestError(
+        "Error code: 400 - Unsupported parameter: 'max_tokens' is not supported with this model.",
+        response=response,
+        body=None,
+    )
+    assert _unsupported_param(exc) == "max_tokens"
+
+
+def test_openai_reraises_unrelated_bad_request(monkeypatch):
+    """A 400 we can't adapt to must surface, not be retried into oblivion."""
+    import openai
+
+    async def create(**kwargs):
+        raise _bad_request("some_param_we_never_send")
+
+    provider = OpenAIProvider()
+    client = pytypes.SimpleNamespace(
+        chat=pytypes.SimpleNamespace(completions=pytypes.SimpleNamespace(create=create))
+    )
+    monkeypatch.setattr(provider, "_get", lambda: client)
+
+    try:
+        asyncio.run(provider._create(model="m", messages=[]))
+    except openai.BadRequestError:
+        return
+    raise AssertionError("expected the error to propagate")
+
+
 def test_google_groups_parallel_tool_results_into_one_turn():
     """Regression: asking for two things at once makes Gemini emit two function calls.
     Gemini then requires the *same number* of response parts in a single following

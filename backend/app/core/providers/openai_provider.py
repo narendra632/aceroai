@@ -6,6 +6,7 @@ native here. Authenticated with `OPENAI_API_KEY` from the environment (never the
 """
 
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -42,6 +43,21 @@ def _classify(exc: Exception) -> ProviderError:
     if any(h in text for h in ("billing", "insufficient_quota", "payment")):
         return BillingError(str(exc))
     return ProviderError(str(exc))
+
+
+def _unsupported_param(exc: Exception) -> str | None:
+    """The parameter name an `unsupported_parameter` 400 is complaining about.
+
+    The structured `body` is preferred, but the SDK does not always populate it, so we
+    fall back to reading the message — which always names the parameter in quotes.
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error") or {}
+        if err.get("code") == "unsupported_parameter" and err.get("param"):
+            return str(err["param"])
+    match = re.search(r"Unsupported parameter: '([^']+)'", str(exc))
+    return match.group(1) if match else None
 
 
 def _accumulate(acc: dict[int, dict], fragment) -> None:
@@ -83,6 +99,31 @@ class OpenAIProvider:
         # Drop our provider-native echo field; OpenAI reconstructs from tool_calls.
         return [{k: v for k, v in m.items() if k != "_provider_raw"} for m in messages]
 
+    async def _create(self, **kwargs):
+        """Create a completion, adapting to what the chosen model actually accepts.
+
+        OpenAI's model families disagree about parameters: newer ones (gpt-5.x) require
+        `max_completion_tokens` and reject `max_tokens`, while older ones reject
+        `reasoning_effort`. Rather than hard-code a model->capability table that rots
+        every release, we send the modern form and let the API tell us: on an
+        `unsupported_parameter` 400 we rename or drop that parameter and retry. This
+        happens before any output is streamed, so nothing is ever duplicated.
+        """
+        kwargs.setdefault("max_completion_tokens", MAX_OUTPUT_TOKENS)
+        for _ in range(3):  # at most a few parameters can be objected to
+            try:
+                return await self._get().chat.completions.create(**kwargs)
+            except openai.BadRequestError as exc:
+                param = _unsupported_param(exc)
+                if param is None or param not in kwargs:
+                    raise
+                value = kwargs.pop(param)
+                # A host that predates the rename still wants the legacy name.
+                if param == "max_completion_tokens":
+                    kwargs["max_tokens"] = value
+                log.info("openai: model rejected '%s'; retrying without it", param)
+        return await self._get().chat.completions.create(**kwargs)
+
     async def stream_with_tools(
         self,
         messages: list[dict],
@@ -93,10 +134,9 @@ class OpenAIProvider:
     ) -> AsyncIterator[tuple[str, object]]:
         acc: dict[int, dict] = {}
         try:
-            stream = await self._get().chat.completions.create(
+            stream = await self._create(
                 model=model or settings.model_chat,
                 messages=self._clean(messages),
-                max_tokens=MAX_OUTPUT_TOKENS,
                 stream=True,
                 stream_options={"include_usage": True},
                 **({"tools": tools} if tools else {}),
@@ -134,10 +174,9 @@ class OpenAIProvider:
         self, messages: list[dict], model: str | None = None, effort: str | None = None
     ) -> str:
         try:
-            resp = await self._get().chat.completions.create(
+            resp = await self._create(
                 model=model or settings.model_chat,
                 messages=self._clean(messages),
-                max_tokens=MAX_OUTPUT_TOKENS,
                 **self._effort(effort),
             )
             return resp.choices[0].message.content or ""
