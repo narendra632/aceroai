@@ -1,15 +1,26 @@
-import { LogOut, Moon, Plus, Sun, X } from "lucide-react";
+import { BookOpen, ListTodo, LogOut, MessageSquare, Moon, Plus, Sun, X } from "lucide-react";
+import type { ComponentType } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/useTheme";
 import type { Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+export type View = "chat" | "tasks" | "journal";
+
+const NAV: { view: View; label: string; icon: ComponentType<{ className?: string }> }[] = [
+  { view: "chat", label: "Chat", icon: MessageSquare },
+  { view: "tasks", label: "Tasks", icon: ListTodo },
+  { view: "journal", label: "Journal", icon: BookOpen },
+];
+
 type Props = {
   email: string;
+  view: View;
   sessions: Session[];
   currentId: string | null;
   open: boolean;
+  onNavigate: (view: View) => void;
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onClose: () => void;
@@ -18,9 +29,11 @@ type Props = {
 
 export default function Sidebar({
   email,
+  view,
   sessions,
   currentId,
   open,
+  onNavigate,
   onSelect,
   onNewChat,
   onClose,
@@ -57,38 +70,60 @@ export default function Sidebar({
           </div>
         </div>
 
-        <div className="px-3">
-          <Button variant="outline" onClick={onNewChat} className="w-full justify-start gap-2">
-            <Plus /> New chat
-          </Button>
-        </div>
-
-        <nav className="mt-3 flex-1 overflow-y-auto px-3 pb-3">
-          {sessions.length === 0 ? (
-            <p className="px-2 py-4 text-sm text-faint">No conversations yet.</p>
-          ) : (
-            <ul className="space-y-1">
-              {sessions.map((s) => (
-                <li key={s.id}>
-                  <button
-                    onClick={() => onSelect(s.id)}
-                    title={s.title ?? "Untitled"}
-                    className={cn(
-                      "w-full truncate rounded-lg px-3 py-2.5 text-left text-sm transition",
-                      s.id === currentId
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-accent/60",
-                    )}
-                  >
-                    {s.title ?? "Untitled"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+        {/* primary navigation */}
+        <nav className="flex flex-col gap-1 px-3">
+          {NAV.map(({ view: v, label, icon: Icon }) => (
+            <button
+              key={v}
+              onClick={() => onNavigate(v)}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition",
+                v === view
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/60",
+              )}
+            >
+              <Icon className="size-4" /> {label}
+            </button>
+          ))}
         </nav>
 
-        <div className="flex items-center justify-between border-t border-border px-4 py-3">
+        {/* conversations — only relevant on the Chat view */}
+        {view === "chat" && (
+          <>
+            <div className="mt-4 px-3">
+              <Button variant="outline" onClick={onNewChat} className="w-full justify-start gap-2">
+                <Plus /> New chat
+              </Button>
+            </div>
+            <div className="mt-2 flex-1 overflow-y-auto px-3 pb-3">
+              {sessions.length === 0 ? (
+                <p className="px-2 py-4 text-sm text-faint">No conversations yet.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {sessions.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        onClick={() => onSelect(s.id)}
+                        title={s.title ?? "Untitled"}
+                        className={cn(
+                          "w-full truncate rounded-lg px-3 py-2.5 text-left text-sm transition",
+                          s.id === currentId
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/60",
+                        )}
+                      >
+                        {s.title ?? "Untitled"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="mt-auto flex items-center justify-between border-t border-border px-4 py-3">
           <span className="truncate text-xs text-faint" title={email}>
             {email}
           </span>

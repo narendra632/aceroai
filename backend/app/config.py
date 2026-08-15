@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2
     # Reject a user message longer than this (chars) before persisting/calling.
     max_input_chars: int = 16000
+    # Max tool-use rounds the assistant may take in one turn before it must answer
+    # with text (guards against a runaway tool loop).
+    tools_max_iters: int = 5
 
     # --- memory (pgvector) ---
     embed_model: str = "gemini-embedding-001"

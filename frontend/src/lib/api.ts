@@ -76,6 +76,88 @@ export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
   return r.ok ? r.json() : [];
 }
 
+// --- tasks ---
+
+export type Task = {
+  id: string;
+  title: string;
+  notes: string | null;
+  status: "todo" | "in_progress" | "done" | "dropped";
+  priority: number; // 1 high · 2 mid · 3 low
+  due_at: string | null;
+  snoozed_until: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskInput = {
+  title: string;
+  notes?: string | null;
+  priority?: number;
+  due_at?: string | null;
+};
+
+export async function listTasks(status?: string): Promise<Task[]> {
+  const r = await req(`/api/tasks${status ? `?status=${status}` : ""}`);
+  return r.ok ? r.json() : [];
+}
+
+export async function createTask(input: TaskInput): Promise<Task> {
+  const r = await req("/api/tasks", { method: "POST", body: JSON.stringify(input) });
+  if (!r.ok) throw new Error("could not create task");
+  return r.json();
+}
+
+export async function updateTask(id: string, patch: Partial<Task>): Promise<Task> {
+  const r = await req(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  if (!r.ok) throw new Error("could not update task");
+  return r.json();
+}
+
+export async function completeTask(id: string): Promise<Task> {
+  const r = await req(`/api/tasks/${id}/complete`, { method: "POST" });
+  if (!r.ok) throw new Error("could not complete task");
+  return r.json();
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  await req(`/api/tasks/${id}`, { method: "DELETE" });
+}
+
+// --- journal ---
+
+export type JournalEntry = {
+  id: string;
+  entry_date: string;
+  content: string;
+  mood: number | null;
+  tags: string[];
+  channel: string;
+  created_at: string;
+};
+
+export type JournalInput = {
+  content: string;
+  mood?: number | null;
+  tags?: string[];
+};
+
+export async function listJournal(): Promise<JournalEntry[]> {
+  const r = await req("/api/journal");
+  return r.ok ? r.json() : [];
+}
+
+export async function addJournalEntry(input: JournalInput): Promise<JournalEntry> {
+  const r = await req("/api/journal", { method: "POST", body: JSON.stringify(input) });
+  if (!r.ok) throw new Error("could not add entry");
+  return r.json();
+}
+
+export async function deleteJournalEntry(id: string): Promise<void> {
+  await req(`/api/journal/${id}`, { method: "DELETE" });
+}
+
 function parseFrame(frame: string): ChatEvent | null {
   let event: string | null = null;
   const dataParts: string[] = [];

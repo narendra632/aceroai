@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
 from app.core.security import hash_password
-from app.db.models import ChatSession, Message, ProfileFact, User
+from app.db.models import ChatSession, JournalEntry, Message, ProfileFact, Task, User
 from app.db.session import SessionLocal
 from app.main import app
 
@@ -29,6 +29,8 @@ def _purge(db):
             db.execute(delete(Message).where(Message.session_id.in_(sids)))
         db.execute(delete(ChatSession).where(ChatSession.user_id == u.id))
         db.execute(delete(ProfileFact).where(ProfileFact.user_id == u.id))
+        db.execute(delete(Task).where(Task.user_id == u.id))
+        db.execute(delete(JournalEntry).where(JournalEntry.user_id == u.id))
     db.execute(delete(User).where(User.email.in_(_ALL_TEST_EMAILS)))
     db.commit()
 
@@ -58,6 +60,16 @@ def user(db):
     return u
 
 
+@pytest.fixture
+def other_user(db):
+    """A second user, to prove data is scoped and never leaks across users."""
+    u = User(email=OTHER_EMAIL, password_hash=hash_password("other-secret-123"))
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
 def fake_embed_vec(text: str) -> list[float]:
     """Deterministic pseudo-embedding of the right dimension for tests — no network."""
     from app.config import settings
@@ -79,6 +91,18 @@ def fake_llm(monkeypatch):
         for tok in ["Hello", ", ", "there", "."]:
             yield tok
 
+    # The handler drives chat through `stream_with_tools`, which yields
+    # (kind, payload) events. The default fake never calls tools — it just streams
+    # the same "Hello, there." reply. Tool-loop tests override this per test.
+    async def _fake_stream_with_tools(
+        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
+    ):
+        if usage is not None:
+            usage["tokens_in"] = 5
+            usage["tokens_out"] = 3
+        for tok in ["Hello", ", ", "there", "."]:
+            yield "delta", tok
+
     async def _fake_embed(texts):
         return [fake_embed_vec(t) for t in texts]
 
@@ -86,6 +110,7 @@ def fake_llm(monkeypatch):
         return "[]"  # no facts by default; memory tests override this
 
     monkeypatch.setattr("app.core.llm.stream_chat", _fake_stream)
+    monkeypatch.setattr("app.core.llm.stream_with_tools", _fake_stream_with_tools)
     monkeypatch.setattr("app.core.llm.embed", _fake_embed)
     monkeypatch.setattr("app.core.llm.complete", _fake_complete)
     # Keep handler-driven tests deterministic — no background extraction tasks.

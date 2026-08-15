@@ -1,9 +1,10 @@
 # frontend — aceroai web app
 
-The web client for aceroai: a Claude-inspired, mobile-responsive chat. React 19
-+ Vite + Tailwind v4, with **shadcn/ui** components and **lucide** icons. It talks
-to the FastAPI backend, streams replies with a smooth typewriter reveal, renders
-markdown, and keeps you logged in with a cookie.
+The web client for aceroai: a Claude-inspired, mobile-first app with three views —
+**Chat**, **Tasks**, and **Journal**. React 19 + Vite + Tailwind v4, with
+**shadcn/ui** components and **lucide** icons. It talks to the FastAPI backend,
+streams replies with a smooth typewriter reveal, renders markdown, and keeps you
+logged in with a bearer token.
 
 > Architecture rationale lives in [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
 > This README is the *what & where* for the frontend.
@@ -25,9 +26,19 @@ backend's CORS is pinned to that origin.
 
 ## How it works
 
-**Auth.** `App.tsx` calls `/api/auth/me` on load. No valid cookie → `LoginScreen`;
-valid cookie → `ChatLayout`. Every request sends `credentials: "include"` so the
-httpOnly auth cookie rides along — the token is never in JS.
+**Auth.** `App.tsx` calls `/api/auth/me` on load. Not signed in → `LoginScreen`;
+signed in → `AppShell`. Login returns a JWT that `lib/api.ts` stores in
+`localStorage` and sends as an `Authorization: Bearer …` header — this works
+cross-site (Vercel frontend ↔ DuckDNS backend), where a third-party cookie is
+blocked by browsers. (Trade-off + the single-domain alternative: see
+`../docs/DEPLOYMENT-EXPLAINED.md`.)
+
+**Navigation.** `AppShell` holds the current view and a single sidebar (docked on
+desktop, a drawer on mobile) with **Chat / Tasks / Journal**. Chat state lives in
+the shell so switching views never drops an open conversation or an in-flight
+stream. `TasksView` and `JournalView` are self-contained CRUD screens over
+`/api/tasks` and `/api/journal`; the assistant can also drive both from Chat, and
+a **"working…"** indicator shows while it runs a tool.
 
 **Streaming + smooth reveal.** Chat is a `POST` returning Server-Sent Events, so
 we can't use `EventSource` (GET-only, no cookies). `lib/api.ts`'s `streamChat`
@@ -53,15 +64,17 @@ persist it.
 |---|---|
 | `index.html` | SPA shell; title; no-flash theme script |
 | `src/main.tsx` | React entry — mounts `<App/>`, imports the theme |
-| `src/App.tsx` | Auth gate (LoginScreen vs ChatLayout) inside `TooltipProvider` |
+| `src/App.tsx` | Auth gate (LoginScreen vs AppShell) inside `TooltipProvider` |
 | `src/index.css` | Tailwind v4 + shadcn tokens in a warm palette + animations |
-| `src/lib/api.ts` | Backend calls + the `streamChat` SSE reader (with abort) |
+| `src/lib/api.ts` | Backend calls (auth, chat SSE, tasks, journal) + the token header |
 | `src/lib/utils.ts` | `cn()` class-merge helper (shadcn) |
 | `src/hooks/useSmoothReveal.ts` | Steady-rate typewriter reveal of streamed text |
 | `src/hooks/useTheme.ts` | Light/dark toggle + persistence |
-| `src/components/ChatLayout.tsx` | Orchestrator: sessions, messages, streaming, abort, drawer |
-| `src/components/Sidebar.tsx` | Session list, New chat, theme toggle, sign out; mobile drawer |
-| `src/components/MessageList.tsx` | Transcript + live streaming bubble + empty state |
+| `src/components/AppShell.tsx` | Top-level shell: view switch + chat state (sessions, streaming, abort) |
+| `src/components/Sidebar.tsx` | Chat/Tasks/Journal nav + (in chat) session list; theme, sign out; mobile drawer |
+| `src/components/TasksView.tsx` | Tasks screen: quick-add, complete, priority, due, delete |
+| `src/components/JournalView.tsx` | Journal screen: dated entries, mood, tags |
+| `src/components/MessageList.tsx` | Transcript + live streaming bubble + "working…" + empty state |
 | `src/components/MessageBubble.tsx` | One message (markdown + copy for assistant) |
 | `src/components/Markdown.tsx` | Safe markdown renderer |
 | `src/components/ThinkingDots.tsx` | Animated first-token indicator |

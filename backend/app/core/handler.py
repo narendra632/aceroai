@@ -8,6 +8,7 @@ DB is never touched mid-stream.
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -18,7 +19,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core import composer, llm, memory
+from app.core import composer, llm, memory, tools
 from app.db.models import ChatSession, Message, User
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,33 @@ def _schedule_extraction(user_id: uuid.UUID, user_text: str, reply_text: str) ->
 def _title_from(text: str) -> str:
     title = " ".join(text.split())
     return title[:TITLE_MAX] if title else "New chat"
+
+
+def _assistant_tool_message(content: str, tool_calls: list[dict]) -> dict:
+    """The assistant turn that requested tools, in OpenAI format, appended to the
+    running messages so the model sees what it called alongside the results."""
+    return {
+        "role": "assistant",
+        "content": content or None,
+        "tool_calls": [
+            {
+                "id": c["id"],
+                "type": "function",
+                "function": {"name": c["name"], "arguments": c["arguments"]},
+            }
+            for c in tool_calls
+        ],
+    }
+
+
+def _decode_args(raw: str) -> dict | None:
+    """Parse a tool call's argument string; None signals malformed JSON so the loop
+    can report it back to the model instead of executing anything."""
+    try:
+        value = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else {}
 
 
 def _persist_user_turn(
@@ -117,12 +145,49 @@ async def handle_message(
     facts = await memory.recall(db, user, text)
     context = await run_in_threadpool(composer.build_context, db, session_id, facts)
 
+    # Bounded tool-use loop (the "one brain" acting): the model may answer directly
+    # (streamed text, unchanged for normal chat) or call tools, which we run via the
+    # service layer and feed back until it produces a final answer. A `tool` event
+    # lets the UI show a brief "working…" state. The loop is capped and every tool
+    # result is fault-tolerant, so a turn always resolves.
     usage: dict = {}
     parts: list[str] = []
+    messages = list(context)
     try:
-        async for delta in llm.stream_chat(context, usage=usage, reasoning_effort=effort):
-            parts.append(delta)
-            yield "delta", delta
+        for _round in range(settings.tools_max_iters):
+            round_text: list[str] = []
+            tool_calls: list[dict] | None = None
+            async for kind, payload in llm.stream_with_tools(
+                messages, tools=tools.TOOLS, usage=usage, reasoning_effort=effort
+            ):
+                if kind == "delta":
+                    round_text.append(payload)
+                    parts.append(payload)
+                    yield "delta", payload
+                else:  # "tool_calls" — end of this round
+                    tool_calls = payload
+            if not tool_calls:
+                break  # the model answered; done
+            messages.append(_assistant_tool_message("".join(round_text), tool_calls))
+            for call in tool_calls:
+                yield "tool", call["name"]
+                args = _decode_args(call["arguments"])
+                if args is None:
+                    result: dict = {"ok": False, "error": "arguments were not valid JSON"}
+                else:
+                    result = await run_in_threadpool(tools.execute, db, user.id, call["name"], args)
+                messages.append(
+                    {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)}
+                )
+        else:
+            # Hit the round cap while still calling tools: force a final text answer
+            # (no tools) so the turn never ends mid-action.
+            async for kind, payload in llm.stream_with_tools(
+                messages, tools=None, usage=usage, reasoning_effort=effort
+            ):
+                if kind == "delta":
+                    parts.append(payload)
+                    yield "delta", payload
     except Exception as exc:  # noqa: BLE001 - one place to catch any provider failure
         log.warning("generation failed for session %s", session_id, exc_info=True)
         yield "error", _user_error(exc)
