@@ -108,6 +108,13 @@ stored vectors.
 - **WHEN** a user sends a message related to a fact learned before the switch
 - **THEN** that fact can still be recalled into context
 
+#### Scenario: The pinned embedding model is visible but not casually changeable
+
+- **WHEN** a user views settings
+- **THEN** the embedding model in use is shown as fixed, together with an explanation
+  that changing it would invalidate stored memory and requires re-embedding every
+  stored fact — it is not offered as an ordinary selectable option
+
 ### Requirement: Provider failures are reported honestly
 
 A provider rejection SHALL be described to the user according to its cause: a genuine

@@ -51,6 +51,7 @@
 - [ ] 7.2 **Settings** view: provider picker (available only), model pickers for chat and "think harder", save + saved-state feedback, error handling
 - [ ] 7.3 Fourth nav entry in the sidebar (Chat / Tasks / Journal / Settings); mobile-first, matches the existing design system
 - [ ] 7.4 Show the active provider/model subtly where it aids trust (e.g. in Settings), without cluttering chat
+- [ ] 7.5 **Memory/embedding section (read-only)**: show the pinned embedding model + dimension, with a short plain-English note that it is fixed *on purpose* — changing it makes every stored memory unreadable, so it would require re-embedding all stored facts in one deliberate migration. Present as informational, **not** a picker
 
 ## 8. Tests (no network in CI)
 
