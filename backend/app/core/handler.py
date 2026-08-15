@@ -14,13 +14,14 @@ import uuid
 from collections.abc import AsyncIterator
 
 from fastapi.concurrency import run_in_threadpool
-from openai import RateLimitError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core import composer, llm, memory, tools
+from app.core.providers.base import BillingError, RateLimitError
 from app.db.models import ChatSession, Message, User
+from app.services import user_settings
 
 log = logging.getLogger(__name__)
 
@@ -32,8 +33,19 @@ _bg_tasks: set[asyncio.Task] = set()
 
 
 def _user_error(exc: Exception) -> str:
-    """Map a provider exception to a safe, friendly message. Full detail is logged
-    server-side; the raw provider text is never sent to the client."""
+    """Map a provider exception to a safe, friendly message describing the *cause*.
+    Full detail is logged server-side; raw provider text is never sent to the client.
+
+    Billing and rate limits are reported separately on purpose: providers return the
+    same status code for both, and calling an unpaid balance a "rate limit" sends you
+    hunting for a limit that doesn't exist.
+    """
+    if isinstance(exc, BillingError):
+        return (
+            "The model provider rejected the request — this usually means a billing or "
+            "quota problem on the provider account, not a temporary limit. "
+            "Check the provider's billing/credits."
+        )
     if isinstance(exc, RateLimitError):
         return "I've hit the model's rate limit for now — please try again in a little while."
     return "Something went wrong reaching the model. Please try again."
@@ -54,8 +66,14 @@ def _title_from(text: str) -> str:
 
 
 def _assistant_tool_message(content: str, tool_calls: list[dict]) -> dict:
-    """The assistant turn that requested tools, in OpenAI format, appended to the
-    running messages so the model sees what it called alongside the results."""
+    """The assistant turn that requested tools, appended to the running messages so the
+    model sees what it called alongside the results.
+
+    `_provider_raw` carries the provider's own representation of that turn when it has
+    one (Gemini attaches a `thought_signature` to each call that must come back
+    unchanged, or the follow-up turn is rejected). Providers that don't need it ignore
+    the field.
+    """
     return {
         "role": "assistant",
         "content": content or None,
@@ -67,6 +85,7 @@ def _assistant_tool_message(content: str, tool_calls: list[dict]) -> dict:
             }
             for c in tool_calls
         ],
+        "_provider_raw": next((c.get("raw") for c in tool_calls if c.get("raw") is not None), None),
     }
 
 
@@ -130,8 +149,14 @@ async def handle_message(
     `reasoning_effort` is the adaptive-reasoning hook: a caller (a channel acting
     on explicit user intent, or a future task like the daily review) may pass a
     specific effort; otherwise chat defaults to `settings.reasoning_effort_chat`.
+
+    The provider and model come from the user's saved settings (falling back to the
+    server defaults). Because that resolution happens here in the one brain, every
+    channel honors the same choice with no channel-specific code.
     """
     effort = reasoning_effort if reasoning_effort is not None else settings.reasoning_effort_chat
+    deep = effort == settings.reasoning_effort_deep
+    provider, model = user_settings.resolve(user, deep=deep)
     text = text or ""
     if len(text) > settings.max_input_chars:
         yield "error", f"That message is too long (max {settings.max_input_chars} characters)."
@@ -158,7 +183,12 @@ async def handle_message(
             round_text: list[str] = []
             tool_calls: list[dict] | None = None
             async for kind, payload in llm.stream_with_tools(
-                messages, tools=tools.TOOLS, usage=usage, reasoning_effort=effort
+                messages,
+                tools=tools.TOOLS,
+                model=model,
+                usage=usage,
+                effort=effort,
+                provider=provider,
             ):
                 if kind == "delta":
                     round_text.append(payload)
@@ -183,7 +213,7 @@ async def handle_message(
             # Hit the round cap while still calling tools: force a final text answer
             # (no tools) so the turn never ends mid-action.
             async for kind, payload in llm.stream_with_tools(
-                messages, tools=None, usage=usage, reasoning_effort=effort
+                messages, tools=None, model=model, usage=usage, effort=effort, provider=provider
             ):
                 if kind == "delta":
                     parts.append(payload)
@@ -195,7 +225,7 @@ async def handle_message(
 
     reply = "".join(parts)
     message_id = await run_in_threadpool(
-        _persist_assistant_turn, db, session_id, reply, settings.model_chat, usage
+        _persist_assistant_turn, db, session_id, reply, f"{provider}/{model}", usage
     )
     yield "done", str(message_id)
 

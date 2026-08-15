@@ -182,7 +182,7 @@ async def _extract(user_text: str, reply_text: str, known: list[str]) -> list[di
             {"role": "user", "content": user_msg},
         ],
         model=settings.model_memory or settings.model_chat,
-        reasoning_effort=settings.reasoning_effort_chat,
+        effort=settings.reasoning_effort_chat,
     )
     return _parse_facts(raw)
 

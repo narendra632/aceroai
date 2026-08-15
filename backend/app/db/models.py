@@ -20,6 +20,11 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(sa.Text)
     telegram_chat_id: Mapped[int | None] = mapped_column(sa.BigInteger, unique=True)
     timezone: Mapped[str] = mapped_column(sa.Text, default="Asia/Kolkata")
+    # Model preferences (migration 003). NULL = use the server's configured default,
+    # so an untouched account behaves exactly as before.
+    llm_provider: Mapped[str | None] = mapped_column(sa.Text)
+    model_chat: Mapped[str | None] = mapped_column(sa.Text)
+    model_deep: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
 
 

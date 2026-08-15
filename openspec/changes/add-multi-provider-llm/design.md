@@ -116,12 +116,38 @@ change; then enable the API, grant the VM role, and deploy. **Rollback** = point
 default provider back and restart (or `git revert`); no data migration to undo, and
 `profile_facts` is untouched because embeddings are pinned.
 
+## Spike findings (task 0, verified live — 11/11 passed)
+
+Run against project `gen-lang-client-0067374696`, `location=global`, ADC + `vertexai=True`.
+Every assumption this design rests on is now **measured, not assumed**:
+
+- **Multi-turn tool calling works, and `thought_signature` is present** on the function
+  call part. Echoing the model's own `Content` back (parts intact) before the function
+  response makes turn 2 succeed — *the exact thing that fails over the OpenAI-compat
+  shim*. This validates choosing native SDKs.
+- **Streaming works**, and **function calls also arrive over the streaming API**, so our
+  `("delta"|"tool_calls")` contract is satisfiable on the Google path.
+- **`client.aio`** (async) works — required, since our stack is async.
+- **Embeddings**: `gemini-embedding-001` returns **768** dims via
+  `EmbedContentConfig(output_dimensionality=768)`. The pinned model stays valid on
+  Agent Platform, so **stored `profile_facts` vectors remain comparable**. (Note: the
+  model-list endpoint advertises `gemini-embedding-2`; `…-001` still resolves, and we
+  deliberately keep it pinned.)
+- **Thinking control**: `ThinkingConfig(thinking_budget=…)` accepted at both 0 and 4096
+  — our chat vs "think harder" intent maps onto a native budget rather than a lossy
+  `reasoning_effort` string.
+- **Billing**: requests succeeded with no `429`, confirming usage flows through **Cloud
+  Billing** (the credit applies) rather than the exhausted prepaid balance.
+- **Models available (23)**, incl. `gemini-3.7-flash`, `gemini-3.6-flash`,
+  `gemini-3.5-flash` (current default), `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`,
+  `gemini-2.5-pro`. Newer flash models than the current default exist — surfaced in the
+  catalog so the user can choose.
+- **Implementation note:** `google-genai` warns about *automatic function calling* on
+  `generate_content*`. We run our **own** tool loop, so the provider MUST disable AFC
+  explicitly (`AutomaticFunctionCallingConfig(disable=True)`) — otherwise the SDK could
+  execute tools behind our back and bypass our guardrails.
+
 ## Open Questions
 
-- **Exact model IDs** available to this project (`gemini-3.5-flash` / `3.1-pro-preview`
-  on Agent Platform) and **`global` vs a regional location** — verified in task 0.
-- **Which OpenAI models** Narendra's key can access, for the catalog defaults.
-- **Adding `google-genai`** — needs Narendra's OK per the project's dependency rule.
-- **Embedding provider going forward:** keep `gemini-embedding-001` (768) as the pinned
-  default — confirm it's reachable via Agent Platform, else keep embeddings on the
-  Developer API until a deliberate re-embed.
+- **Which OpenAI models** Narendra's key can access — resolved when `OPENAI_API_KEY` is
+  configured; the catalog is config-driven so it needs no code change.

@@ -73,10 +73,8 @@ def test_history_endpoint(auth_client):
 def test_reasoning_effort_forwarded(auth_client, monkeypatch):
     captured: dict = {}
 
-    async def recorder(
-        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
-    ):
-        captured["effort"] = reasoning_effort
+    async def recorder(messages, tools=None, model=None, usage=None, effort=None, provider=None):
+        captured["effort"] = effort
         yield "delta", "ok"
 
     monkeypatch.setattr("app.core.llm.stream_with_tools", recorder)
@@ -87,10 +85,8 @@ def test_reasoning_effort_forwarded(auth_client, monkeypatch):
 def test_deep_flag_routes_high_reasoning(auth_client, monkeypatch):
     captured: dict = {}
 
-    async def recorder(
-        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
-    ):
-        captured["effort"] = reasoning_effort
+    async def recorder(messages, tools=None, model=None, usage=None, effort=None, provider=None):
+        captured["effort"] = effort
         yield "delta", "ok"
 
     monkeypatch.setattr("app.core.llm.stream_with_tools", recorder)
@@ -99,9 +95,7 @@ def test_deep_flag_routes_high_reasoning(auth_client, monkeypatch):
 
 
 def test_provider_error_reported_without_leaking(auth_client, monkeypatch):
-    async def boom(
-        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
-    ):
+    async def boom(messages, tools=None, model=None, usage=None, effort=None, provider=None):
         if False:
             yield "delta", ""  # make this an async generator
         raise RuntimeError("SECRET internal provider detail")

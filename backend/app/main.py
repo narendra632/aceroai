@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import auth, chat, journal, tasks
+from app.api import settings as settings_api
 from app.channels import telegram
 from app.config import DEV_JWT_SECRET, settings
 from app.services.errors import Invalid, NotFound
@@ -53,6 +54,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(tasks.router)
 app.include_router(journal.router)
+app.include_router(settings_api.router)
 
 
 # Map domain errors from the service layer to HTTP so routes stay thin. (The
