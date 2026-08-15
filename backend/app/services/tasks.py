@@ -6,13 +6,14 @@ UI and the assistant share one notion of "what's urgent".
 """
 
 import datetime as dt
+import re
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Task
-from app.services.errors import Invalid, NotFound
+from app.services.errors import Duplicate, Invalid, NotFound
 
 ACTIVE_STATUSES = ("todo", "in_progress")
 _VALID_STATUSES = ("todo", "in_progress", "done", "dropped")
@@ -49,6 +50,28 @@ def _validate_priority(priority: int) -> None:
         raise Invalid("priority must be 1 (high), 2 (mid), or 3 (low)")
 
 
+def _normalize(title: str) -> str:
+    """Fold a title to a comparable form: case, punctuation and spacing don't matter."""
+    return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+
+
+def find_duplicate(db: Session, user_id: uuid.UUID, title: str) -> Task | None:
+    """An existing *active* task whose title means the same thing.
+
+    Deliberately conservative — it catches "Pay rent" vs "pay rent!" but not
+    differently-worded tasks. The assistant is the smart layer here (it sees the open
+    list in its context); this is the backstop that stops an obvious silent duplicate
+    when the model slips.
+    """
+    target = _normalize(title)
+    if not target:
+        return None
+    for task in list_tasks(db, user_id):
+        if _normalize(task.title) == target:
+            return task
+    return None
+
+
 def get_task(db: Session, user_id: uuid.UUID, task_id: uuid.UUID) -> Task:
     task = db.get(Task, task_id)
     if task is None or task.user_id != user_id:
@@ -77,11 +100,16 @@ def create_task(
     notes: str | None = None,
     priority: int = 2,
     due_at: dt.datetime | None = None,
+    allow_duplicate: bool = False,
 ) -> Task:
     title = (title or "").strip()
     if not title:
         raise Invalid("a task needs a title")
     _validate_priority(priority)
+    if not allow_duplicate:
+        existing = find_duplicate(db, user_id, title)
+        if existing is not None:
+            raise Duplicate(f"an open task called '{existing.title}' already exists", existing)
     task = Task(user_id=user_id, title=title, notes=notes, priority=priority, due_at=due_at)
     db.add(task)
     db.commit()

@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # Max tool-use rounds the assistant may take in one turn before it must answer
     # with text (guards against a runaway tool loop).
     tools_max_iters: int = 5
+    # How many open tasks are shown to the model each turn, so it can avoid duplicates,
+    # act by id in one step, and surface what's due. Keeps context small on long lists.
+    context_tasks_limit: int = 30
 
     # --- memory (pgvector) ---
     # PINNED ON PURPOSE. Every stored profile_facts vector was produced by this model;

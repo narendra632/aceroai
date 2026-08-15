@@ -168,7 +168,7 @@ async def handle_message(
     # Semantic recall (best-effort): the most relevant facts about the user for
     # this message, injected into context. A failure here never blocks the reply.
     facts = await memory.recall(db, user, text)
-    context = await run_in_threadpool(composer.build_context, db, session_id, facts)
+    context = await run_in_threadpool(composer.build_context, db, session_id, facts, user)
 
     # Bounded tool-use loop (the "one brain" acting): the model may answer directly
     # (streamed text, unchanged for normal chat) or call tools, which we run via the

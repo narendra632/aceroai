@@ -79,6 +79,16 @@
 - [ ] 10.4 **Budget alert** on the billing account so credit exhaustion surfaces early
 - [ ] 10.5 Document rollback (restore default provider + restart)
 
+## 10b. Context awareness + duplicate prevention (folded in)
+
+- [x] 10b.1 `composer`: inject the user's open tasks (ids, due/overdue, priority) into every turn, capped by `context_tasks_limit`; state explicitly when there are none
+- [x] 10b.2 `handler`: pass the user through to `build_context` so awareness works on every channel
+- [x] 10b.3 `services/tasks`: `find_duplicate` (case/punctuation-insensitive) + `create_task` refuses an equivalent **open** task, raising `Duplicate` with the existing row; `allow_duplicate` escape hatch
+- [x] 10b.4 `core/tools`: return the existing task in the tool result so the assistant can point at it; `main.py` maps `Duplicate` → **409**
+- [x] 10b.5 `SOUL.md`: use the visible list, never duplicate, act by id, surface due/overdue work
+- [x] 10b.6 Tests (15): context contents, capping, per-user isolation, overdue flag, completed excluded; duplicate refused/allowed/forced, API 409, tool reports existing
+- [x] 10b.7 Live-verified: "add pay rent" → *"You already have that…"* (no tool call); "hi" → proactively lists what's due tomorrow; "mark rent done" → single `complete_task`
+
 ## 11. Docs
 
 - [ ] 11.1 `backend/README.md`: the provider interface, how to add a provider, ADC (local vs GCE metadata), per-user selection, embedding pinning

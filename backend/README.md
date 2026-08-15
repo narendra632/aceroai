@@ -64,6 +64,15 @@ message ─► handle_message ─► llm.stream_with_tools (messages + tool defs
              └── append result ◄── tools.execute(db, user.id, name, args)
 ```
 
+**Context awareness.** The user's **open tasks are injected into every turn** (with
+ids, due/overdue and priority, capped by `CONTEXT_TASKS_LIMIT`), so the assistant
+isn't blind: it refuses to duplicate work it can already see, acts on a task by id
+in a single step instead of looking it up first, and can surface what's due without
+being asked. As a deterministic backstop, `services/tasks.create_task` refuses an
+equivalent **open** task (case/punctuation-insensitive) and returns the existing one
+— `409` over REST, and a structured `existing` payload to the assistant. Pass
+`allow_duplicate=True` when a second copy is genuinely wanted.
+
 Guardrails: the loop is capped at `TOOLS_MAX_ITERS` (then a forced text answer);
 tools are **user-scoped by construction** (the model never supplies a user id, and
 any record id is verified to belong to the caller); and `tools.execute` never

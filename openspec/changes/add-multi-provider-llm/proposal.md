@@ -52,6 +52,17 @@ capability — no trade.
 - **New dependency: `google-genai`** (Google's official SDK) — **ask Narendra before
   adding**. `openai` is already present.
 
+**Context awareness (folded in after testing revealed the gap):** the assistant could
+call tools but was **blind to what already existed** — it never saw the user's task
+list unless it chose to look it up, so it created duplicates, needed an extra
+round-trip to act on a task, and could never proactively surface something due (a
+prime directive in `SOUL.md` that was therefore unenforceable).
+- The user's **open tasks are injected into every turn** (same pattern as recalled
+  memory facts), with ids so the assistant can act in one step.
+- The task service **refuses an equivalent open task** (case/punctuation-insensitive)
+  and hands back the existing one — a deterministic backstop for when the model slips.
+  `409 Conflict` over REST; a structured `existing` payload for the assistant.
+
 ## Capabilities
 
 ### New Capabilities
@@ -61,9 +72,15 @@ capability — no trade.
   memory remains valid; provider failures are reported honestly.
 
 ### Modified Capabilities
-<!-- None. web-chat, memory, tasks, journal and assistant-tools keep their existing
-     requirements — streaming, semantic recall and multi-turn tool calling must behave
-     identically (or better) on every provider. That is verified, not re-specified. -->
+- `assistant-tools`: the assistant is now **aware of the user's open tasks every turn**,
+  so it acts on what exists instead of duplicating it, acts by id in one step, and can
+  surface due/overdue work unprompted.
+- `tasks`: creating a task that **duplicates an open one is refused**, identifying the
+  existing task (overridable when a second copy is genuinely wanted).
+
+<!-- web-chat, memory and journal keep their existing requirements — streaming,
+     semantic recall and multi-turn tool calling must behave identically (or better)
+     on every provider. That is verified, not re-specified. -->
 
 ## Impact
 

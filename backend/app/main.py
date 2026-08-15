@@ -9,7 +9,7 @@ from app.api import auth, chat, journal, tasks
 from app.api import settings as settings_api
 from app.channels import telegram
 from app.config import DEV_JWT_SECRET, settings
-from app.services.errors import Invalid, NotFound
+from app.services.errors import Duplicate, Invalid, NotFound
 
 
 def check_production_config() -> None:
@@ -67,6 +67,11 @@ async def _not_found(request: Request, exc: NotFound) -> JSONResponse:
 @app.exception_handler(Invalid)
 async def _invalid(request: Request, exc: Invalid) -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)})
+
+
+@app.exception_handler(Duplicate)
+async def _duplicate(request: Request, exc: Duplicate) -> JSONResponse:
+    return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc)})
 
 
 @app.get("/health")
