@@ -183,6 +183,30 @@ def test_openai_strips_provider_raw_before_sending():
     assert cleaned == [{"role": "assistant", "content": "x"}]
 
 
+def test_google_groups_parallel_tool_results_into_one_turn():
+    """Regression: asking for two things at once makes Gemini emit two function calls.
+    Gemini then requires the *same number* of response parts in a single following
+    content — separate messages get rejected with INVALID_ARGUMENT."""
+    _, contents = GoogleProvider._split(
+        [
+            {"role": "user", "content": "add two tasks"},
+            {"role": "assistant", "content": None},
+            {"role": "tool", "name": "create_task", "content": '{"ok": true}'},
+            {"role": "tool", "name": "create_task", "content": '{"ok": true}'},
+        ]
+    )
+    responses = [c for c in contents if any(p.function_response for p in c.parts)]
+    assert len(responses) == 1, "parallel tool results must be one content, not many"
+    assert len(responses[0].parts) == 2, "one response part per function call"
+    assert all(p.function_response.name == "create_task" for p in responses[0].parts)
+
+
+def test_google_tool_result_name_is_preserved():
+    """Gemini pairs a response to its call by name, so the name must survive."""
+    _, contents = GoogleProvider._split([{"role": "tool", "name": "list_tasks", "content": "{}"}])
+    assert contents[0].parts[0].function_response.name == "list_tasks"
+
+
 def test_google_translates_messages():
     system, contents = GoogleProvider._split(
         [

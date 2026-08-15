@@ -207,7 +207,13 @@ async def handle_message(
                 else:
                     result = await run_in_threadpool(tools.execute, db, user.id, call["name"], args)
                 messages.append(
-                    {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)}
+                    {
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        # Gemini pairs a response to its call by name, so always send it.
+                        "name": call["name"],
+                        "content": json.dumps(result),
+                    }
                 )
         else:
             # Hit the round cap while still calling tools: force a final text answer

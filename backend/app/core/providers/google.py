@@ -96,11 +96,41 @@ class GoogleProvider:
     @staticmethod
     def _split(messages: list[dict]) -> tuple[str, list[types.Content]]:
         """Return (system_instruction, contents). Gemini takes system prompts in their
-        own field, and uses role "model" where OpenAI says "assistant"."""
+        own field, and uses role "model" where OpenAI says "assistant".
+
+        Tool results need care: OpenAI wants one message per tool result, but Gemini
+        requires the responses for a turn **grouped into a single content**, with as
+        many response parts as that turn had function calls — otherwise it rejects the
+        request with INVALID_ARGUMENT. So consecutive tool messages are merged here.
+        """
         system_parts: list[str] = []
         contents: list[types.Content] = []
+        pending: list[types.Part] = []  # function responses awaiting a flush
+
+        def flush() -> None:
+            if pending:
+                contents.append(types.Content(role="user", parts=list(pending)))
+                pending.clear()
+
         for m in messages:
             role = m.get("role")
+            if role == "tool":
+                try:
+                    payload = json.loads(m.get("content") or "{}")
+                except json.JSONDecodeError:
+                    payload = {"result": m.get("content")}
+                if not isinstance(payload, dict):
+                    payload = {"result": payload}
+                # The name must match the function call it answers — Gemini pairs them
+                # by name, not by position.
+                pending.append(
+                    types.Part.from_function_response(
+                        name=m.get("name") or "tool", response=payload
+                    )
+                )
+                continue
+
+            flush()  # any other role ends the run of tool results
             if role == "system":
                 if m.get("content"):
                     system_parts.append(str(m["content"]))
@@ -118,23 +148,7 @@ class GoogleProvider:
                     contents.append(
                         types.Content(role="model", parts=[types.Part(text=str(m["content"]))])
                     )
-            elif role == "tool":
-                try:
-                    payload = json.loads(m.get("content") or "{}")
-                except json.JSONDecodeError:
-                    payload = {"result": m.get("content")}
-                if not isinstance(payload, dict):
-                    payload = {"result": payload}
-                contents.append(
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_function_response(
-                                name=m.get("name") or "tool", response=payload
-                            )
-                        ],
-                    )
-                )
+        flush()
         return "\n\n".join(system_parts), contents
 
     def _config(
