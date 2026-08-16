@@ -1,55 +1,27 @@
-"""Thin async wrapper over the openai SDK, pointed at any OpenAI-compatible
-endpoint via settings (Gemini by default). Provider swap = change .env only.
+"""Facade over the model providers.
 
-`stream_chat` / `complete` / `embed` are module-level so tests can monkeypatch
-them with fakes — no network, no cost in CI.
+Callers (the handler's tool loop, memory) use these four functions and never know which
+provider served a request. Each provider lives in `app/core/providers/` and speaks its
+own **native** SDK, so nothing is degraded by a compatibility shim.
 
-Robustness: transient provider errors (timeout, connection, rate-limit) are
-retried with a short backoff. For streaming, a retry only happens *before* the
-first token is yielded, so retries never duplicate already-streamed output.
+Robustness lives here, once, for every provider: transient failures (timeout,
+connection, overload) are retried with a short backoff. For streaming, a retry only
+happens *before* the first token is yielded, so retries never duplicate output.
 """
 
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    AsyncOpenAI,
-    InternalServerError,
-    RateLimitError,
-)
-
 from app.config import settings
+from app.core.providers import get_provider
+from app.core.providers.base import TransientError
 
 log = logging.getLogger(__name__)
 
-# gemini-3.x flash is a thinking model: it spends tokens on reasoning before any
-# visible text, so give the reply generous headroom (see verify_llm history).
-DEFAULT_MAX_TOKENS = 8192
 
-# Errors worth retrying: transient network/quota/overload (e.g. Gemini 503
-# "high demand"), not bad requests.
-_RETRYABLE = (APITimeoutError, APIConnectionError, RateLimitError, InternalServerError)
-
-_client: AsyncOpenAI | None = None
-
-
-def _get_client() -> AsyncOpenAI:
-    # Built lazily so importing this module never requires a key — CI, tests,
-    # and a not-yet-configured checkout can still import the app. The SDK raises
-    # if constructed with an empty api_key.
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
-    return _client
-
-
-def _reasoning_kwargs(reasoning_effort: str | None) -> dict:
-    # Include the knob only when set, so providers/models that don't support it
-    # are unaffected (keeps the provider swap clean).
-    return {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+def _resolve(provider: str | None) -> str:
+    return provider or settings.llm_provider
 
 
 def _backoff(attempt: int) -> float:
@@ -57,11 +29,11 @@ def _backoff(attempt: int) -> float:
 
 
 async def _with_retry[T](run: Callable[[], Awaitable[T]]) -> T:
-    """Run a non-streaming coroutine factory, retrying transient errors."""
+    """Run a non-streaming coroutine factory, retrying transient provider errors."""
     for attempt in range(settings.llm_max_retries + 1):
         try:
             return await run()
-        except _RETRYABLE as exc:
+        except TransientError as exc:
             if attempt == settings.llm_max_retries:
                 raise
             log.warning("llm transient error (attempt %d): %s; retrying", attempt + 1, exc)
@@ -69,167 +41,61 @@ async def _with_retry[T](run: Callable[[], Awaitable[T]]) -> T:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-async def stream_chat(
-    messages: list[dict],
-    model: str | None = None,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
-    usage: dict | None = None,
-    reasoning_effort: str | None = None,
-) -> AsyncIterator[str]:
-    """Yield assistant text deltas. If `usage` dict is passed, it is populated
-    with token counts when the provider reports them (Gemini may omit them)."""
-    attempts = settings.llm_max_retries + 1
-    for attempt in range(attempts):
-        produced = False
-        try:
-            stream = await _get_client().chat.completions.create(
-                model=model or settings.model_chat,
-                messages=messages,
-                max_tokens=max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-                **_reasoning_kwargs(reasoning_effort),
-            )
-            async for chunk in stream:
-                if usage is not None and getattr(chunk, "usage", None):
-                    usage["tokens_in"] = chunk.usage.prompt_tokens
-                    usage["tokens_out"] = chunk.usage.completion_tokens
-                for choice in chunk.choices:
-                    delta = choice.delta.content if choice.delta else None
-                    if delta:
-                        produced = True
-                        yield delta
-            return
-        except _RETRYABLE as exc:
-            # Never retry once tokens were streamed (would duplicate output).
-            if produced or attempt == attempts - 1:
-                raise
-            log.warning("stream_chat transient error (attempt %d): %s; retrying", attempt + 1, exc)
-            await asyncio.sleep(_backoff(attempt))
-
-
-def _accumulate_tool_call(acc: dict[int, dict], fragment) -> None:
-    """Merge a streamed tool-call fragment into the per-index accumulator. The SDK
-    streams a tool call across chunks: an id/name once, then argument text in pieces."""
-    slot = acc.setdefault(fragment.index, {"id": None, "name": None, "arguments": ""})
-    if fragment.id:
-        slot["id"] = fragment.id
-    if fragment.function:
-        if fragment.function.name:
-            slot["name"] = fragment.function.name
-        if fragment.function.arguments:
-            slot["arguments"] += fragment.function.arguments
-
-
-def _finalize_tool_calls(acc: dict[int, dict]) -> list[dict]:
-    # In call order, keeping only complete calls (those that named a function);
-    # synthesize an id if the provider omitted one and default empty args to "{}".
-    calls: list[dict] = []
-    for i in sorted(acc):
-        slot = acc[i]
-        if not slot["name"]:
-            continue
-        calls.append(
-            {
-                "id": slot["id"] or f"call_{i}",
-                "name": slot["name"],
-                "arguments": slot["arguments"] or "{}",
-            }
-        )
-    return calls
-
-
 async def stream_with_tools(
     messages: list[dict],
     tools: list[dict] | None = None,
     model: str | None = None,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
     usage: dict | None = None,
-    reasoning_effort: str | None = None,
+    effort: str | None = None,
+    provider: str | None = None,
 ) -> AsyncIterator[tuple[str, object]]:
-    """Stream one model turn as `(kind, payload)` events. `kind` is either:
+    """Stream one model turn as `(kind, payload)` events:
 
-    - `"delta"` → `payload` is a text chunk of the assistant's visible reply;
-    - `"tool_calls"` → `payload` is a `list[dict]` of `{id, name, arguments}` the
-      model wants executed (yielded once, at the end of the turn).
+    - `("delta", str)` — a chunk of visible assistant text
+    - `("tool_calls", list)` — tools to run, yielded once at the end of the turn
 
-    A plain chat turn yields only `"delta"` events (same behavior as `stream_chat`).
-    When `tools` is None, no tool calls are ever produced (used to force a final
-    text answer). Retries transient errors only before anything is produced.
+    A plain chat turn yields only `"delta"` events. Passing `tools=None` forces a text
+    answer (used to close out a capped tool loop).
     """
-    tool_kwargs = {"tools": tools} if tools else {}
+    impl = get_provider(_resolve(provider))
     attempts = settings.llm_max_retries + 1
     for attempt in range(attempts):
         produced = False
-        acc: dict[int, dict] = {}
         try:
-            stream = await _get_client().chat.completions.create(
-                model=model or settings.model_chat,
-                messages=messages,
-                max_tokens=max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-                **tool_kwargs,
-                **_reasoning_kwargs(reasoning_effort),
-            )
-            async for chunk in stream:
-                if usage is not None and getattr(chunk, "usage", None):
-                    usage["tokens_in"] = chunk.usage.prompt_tokens
-                    usage["tokens_out"] = chunk.usage.completion_tokens
-                for choice in chunk.choices:
-                    delta = choice.delta
-                    if not delta:
-                        continue
-                    if delta.content:
-                        produced = True
-                        yield "delta", delta.content
-                    if getattr(delta, "tool_calls", None):
-                        produced = True
-                        for frag in delta.tool_calls:
-                            _accumulate_tool_call(acc, frag)
-            calls = _finalize_tool_calls(acc)
-            if calls:
-                yield "tool_calls", calls
+            async for kind, payload in impl.stream_with_tools(
+                messages, tools=tools, model=model, effort=effort, usage=usage
+            ):
+                produced = True
+                yield kind, payload
             return
-        except _RETRYABLE as exc:
+        except TransientError as exc:
+            # Never retry once output was produced (it would duplicate).
             if produced or attempt == attempts - 1:
                 raise
-            log.warning(
-                "stream_with_tools transient error (attempt %d): %s; retrying", attempt + 1, exc
-            )
+            log.warning("stream transient error (attempt %d): %s; retrying", attempt + 1, exc)
             await asyncio.sleep(_backoff(attempt))
 
 
 async def complete(
     messages: list[dict],
     model: str | None = None,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
-    reasoning_effort: str | None = None,
+    effort: str | None = None,
+    provider: str | None = None,
 ) -> str:
-    """Non-streaming completion — returns the full text. Used for structured
-    background work (fact extraction) where streaming adds nothing."""
-
-    async def _run() -> str:
-        resp = await _get_client().chat.completions.create(
-            model=model or settings.model_chat,
-            messages=messages,
-            max_tokens=max_tokens,
-            **_reasoning_kwargs(reasoning_effort),
-        )
-        return resp.choices[0].message.content or ""
-
-    return await _with_retry(_run)
+    """Non-streaming completion — used for structured background work (fact extraction)."""
+    impl = get_provider(_resolve(provider))
+    return await _with_retry(lambda: impl.complete(messages, model=model, effort=effort))
 
 
 async def embed(texts: list[str]) -> list[list[float]]:
-    """Embed texts (order preserved) via the provider's /embeddings endpoint."""
+    """Embed texts (order preserved).
 
-    async def _run() -> list[list[float]]:
-        resp = await _get_client().embeddings.create(
-            model=settings.embed_model,
-            input=texts,
-            dimensions=settings.embed_dim,
-        )
-        return [d.embedding for d in resp.data]
-
-    return await _with_retry(_run)
+    Deliberately ignores the user's chat-provider choice: every stored `profile_facts`
+    vector came from `settings.embed_model`, and vectors from a different model are not
+    comparable (same length, different meaning), so recall would silently return
+    nonsense. Changing the embedding model is a deliberate re-embed migration.
+    """
+    impl = get_provider(settings.embed_provider)
+    return await _with_retry(
+        lambda: impl.embed(texts, model=settings.embed_model, dim=settings.embed_dim)
+    )

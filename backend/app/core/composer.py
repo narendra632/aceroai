@@ -14,7 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import Message
+from app.db.models import Message, User
+from app.services import tasks as tasks_svc
 
 # backend/app/core/composer.py -> parents[3] is the repo root.
 _DEFAULT_SOUL_PATH = Path(__file__).resolve().parents[3] / "docs" / "SOUL.md"
@@ -43,6 +44,41 @@ def _now_block() -> str:
     return f"Current date and time: {now:%A %Y-%m-%d %H:%M} ({settings.app_timezone})."
 
 
+_PRIORITY_WORD = {1: "high", 2: "medium", 3: "low"}
+
+
+def _tasks_block(db: Session, user: User) -> str | None:
+    """The user's open tasks, so the assistant is *aware* rather than blind.
+
+    Without this the model cannot see what already exists, so it creates duplicates,
+    needs an extra round-trip to act on a task it was just told about, and can never
+    proactively surface something that's due — which is a prime directive in SOUL.md.
+    Ids are included so it can complete/update in a single step; the persona tells it
+    not to read ids aloud.
+    """
+    rows = tasks_svc.list_tasks(db, user.id)[: settings.context_tasks_limit]
+    if not rows:
+        return "The user has no open tasks right now."
+    now = dt.datetime.now(ZoneInfo(settings.app_timezone))
+    lines = []
+    for t in rows:
+        bits = [f"[id {t.id}] {t.title}"]
+        if t.due_at is not None:
+            due = t.due_at.astimezone(ZoneInfo(settings.app_timezone))
+            overdue = " OVERDUE" if due < now else ""
+            bits.append(f"due {due:%a %d %b %H:%M}{overdue}")
+        bits.append(f"{_PRIORITY_WORD.get(t.priority, 'medium')} priority")
+        if t.status != "todo":
+            bits.append(t.status)
+        lines.append("- " + " — ".join(bits))
+    return (
+        "The user's open tasks, most urgent first. Use these instead of guessing: do "
+        "not create a task that is already here (say it exists, or update it), and act "
+        "on the right one by its id. Mention anything due or overdue when it is "
+        "relevant.\n" + "\n".join(lines)
+    )
+
+
 def _facts_block(facts: list[str]) -> str:
     lines = "\n".join(f"- {f}" for f in facts)
     return (
@@ -51,12 +87,18 @@ def _facts_block(facts: list[str]) -> str:
     )
 
 
-def build_context(db: Session, session_id: uuid.UUID, facts: list[str] | None = None) -> list[dict]:
-    """Assemble model input: SOUL.md persona, then the semantically-recalled
-    profile facts (when any), then the session's recent messages in order.
+def build_context(
+    db: Session,
+    session_id: uuid.UUID,
+    facts: list[str] | None = None,
+    user: User | None = None,
+) -> list[dict]:
+    """Assemble model input: SOUL.md persona, the current date/time, the user's open
+    tasks, the semantically-recalled profile facts (when any), then the session's
+    recent messages in order.
 
-    `facts` are recalled by the handler (an async embedding step) and passed in,
-    so this stays a pure, synchronous DB read.
+    `facts` are recalled by the handler (an async embedding step) and passed in;
+    tasks are a plain DB read, so they are loaded here. This stays fully synchronous.
     """
     rows = (
         db.execute(
@@ -72,6 +114,10 @@ def build_context(db: Session, session_id: uuid.UUID, facts: list[str] | None = 
         {"role": "system", "content": _read_persona()},
         {"role": "system", "content": _now_block()},
     ]
+    if user is not None:
+        block = _tasks_block(db, user)
+        if block:
+            context.append({"role": "system", "content": block})
     if facts:
         context.append({"role": "system", "content": _facts_block(facts)})
     for m in reversed(rows):

@@ -25,7 +25,7 @@ from app.config import settings
 from app.db.models import JournalEntry, Task
 from app.services import journal as journal_svc
 from app.services import tasks as tasks_svc
-from app.services.errors import Invalid, NotFound
+from app.services.errors import Duplicate, Invalid, NotFound
 
 log = logging.getLogger(__name__)
 
@@ -299,6 +299,11 @@ def execute(db: Session, user_id: uuid.UUID, name: str, arguments: dict) -> dict
         return {"ok": False, "error": f"unknown tool '{name}'"}
     try:
         return {"ok": True, "result": fn(db, user_id, arguments or {})}
+    except Duplicate as exc:
+        # Hand the existing record back so the assistant can point at it ("you already
+        # have that one") instead of creating a second copy.
+        existing = _task_summary(exc.existing) if isinstance(exc.existing, Task) else None
+        return {"ok": False, "error": str(exc), "existing": existing}
     except (Invalid, NotFound) as exc:
         return {"ok": False, "error": str(exc)}
     except Exception:  # noqa: BLE001 - a tool must never crash the chat turn

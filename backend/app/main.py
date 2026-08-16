@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -6,9 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import auth, chat, journal, tasks
+from app.api import settings as settings_api
 from app.channels import telegram
 from app.config import DEV_JWT_SECRET, settings
-from app.services.errors import Invalid, NotFound
+from app.services.errors import Duplicate, Invalid, NotFound
+
+
+def configure_logging() -> None:
+    """Make our own logs visible without touching uvicorn's. The per-turn timing line
+    (logger "aceroai.timing") is how latency is verified against a stopwatch."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.getLogger("aceroai.timing").setLevel(logging.INFO)
 
 
 def check_production_config() -> None:
@@ -22,6 +31,7 @@ def check_production_config() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     check_production_config()
     # Telegram poller runs only when a token is configured (Feature 3: scheduler here too)
     poller = None
@@ -53,6 +63,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(tasks.router)
 app.include_router(journal.router)
+app.include_router(settings_api.router)
 
 
 # Map domain errors from the service layer to HTTP so routes stay thin. (The
@@ -65,6 +76,11 @@ async def _not_found(request: Request, exc: NotFound) -> JSONResponse:
 @app.exception_handler(Invalid)
 async def _invalid(request: Request, exc: Invalid) -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)})
+
+
+@app.exception_handler(Duplicate)
+async def _duplicate(request: Request, exc: Duplicate) -> JSONResponse:
+    return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc)})
 
 
 @app.get("/health")

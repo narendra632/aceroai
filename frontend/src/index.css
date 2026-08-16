@@ -97,6 +97,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* scrollable areas that shouldn't show a bar (session list) — still scrolls */
+.no-scrollbar {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* old Edge */
+}
+.no-scrollbar::-webkit-scrollbar { /* Chrome/Safari */
+  display: none;
+}
+
 /* streaming caret */
 @keyframes blink {
   0%, 100% { opacity: 1; }

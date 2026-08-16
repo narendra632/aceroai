@@ -93,3 +93,30 @@ class JournalOut(BaseModel):
     tags: list[str]
     channel: str
     created_at: dt.datetime
+
+
+# --- settings ---
+
+
+class SettingsUpdate(BaseModel):
+    provider: str | None = None
+    model_chat: str | None = None
+    model_deep: str | None = None
+
+
+class EmbeddingInfo(BaseModel):
+    provider: str
+    model: str
+    dimensions: int
+    pinned: bool
+    note: str
+
+
+class SettingsOut(BaseModel):
+    provider: str
+    model_chat: str
+    model_deep: str
+    available_providers: list[str]
+    model_catalog: dict[str, list[str]]
+    defaults: dict[str, str]
+    embedding: EmbeddingInfo

@@ -215,8 +215,8 @@ diffs with ruff+pytest after; ask when unsure.
 
 **Phase 0**, **Feature 1** (web chat), **Feature 2** (Telegram),
 **cross-session memory + adaptive reasoning** (2026-07-31), **hosting +
-CI/CD** (2026-08-03), and **tasks + journal with assistant tools** (2026-08-03)
-are complete.
+CI/CD** (2026-08-03), **tasks + journal with assistant tools** (2026-08-03), and the
+**multi-provider LLM layer + Settings** (2026-08-16) are complete.
 Feature 1: `core/llm` + `core/composer` + `core/handler` (the one brain),
 JWT-cookie auth, SSE streaming chat, Claude-inspired multi-session React UI
 (shadcn/ui, markdown, smooth streaming, light/dark). Feature 2: a thin
@@ -225,6 +225,17 @@ Memory: `core/memory.py` extracts durable facts, embeds them
 (`profile_facts.embedding` via pgvector/HNSW, migration 002), and semantically
 recalls the most relevant into every session; reasoning effort is chosen
 per request (web "think harder" toggle + Telegram `/think` + a task-routing hook).
+Model providers: `core/llm.py` is a facade over `core/providers/`, where each provider
+uses its **own native SDK** — `google-genai` against **Agent Platform (Vertex)** with
+ADC (billed via Cloud Billing, so Cloud credits apply) and the `openai` SDK for OpenAI.
+Native rather than the OpenAI-compat shim because Gemini's per-call `thought_signature`
+has nowhere to live in the OpenAI schema, which breaks multi-turn tool calls. Provider
+and models are **per user** (migration 003, chosen in Settings) and resolved in the one
+brain, so Telegram inherits them. **Embeddings are pinned** independently of that
+choice — vectors from different models aren't comparable, so switching would silently
+corrupt memory recall. Provider errors are classified by cause, so a billing failure is
+never reported as a rate limit.
+
 Tasks & journal: a shared service layer (`app/services/`) is the single source of
 truth for both the REST API (`/api/tasks`, `/api/journal`) and the assistant's
 **tools** (`app/core/tools.py`). `handle_message` runs a bounded, user-scoped,

@@ -82,20 +82,11 @@ def fake_embed_vec(text: str) -> list[float]:
 
 @pytest.fixture(autouse=True)
 def fake_llm(monkeypatch):
-    async def _fake_stream(
-        messages, model=None, max_tokens=8192, usage=None, reasoning_effort=None
-    ):
-        if usage is not None:
-            usage["tokens_in"] = 5
-            usage["tokens_out"] = 3
-        for tok in ["Hello", ", ", "there", "."]:
-            yield tok
-
     # The handler drives chat through `stream_with_tools`, which yields
     # (kind, payload) events. The default fake never calls tools — it just streams
     # the same "Hello, there." reply. Tool-loop tests override this per test.
     async def _fake_stream_with_tools(
-        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
+        messages, tools=None, model=None, usage=None, effort=None, provider=None
     ):
         if usage is not None:
             usage["tokens_in"] = 5
@@ -106,10 +97,9 @@ def fake_llm(monkeypatch):
     async def _fake_embed(texts):
         return [fake_embed_vec(t) for t in texts]
 
-    async def _fake_complete(messages, model=None, max_tokens=8192, reasoning_effort=None):
+    async def _fake_complete(messages, model=None, effort=None, provider=None):
         return "[]"  # no facts by default; memory tests override this
 
-    monkeypatch.setattr("app.core.llm.stream_chat", _fake_stream)
     monkeypatch.setattr("app.core.llm.stream_with_tools", _fake_stream_with_tools)
     monkeypatch.setattr("app.core.llm.embed", _fake_embed)
     monkeypatch.setattr("app.core.llm.complete", _fake_complete)

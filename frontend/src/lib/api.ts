@@ -76,6 +76,10 @@ export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
   return r.ok ? r.json() : [];
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  await req(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
+}
+
 // --- tasks ---
 
 export type Task = {
@@ -156,6 +160,47 @@ export async function addJournalEntry(input: JournalInput): Promise<JournalEntry
 
 export async function deleteJournalEntry(id: string): Promise<void> {
   await req(`/api/journal/${id}`, { method: "DELETE" });
+}
+
+// --- settings (provider + models) ---
+
+export type EmbeddingInfo = {
+  provider: string;
+  model: string;
+  dimensions: number;
+  pinned: boolean;
+  note: string;
+};
+
+export type Settings = {
+  provider: string;
+  model_chat: string;
+  model_deep: string;
+  available_providers: string[];
+  model_catalog: Record<string, string[]>;
+  defaults: Record<string, string>;
+  embedding: EmbeddingInfo;
+};
+
+export type SettingsUpdate = {
+  provider?: string;
+  model_chat?: string;
+  model_deep?: string;
+};
+
+export async function getSettings(): Promise<Settings> {
+  const r = await req("/api/settings");
+  if (!r.ok) throw new Error("could not load settings");
+  return r.json();
+}
+
+export async function updateSettings(patch: SettingsUpdate): Promise<Settings> {
+  const r = await req("/api/settings", { method: "PATCH", body: JSON.stringify(patch) });
+  if (!r.ok) {
+    const detail = await r.json().catch(() => null);
+    throw new Error(detail?.detail ?? "could not save settings");
+  }
+  return r.json();
 }
 
 function parseFrame(frame: string): ChatEvent | null {

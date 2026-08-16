@@ -10,3 +10,15 @@ class NotFound(Exception):
 
 class Invalid(Exception):
     """The requested change is not valid (bad field value, empty content, ...)."""
+
+
+class Duplicate(Exception):
+    """The record would duplicate one that already exists.
+
+    Carries the existing record so the caller can point at it — the assistant should
+    say "you already have that one" rather than silently creating a second copy.
+    """
+
+    def __init__(self, message: str, existing=None) -> None:
+        super().__init__(message)
+        self.existing = existing

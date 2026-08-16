@@ -15,9 +15,7 @@ def _scripted(*turns):
     next turn (a list of (kind, payload) events); the final turn repeats."""
     state = {"i": 0}
 
-    async def fake(
-        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
-    ):
+    async def fake(messages, tools=None, model=None, usage=None, effort=None, provider=None):
         turn = turns[min(state["i"], len(turns) - 1)]
         state["i"] += 1
         for kind, payload in turn:
@@ -102,9 +100,7 @@ def test_tool_cannot_touch_other_users_task(auth_client, db, user, other_user, m
 def test_tool_loop_is_bounded(auth_client, monkeypatch):
     monkeypatch.setattr(settings, "tools_max_iters", 3)
 
-    async def always_tool(
-        messages, tools=None, model=None, max_tokens=8192, usage=None, reasoning_effort=None
-    ):
+    async def always_tool(messages, tools=None, model=None, usage=None, effort=None, provider=None):
         # never answers with text — would loop forever if unbounded
         yield "tool_calls", [_call("c", "list_tasks", {})]
 

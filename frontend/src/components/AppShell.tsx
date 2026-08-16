@@ -9,6 +9,7 @@ import Composer from "./Composer";
 import JournalView from "./JournalView";
 import MessageList from "./MessageList";
 import type { UIMessage } from "./MessageBubble";
+import SettingsView from "./SettingsView";
 import Sidebar, { type View } from "./Sidebar";
 import TasksView from "./TasksView";
 
@@ -43,6 +44,16 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     setCurrentId(id);
     const msgs = await api.getMessages(id);
     setMessages(msgs.map((m) => ({ role: m.role as UIMessage["role"], content: m.content })));
+  }
+
+  async function deleteSession(id: string) {
+    await api.deleteSession(id);
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (id === currentId) {
+      // the open conversation was deleted — fall back to a blank one
+      setCurrentId(null);
+      setMessages([]);
+    }
   }
 
   function newChat() {
@@ -114,7 +125,12 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
   }
 
   const streaming = busy ? { thinking, text: reveal.text, label: working ?? undefined } : null;
-  const title = view === "chat" ? "aceroai" : view === "tasks" ? "Tasks" : "Journal";
+  const TITLES: Record<View, string> = {
+    chat: "aceroai",
+    tasks: "Tasks",
+    journal: "Journal",
+    settings: "Settings",
+  };
 
   return (
     <div className="flex h-full">
@@ -126,6 +142,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
         open={sidebarOpen}
         onNavigate={navigate}
         onSelect={openSession}
+        onDelete={deleteSession}
         onNewChat={newChat}
         onClose={() => setSidebarOpen(false)}
         onLogout={onLogout}
@@ -141,7 +158,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           >
             <Menu />
           </Button>
-          <span className="font-semibold tracking-tight">{title}</span>
+          <span className="font-semibold tracking-tight">{TITLES[view]}</span>
         </header>
 
         {view === "chat" ? (
@@ -151,8 +168,10 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           </>
         ) : view === "tasks" ? (
           <TasksView />
-        ) : (
+        ) : view === "journal" ? (
           <JournalView />
+        ) : (
+          <SettingsView />
         )}
       </div>
     </div>
