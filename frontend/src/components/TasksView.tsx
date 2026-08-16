@@ -149,13 +149,21 @@ export default function TasksView() {
     });
   }
 
+  /** Does this task still belong on the tab currently being viewed? */
+  function belongsHere(task: Task): boolean {
+    return tab === "done" ? task.status === "done" : task.status !== "done" && task.status !== "dropped";
+  }
+
   async function save(id: string, patch: Partial<Task>) {
     const updated = await api.updateTask(id, patch);
-    // A status change can move the task out of this tab entirely.
-    if (tab === "active" && (updated.status === "done" || updated.status === "dropped")) {
-      list.setItems((items) => items.filter((t) => t.id !== id));
-    } else {
+    // A status change can move a task off this tab in EITHER direction — marking one
+    // done removes it from Active, and re-opening a finished one removes it from Done.
+    // Handling only the first direction left a re-opened task sitting on Done until
+    // you switched tabs and back.
+    if (belongsHere(updated)) {
       list.replace((t) => t.id === id, updated);
+    } else {
+      list.setItems((items) => items.filter((t) => t.id !== id));
     }
     toast.success("Task updated");
   }

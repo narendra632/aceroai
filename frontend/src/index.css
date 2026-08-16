@@ -84,6 +84,17 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Tell the browser which theme its OWN widgets should follow. Without this, native
+   controls keep their light-mode chrome in dark mode — most visibly the <input
+   type="time"> clock icon, which renders as a near-black glyph on a dark field.
+   Also fixes scrollbars and native focus rings. */
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {
