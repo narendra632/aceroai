@@ -246,9 +246,17 @@ GOOGLE_CLOUD_PROJECT=<your project id>
 GOOGLE_CLOUD_LOCATION=global
 MODEL_CHAT=gemini-3.5-flash
 MODEL_HEAVY=gemini-3.1-pro-preview
-# OPENAI_API_KEY=            # optional — set it to offer OpenAI in Settings too
+EMBED_LOCATION=us-central1     # nearest region to the VM — NOT "global" (see below)
+# OPENAI_API_KEY=              # optional — set it to offer OpenAI in Settings too
 ```
 `LLM_API_KEY` is no longer needed for Google.
+
+> ⚠ **`EMBED_LOCATION` matters a lot.** On the `global` endpoint an embedding measured
+> **~12 s** once the connection went cold — which is every real message — versus
+> ~1.8 s from `us-central1`. Vectors are identical across regions (verified cosine
+> 1.000000), so this is pure latency. Pick the region nearest **the VM**: the Oregon
+> VM wants `us-central1`; a laptop in India wants `asia-south1`. Full measurements in
+> [`REQUEST-ANATOMY.md`](REQUEST-ANATOMY.md).
 
 **Verify from the VM** after `docker compose ... up -d`:
 ```bash

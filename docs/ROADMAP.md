@@ -48,6 +48,18 @@
 
 ## Future considerations (not scheduled)
 
+- **Further latency work on memory recall.** After moving embeddings off the `global`
+  endpoint a turn is ~2.9 s, of which the embedding is still the largest single piece
+  (~1.8 s from Oregon, ~0.5 s from Mumbai). Ideas, roughly in order of value-for-effort
+  (see [`REQUEST-ANATOMY.md`](REQUEST-ANATOMY.md) for the measurements):
+  1. **Skip recall for trivial messages** ("ok", "thanks", one-word replies) — saves the
+     whole embedding on those turns for no loss of usefulness.
+  2. **Cache embeddings** of repeated/near-identical queries.
+  3. **Benchmark smaller/faster embedding models** against the current one for both
+     latency *and* recall quality — ⚠ changing the model invalidates every stored
+     vector, so it requires a deliberate re-embed migration of `profile_facts`.
+  4. **Trim the fixed token floor** (persona + tool schemas are re-sent every turn).
+
 - **Public / multi-user app** — Narendra may later open this up to other users.
   If so, the auth and user model (currently deliberately single-user: one seeded
   user, one Telegram allowlist) will need rework: real signup, per-user isolation,

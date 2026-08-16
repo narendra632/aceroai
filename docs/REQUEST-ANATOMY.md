@@ -159,6 +159,28 @@ not the app.
 
 ---
 
+### Region matters — pick the one nearest the *server*
+
+Same model, same 768 dims, measured from a laptop in India (6 s gaps between calls):
+
+| `EMBED_LOCATION` | latency |
+|---|---|
+| `global` | ~12,000 ms |
+| `us-central1` (Iowa) | ~1,771 ms |
+| `asia-south1` (Mumbai) | **~486 ms** |
+| `asia-southeast1` (Singapore) | ~459 ms |
+
+Vectors identical in every region (cosine **1.000000** against `us-central1`).
+
+So the remaining latency after the `global` fix really was **distance**. But the
+distance that counts is **server → region**, not user → region:
+
+- **Local dev in India** → `EMBED_LOCATION=asia-south1` (~486 ms)
+- **Production VM in `us-west1` (Oregon)** → `EMBED_LOCATION=us-central1`
+
+Setting Mumbai on the Oregon VM would make production *slower*. Hence it is per-environment
+config, defaulting to `us-central1` (which suits the deployed server).
+
 ## 6. Where the remaining time goes (honest assessment)
 
 At ~2.9 s, the split is roughly **60 % embedding, 35 % model, <5 % us**.

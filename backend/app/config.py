@@ -62,8 +62,12 @@ class Settings(BaseSettings):
     embed_dim: int = 768  # matches the profile_facts.embedding vector column
     # Embeddings are served from a REGION, not the "global" endpoint: measured, global
     # takes ~12s per embedding once the connection goes cold (i.e. every real message)
-    # while us-central1 takes ~0.5-2s. Verified the vectors are identical across
-    # regions (cosine 1.000000), so this changes latency only — never stored meaning.
+    # while a region takes ~0.5-2s. Vectors are identical across regions (verified
+    # cosine 1.000000), so this changes latency only — never stored meaning.
+    #
+    # Pick the region nearest the SERVER, not the user: from the Oregon VM that is
+    # us-central1 (~1.8s); developing from India, asia-south1 is ~486ms. Override
+    # EMBED_LOCATION per environment. See docs/REQUEST-ANATOMY.md.
     embed_location: str = "us-central1"
     memory_recall_k: int = 12  # max relevant facts injected per message
     # Hard ceiling on recall. Recall is best-effort by design, so if the embedding call
