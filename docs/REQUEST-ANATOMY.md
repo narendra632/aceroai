@@ -159,6 +159,28 @@ not the app.
 
 ---
 
+### Production numbers (Oregon VM, measured 2026-08-16)
+
+The deployed backend is **faster than local dev**, because the VM sits close to the
+embedding region while the laptop is a continent away:
+
+| | Laptop (India) | **Production VM (Oregon)** |
+|---|---|---|
+| embedding (`us-central1`) | ~1,775 ms | **~338–364 ms** |
+| pgvector search | ~15–20 ms | **~5–6 ms** |
+| plain turn, total | ~2,910 ms | **~1,909 ms** |
+| plain turn, first token | ~2,870 ms | **~1,350 ms** |
+| tool turn (1 tool, 2 rounds) | — | ~2,668 ms |
+| tool turn (2 parallel tools) | — | ~3,520 ms |
+
+Observations from the live logs:
+- **A tool turn costs ~+1.1–1.3 s** — and that is the *extra model round*, not the tool:
+  `tool:create_task=10ms`, `tool:complete_task=12ms`. Tools are cheap; model calls are not.
+- **Parallel tool calls work**: one turn logged `tool:create_task=10ms tool:create_task=7ms`.
+- **Cold start is real but settles**: the first embedding after a restart took 2,143 ms,
+  then 338 ms; `persist_user` went 224 ms → 8 ms as the DB pool warmed.
+- `tokens_in` drifted 1,021 → 1,371 within a session as history and recalled facts grew.
+
 ### Region matters — pick the one nearest the *server*
 
 Same model, same 768 dims, measured from a laptop in India (6 s gaps between calls):
