@@ -9,8 +9,10 @@ Two guarantees keep this off the critical path:
   no facts and the chat proceeds normally.
 """
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 
 from fastapi.concurrency import run_in_threadpool
@@ -23,6 +25,7 @@ from app.db.models import ProfileFact, User
 from app.db.session import SessionLocal
 
 log = logging.getLogger(__name__)
+timing = logging.getLogger("aceroai.timing")
 
 _CATEGORIES = {"preference", "health", "work", "finance", "relationship", "other"}
 
@@ -65,8 +68,29 @@ async def recall(db: Session, user: User, query_text: str, k: int | None = None)
     if k <= 0 or not query_text.strip():
         return []
     try:
-        vecs = await llm.embed([query_text])
-        return await run_in_threadpool(recall_facts, db, user, vecs[0], k)
+        t0 = time.perf_counter()
+        vecs = await asyncio.wait_for(
+            llm.embed([query_text]), timeout=settings.memory_recall_timeout_s
+        )
+        t1 = time.perf_counter()
+        facts = await run_in_threadpool(recall_facts, db, user, vecs[0], k)
+        t2 = time.perf_counter()
+        # Split the two halves: the embedding is a network round-trip, the search is
+        # local pgvector. Knowing which dominates is the difference between "tune the
+        # index" and "the provider is slow".
+        timing.info(
+            "recall embed=%.0fms pgvector=%.0fms facts=%d",
+            (t1 - t0) * 1000,
+            (t2 - t1) * 1000,
+            len(facts),
+        )
+        return facts
+    except TimeoutError:
+        timing.info(
+            "recall timed out after %.1fs; answering without facts",
+            settings.memory_recall_timeout_s,
+        )
+        return []
     except Exception:
         log.warning("memory recall failed; proceeding without facts", exc_info=True)
         return []

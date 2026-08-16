@@ -46,6 +46,16 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     setMessages(msgs.map((m) => ({ role: m.role as UIMessage["role"], content: m.content })));
   }
 
+  async function deleteSession(id: string) {
+    await api.deleteSession(id);
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (id === currentId) {
+      // the open conversation was deleted — fall back to a blank one
+      setCurrentId(null);
+      setMessages([]);
+    }
+  }
+
   function newChat() {
     setSidebarOpen(false);
     setView("chat");
@@ -132,6 +142,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
         open={sidebarOpen}
         onNavigate={navigate}
         onSelect={openSession}
+        onDelete={deleteSession}
         onNewChat={newChat}
         onClose={() => setSidebarOpen(false)}
         onLogout={onLogout}

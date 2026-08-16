@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -59,6 +59,20 @@ def list_sessions(
         .all()
     )
     return [SessionOut.model_validate(r) for r in rows]
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(
+    session_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a conversation and its messages. Owner-scoped; learned profile facts are
+    deliberately kept — memory about the user outlives any single conversation."""
+    session = _owned_session(db, session_id, user)
+    db.execute(delete(Message).where(Message.session_id == session.id))
+    db.delete(session)
+    db.commit()
 
 
 @router.get("/sessions/{session_id}/messages")

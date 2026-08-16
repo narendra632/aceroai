@@ -108,29 +108,63 @@ export default function SettingsView() {
           Choose which AI answers you. This applies everywhere — web and Telegram.
         </p>
 
+        {/* What is ACTUALLY answering right now — saved state, not the pending picker. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-3">
+          <span className="relative flex size-2.5">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
+            <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
+          </span>
+          <span className="text-sm">
+            Answering with{" "}
+            <strong>{PROVIDER_LABEL[data.provider] ?? data.provider}</strong>
+            <span className="text-muted-foreground"> · </span>
+            <span className="font-mono text-xs">{data.model_chat}</span>
+          </span>
+          {dirty && (
+            <span className="rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground">
+              unsaved changes — press Save to switch
+            </span>
+          )}
+        </div>
+
         <section className="rounded-xl border border-border bg-card p-4">
           <h2 className="mb-3 font-medium">Provider</h2>
           <div className="flex flex-wrap gap-2">
-            {data.available_providers.map((p) => (
-              <button
-                key={p}
-                onClick={() => {
-                  setProvider(p);
-                  // jump to that provider's defaults so the models always match
-                  const next = data.model_catalog[p] ?? [];
-                  setChat(next[0] ?? "");
-                  setDeep(next[0] ?? "");
-                }}
-                className={cn(
-                  "rounded-lg border px-3 py-2 text-sm transition",
-                  p === provider
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border hover:bg-accent",
-                )}
-              >
-                {PROVIDER_LABEL[p] ?? p}
-              </button>
-            ))}
+            {data.available_providers.map((p) => {
+              const picked = p === provider;
+              const live = p === data.provider;
+              return (
+                <button
+                  key={p}
+                  onClick={() => {
+                    setProvider(p);
+                    // jump to that provider's defaults so the models always match
+                    const next = data.model_catalog[p] ?? [];
+                    setChat(next[0] ?? "");
+                    setDeep(next[0] ?? "");
+                  }}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition",
+                    picked
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border hover:bg-accent",
+                  )}
+                >
+                  {picked && <Check className="size-4" />}
+                  {PROVIDER_LABEL[p] ?? p}
+                  {live && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.5 text-[10px] tracking-wide uppercase",
+                        picked ? "bg-primary-foreground/20" : "bg-accent text-accent-foreground",
+                      )}
+                    >
+                      active
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           {data.available_providers.length < 2 && (
             <p className="mt-3 text-xs text-faint">

@@ -76,6 +76,10 @@ export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
   return r.ok ? r.json() : [];
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  await req(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
+}
+
 // --- tasks ---
 
 export type Task = {

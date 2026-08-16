@@ -63,6 +63,7 @@ class GoogleProvider:
 
     def __init__(self) -> None:
         self._client: genai.Client | None = None
+        self._embed_client: genai.Client | None = None
 
     def _get(self) -> genai.Client:
         # Built lazily so importing never requires credentials (CI has none).
@@ -73,6 +74,19 @@ class GoogleProvider:
                 location=settings.google_cloud_location,
             )
         return self._client
+
+    def _get_embed(self) -> genai.Client:
+        """Embeddings use their own (regional) client — see `embed_location`. On the
+        "global" endpoint an embedding measured ~12s once the connection went cold,
+        which is every real message; a region returns in ~0.5-2s for identical vectors."""
+        location = settings.embed_location or settings.google_cloud_location
+        if location == settings.google_cloud_location:
+            return self._get()
+        if self._embed_client is None:
+            self._embed_client = genai.Client(
+                vertexai=True, project=settings.google_cloud_project, location=location
+            )
+        return self._embed_client
 
     # --- translation: our message list -> Gemini contents -------------------------
 
@@ -230,7 +244,7 @@ class GoogleProvider:
 
     async def embed(self, texts: list[str], model: str, dim: int) -> list[list[float]]:
         try:
-            resp = await self._get().aio.models.embed_content(
+            resp = await self._get_embed().aio.models.embed_content(
                 model=model,
                 contents=texts,
                 config=types.EmbedContentConfig(output_dimensionality=dim),

@@ -10,6 +10,7 @@ DB is never touched mid-stream.
 import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 
@@ -18,7 +19,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core import composer, llm, memory, tools
+from app.core import composer, llm, memory, telemetry, tools
 from app.core.providers.base import BillingError, RateLimitError
 from app.db.models import ChatSession, Message, User
 from app.services import user_settings
@@ -162,13 +163,33 @@ async def handle_message(
         yield "error", f"That message is too long (max {settings.max_input_chars} characters)."
         return
 
-    session_id = await run_in_threadpool(_persist_user_turn, db, user, text, channel, session_id)
+    # Measured, not guessed: every stage below is timed and logged as one line per
+    # turn (logger "aceroai.timing"), so latency can be checked against a stopwatch.
+    tl = telemetry.Timeline()
+    tl.note(provider=provider, model=model, effort=effort or "-", channel=channel)
+
+    with tl.stage("persist_user"):
+        session_id = await run_in_threadpool(
+            _persist_user_turn, db, user, text, channel, session_id
+        )
     yield "session", str(session_id)
 
     # Semantic recall (best-effort): the most relevant facts about the user for
     # this message, injected into context. A failure here never blocks the reply.
-    facts = await memory.recall(db, user, text)
-    context = await run_in_threadpool(composer.build_context, db, session_id, facts, user)
+    # This is a *network* call (embedding) plus a pgvector search — usually the second
+    # biggest cost after the model itself.
+    with tl.stage("memory_recall"):
+        facts = await memory.recall(db, user, text)
+    with tl.stage("build_context"):
+        context = await run_in_threadpool(composer.build_context, db, session_id, facts, user)
+    shape = telemetry.describe_context(context)
+    tl.note(
+        facts=len(facts),
+        ctx_msgs=shape["messages"],
+        ctx_chars=shape["chars"],
+        ctx_approx_tokens=shape["approx_tokens"],
+    )
+    log.debug("context blocks for session %s: %s", session_id, shape["blocks"])
 
     # Bounded tool-use loop (the "one brain" acting): the model may answer directly
     # (streamed text, unchanged for normal chat) or call tools, which we run via the
@@ -178,8 +199,12 @@ async def handle_message(
     usage: dict = {}
     parts: list[str] = []
     messages = list(context)
+    first_token_seen = False
+    rounds = 0
     try:
         for _round in range(settings.tools_max_iters):
+            rounds += 1
+            round_start = time.perf_counter()
             round_text: list[str] = []
             tool_calls: list[dict] | None = None
             async for kind, payload in llm.stream_with_tools(
@@ -191,11 +216,16 @@ async def handle_message(
                 provider=provider,
             ):
                 if kind == "delta":
+                    if not first_token_seen:
+                        first_token_seen = True
+                        # The number the user actually feels: request in -> first word out.
+                        tl.mark("first_token")
                     round_text.append(payload)
                     parts.append(payload)
                     yield "delta", payload
                 else:  # "tool_calls" — end of this round
                     tool_calls = payload
+            tl.stages.append((f"llm_round{rounds}", (time.perf_counter() - round_start) * 1000))
             if not tool_calls:
                 break  # the model answered; done
             messages.append(_assistant_tool_message("".join(round_text), tool_calls))
@@ -205,7 +235,10 @@ async def handle_message(
                 if args is None:
                     result: dict = {"ok": False, "error": "arguments were not valid JSON"}
                 else:
-                    result = await run_in_threadpool(tools.execute, db, user.id, call["name"], args)
+                    with tl.stage(f"tool:{call['name']}"):
+                        result = await run_in_threadpool(
+                            tools.execute, db, user.id, call["name"], args
+                        )
                 messages.append(
                     {
                         "role": "tool",
@@ -226,15 +259,29 @@ async def handle_message(
                     yield "delta", payload
     except Exception as exc:  # noqa: BLE001 - one place to catch any provider failure
         log.warning("generation failed for session %s", session_id, exc_info=True)
+        tl.note(error=type(exc).__name__)
+        tl.emit()
         yield "error", _user_error(exc)
         return
 
     reply = "".join(parts)
-    message_id = await run_in_threadpool(
-        _persist_assistant_turn, db, session_id, reply, f"{provider}/{model}", usage
-    )
+    with tl.stage("persist_assistant"):
+        message_id = await run_in_threadpool(
+            _persist_assistant_turn, db, session_id, reply, f"{provider}/{model}", usage
+        )
     yield "done", str(message_id)
 
-    # Learn durable facts from this turn, off the reply path.
+    # Provider-reported token usage is authoritative; the ctx_* numbers above are our
+    # own estimate of what each block contributed.
+    tl.note(
+        rounds=rounds,
+        reply_chars=len(reply),
+        tokens_in=usage.get("tokens_in", "-"),
+        tokens_out=usage.get("tokens_out", "-"),
+    )
+    tl.emit()
+
+    # Learn durable facts from this turn, off the reply path — deliberately AFTER
+    # "done", so its latency is never felt by the user.
     if settings.memory_extraction_enabled and reply:
         _schedule_extraction(user.id, text, reply)

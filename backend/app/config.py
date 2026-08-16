@@ -60,7 +60,16 @@ class Settings(BaseSettings):
     embed_provider: str = "google"
     embed_model: str = "gemini-embedding-001"
     embed_dim: int = 768  # matches the profile_facts.embedding vector column
+    # Embeddings are served from a REGION, not the "global" endpoint: measured, global
+    # takes ~12s per embedding once the connection goes cold (i.e. every real message)
+    # while us-central1 takes ~0.5-2s. Verified the vectors are identical across
+    # regions (cosine 1.000000), so this changes latency only — never stored meaning.
+    embed_location: str = "us-central1"
     memory_recall_k: int = 12  # max relevant facts injected per message
+    # Hard ceiling on recall. Recall is best-effort by design, so if the embedding call
+    # stalls we answer without facts rather than making the user wait — this bounds the
+    # tail latency instead of letting one slow call dominate the whole turn.
+    memory_recall_timeout_s: float = 4.0
     memory_dedup_distance: float = 0.12  # cosine distance below which a fact is a dup
     model_memory: str = ""  # extractor model; empty = use model_chat
     memory_extraction_enabled: bool = True

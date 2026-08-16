@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -12,6 +13,13 @@ from app.config import DEV_JWT_SECRET, settings
 from app.services.errors import Duplicate, Invalid, NotFound
 
 
+def configure_logging() -> None:
+    """Make our own logs visible without touching uvicorn's. The per-turn timing line
+    (logger "aceroai.timing") is how latency is verified against a stopwatch."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.getLogger("aceroai.timing").setLevel(logging.INFO)
+
+
 def check_production_config() -> None:
     """Refuse to run in production with the built-in dev secret."""
     if settings.app_env == "prod" and settings.jwt_secret == DEV_JWT_SECRET:
@@ -23,6 +31,7 @@ def check_production_config() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     check_production_config()
     # Telegram poller runs only when a token is configured (Feature 3: scheduler here too)
     poller = None
