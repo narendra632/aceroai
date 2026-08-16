@@ -1,20 +1,39 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  aceroai — a single-user personal AI assistant.
+  Stack: FastAPI + sync SQLAlchemy 2.0 + Postgres 17/pgvector + Alembic;
+  React 19 + Vite + Tailwind v4 + shadcn/ui (Radix, already installed).
+  AGENTS.md is the source of truth for conventions; docs/ARCHITECTURE.md for how
+  it works; docs/ROADMAP.md for what is planned.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Golden rules that shape most proposals:
+  - One brain: all conversational logic goes through core/handler.handle_message.
+    Channels (web SSE, Telegram) are thin adapters with no chat logic.
+  - services/ is the single source of truth for both the REST API and the
+    assistant's tools — never implement a rule in only one of them.
+  - Derived values are computed, never stored. Timestamps are timestamptz.
+  - Schema changes only via a new Alembic migration; never edit an applied one.
+  - Secrets live only in .env. Never add a way to enter credentials in the UI.
+  - Dependencies via `uv add` (backend) — and ASK before adding any dependency.
+  - Embeddings are PINNED: changing EMBED_MODEL/EMBED_DIM invalidates every stored
+    profile_facts vector and requires a deliberate re-embed migration.
+  - No shortcuts on UI/UX. The bar is a finished product, not "it works".
+    Known gaps: docs/UI-AUDIT.md.
+
+rules:
+  tasks:
+    - End every task list with a final section containing this item, checked like
+      tests are: "docs and diagrams reflect what was built". If the change truly
+      alters nothing documented, answer it explicitly rather than dropping it —
+      the difference between "checked" and "forgotten" must stay visible.
+    - Include a verification section that runs `uv run ruff format .` and
+      `uv run pytest` from backend/, and confirms .env is not staged.
+    - Put risky or uncertain work in a section 0 that verifies assumptions before
+      any production code is written.
+  proposal:
+    - Always include a "Non-goals (this change)" section.
+    - State new dependencies explicitly and flag that Narendra must approve them.
+  design:
+    - Record options that were considered and REJECTED, with the reason. The
+      rejected path is usually the more useful half of the record.

@@ -109,14 +109,19 @@ Set at least:
 POSTGRES_PASSWORD=<a strong password, no @ or %>
 DATABASE_URL=postgresql+psycopg://agent:<same password>@db:5432/agent
 JWT_SECRET=<paste: openssl rand -hex 32>
-LLM_API_KEY=<your Gemini key>
+
+# Google needs NO key — the VM's service account supplies credentials (step 5).
+GOOGLE_CLOUD_PROJECT=<your project id>
+OPENAI_API_KEY=<optional; leave blank and OpenAI isn't offered in Settings>
 MODEL_CHAT=gemini-3.5-flash
 MODEL_HEAVY=gemini-3.1-pro-preview
 TELEGRAM_BOT_TOKEN=<your bot token, optional>
 
+# Embeddings: pick the region nearest THIS SERVER, not nearest you.
+# The Oregon VM → us-central1. (The `global` endpoint measured ~12 s per call.)
+EMBED_LOCATION=us-central1
+
 APP_ENV=prod
-COOKIE_SECURE=true
-COOKIE_SAMESITE=none
 SOUL_PATH=/docs/SOUL.md
 SITE_ADDRESS=acero.duckdns.org
 FRONTEND_ORIGIN=https://<your-vercel-url>   # fill after Vercel (step 1.8), then restart
@@ -291,7 +296,14 @@ Then send a real message and ask the assistant to add a task.
 - **Logs**: `docker compose -f docker-compose.prod.yml logs -f api`
 - **Restart**: `... up -d` (after editing `.env`) · **Stop**: `... down`
 - **Update (manual)**: `git pull && docker compose -f docker-compose.prod.yml up -d --build`
-- **DB backup** (optional cron): `docker compose -f docker-compose.prod.yml exec -T db pg_dump -U agent agent > ~/backup-$(date +%F).sql`
+- **DB backup** — ⚠ **there is no automated backup, and this is the project's biggest
+  standing risk** (see [`ROADMAP.md`](ROADMAP.md)). Memory, journal, tasks, and chat
+  history all live on one disk with no off-box copy. Run this manually until it is
+  automated, and note that a dump left *on the same VM* protects against a bad
+  migration but not against losing the disk:
+  ```bash
+  docker compose -f docker-compose.prod.yml exec -T db pg_dump -U agent agent > ~/backup-$(date +%F).sql
+  ```
 - **Budget**: you should stay at $0; the $1 alert warns you otherwise.
 
 ## Troubleshooting
@@ -299,7 +311,10 @@ Then send a real message and ask the assistant to add a task.
 - **No certificate / HTTPS fails** → DuckDNS must resolve to the VM IP and ports
   80/443 must be open (the "Allow HTTP/HTTPS" firewall tags). Check `caddy` logs.
 - **Login works but the app can't stay logged in** → `FRONTEND_ORIGIN` must exactly
-  match the Vercel URL, and `COOKIE_SECURE=true` + `COOKIE_SAMESITE=none` must be set
-  (cross-site cookie). Restart the api after changing `.env`.
+  match the Vercel URL. Restart the api after changing `.env`. *(Auth is a bearer
+  token in `localStorage`, not a cookie — `COOKIE_SECURE`/`COOKIE_SAMESITE` still
+  exist but no longer affect login.)*
+- **`403 PERMISSION_DENIED` / `ACCESS_TOKEN_SCOPE_INSUFFICIENT`** → the VM has the
+  IAM role but not the **access scope**. Both gates are required — see step 5.3.
 - **Out of memory / killed** → confirm swap (`free -h`); the `e2-micro` needs it.
 - **App won't start in prod** → you left `JWT_SECRET` as the sample; set a real one.

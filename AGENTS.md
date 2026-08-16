@@ -8,8 +8,10 @@ incremental change.
 
 ## Stack
 - Backend: FastAPI, **sync** SQLAlchemy 2.0 (typed `Mapped[]` style),
-  Postgres 17 + pgvector, Alembic, APScheduler, openai SDK with base_url swap (Gemini default, OpenAI swappable), sse-starlette.
-- Frontend: React + Vite + Tailwind v4 (shadcn/ui later).
+  Postgres 17 + pgvector, Alembic, sse-starlette. Models are reached through
+  `core/providers/`, each on its **native** SDK — `google-genai` (Agent Platform
+  via ADC) and `openai`. APScheduler is a dependency but no job exists yet.
+- Frontend: React 19 + Vite + Tailwind v4 + shadcn/ui (Radix) + lucide icons.
 - Tooling: uv, ruff, pytest, pre-commit, OpenSpec, Docker Compose.
 
 ## Golden rules
@@ -31,6 +33,14 @@ incremental change.
 9. Small diffs. After edits run `uv run ruff format .` and `uv run pytest`
    from `backend/`.
 10. When unsure about a product decision, ask — don't assume.
+11. **Docs and diagrams are updated by the change that alters the behavior**,
+    never afterwards. Every OpenSpec `tasks.md` ends with that item, checked
+    like tests. `ARCHITECTURE.md` describes only what is built; anything
+    planned goes in `ROADMAP.md`. Never annotate a doc `(planned — Feature N)`:
+    each one becomes a lie on ship, and nothing forces a revisit.
+12. **No shortcuts on UI/UX.** The bar is a finished product, not "it works" —
+    no raw native controls where a themed one is needed, no destructive action
+    without confirmation, no silent success. Known gaps: `docs/UI-AUDIT.md`.
 
 ## Commands (run from backend/ unless noted)
 - DB up (from root):        docker compose up db -d
@@ -41,53 +51,37 @@ incremental change.
 - Lint + format:            uv run ruff check . && uv run ruff format .
 
 ## Layout
-- backend/app/core/     llm.py, composer.py (context
-                        builder), handler.py (the one brain), security.py
-- backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal)
+- backend/app/core/     handler.py (the one brain), composer.py (context builder),
+                        llm.py (provider facade), tools.py (assistant tools),
+                        memory.py (extract/embed/recall), telemetry.py, security.py
+- backend/app/core/providers/  base.py (contract + error taxonomy),
+                        google.py (native google-genai), openai_provider.py
+- backend/app/services/ tasks.py, journal.py, user_settings.py, errors.py —
+                        the single source of truth for the API *and* the tools
+- backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal, settings)
 - backend/app/channels/ telegram.py long-poller
-- backend/app/jobs/     scheduler + review jobs
-- backend/app/db/       models.py, session.py
-- frontend/             Vite SPA
-- docs/SOUL.md          assistant persona (read by composer)
+- backend/app/jobs/     empty package — no scheduled job built yet
+- backend/app/db/       models.py (7 tables), session.py
+- frontend/src/         Vite SPA — components/ (14), hooks/, lib/api.ts
+- docs/SOUL.md          assistant persona (read by composer every turn)
 - openspec/             specs (source of truth) + changes
 
 ## Current status
-Features 1 & 2, cross-session memory & adaptive reasoning, hosting,
-tasks+journal (with assistant tools), and the multi-provider LLM layer are complete.
-Feature 1 (2026-07-26): LLM wrapper + one-brain handle_message + JWT-cookie auth +
-SSE web chat, multi-session React + shadcn/ui UI. Feature 2 (2026-07-28): thin
-channels/telegram.py long-poller routed through the same handle_message (allowlist
-via users.telegram_chat_id, /start linking). Memory & reasoning (2026-07-31):
-durable facts extracted, embedded (pgvector/HNSW, migration 002), and semantically
-recalled into context; adaptive reasoning (per-request effort: web "think harder"
-toggle + Telegram /think + a task-routing hook); plus retry/backoff, error
-hygiene, and an input cap. Specs archived under
-openspec/specs/{auth,web-chat,telegram,memory}.
 
-Hosting (2026-08-03): backend live on a Google Cloud always-free e2-micro
-(Docker: Caddy auto-HTTPS + api + Postgres/pgvector, DuckDNS), frontend on Vercel;
-CI/CD auto-deploys on push to main (tests → build image → GHCR → SSH pull on the
-VM). Cross-site cookie was blocked by browser privacy protections, so auth uses a
-Bearer token in localStorage (Authorization header). See docs/DEPLOY.md.
+**Built and live:** web chat (SSE) · Telegram channel · cross-session memory
+(pgvector/HNSW) · adaptive reasoning · tasks + journal with assistant tool-use ·
+multi-provider LLM + Settings · hosting with auto-deploy on push to `main`.
 
-Tasks & journal (2026-08-03): shared app/services/ layer is the single source of
-truth for the REST API (/api/tasks, /api/journal) and the assistant's tools
-(app/core/tools.py). handle_message runs a bounded, user-scoped, fault-tolerant
-tool-use loop (function-calling) so the assistant creates/reads/updates tasks &
-journal from chat on web and Telegram; frontend gains a Chat/Tasks/Journal nav
-shell. Deferred: journal semantic search (embedding) and PWA/push.
+**Not built yet:** anything in `app/jobs/` (no scheduled job), PWA/push, journal
+semantic search, database backups.
 
-Model providers (2026-08-16): core/llm.py is a facade over core/providers/, each using
-its NATIVE SDK — google-genai on Agent Platform via ADC (Cloud Billing, so Cloud credits
-apply) and the openai SDK. Native because Gemini's per-call thought_signature can't
-survive the OpenAI-compat schema, which breaks multi-turn tool calls. Provider + models
-are per-user (migration 003) chosen in the Settings view; resolved in the one brain so
-Telegram inherits them. Embeddings are PINNED separately (switching chat provider must
-never change them, or stored profile_facts vectors become meaningless). Billing errors
-are no longer reported as rate limits.
+Status detail and what comes next live in **`docs/ROADMAP.md`** — the one place
+that owns it. Do not restate progress here; this file owns *conventions*.
 
-Roadmap in docs/ROADMAP.md. Next up (agreed): the rest of the UI feature set
-(investments — ask for his .md files; knowledge visualization) + PWA/push, then
-MCP-powered capabilities. (The day-end summary job can land now that hosting is live.)
-
-Architecture reference: docs/ARCHITECTURE.md
+## Key references
+- **`docs/ARCHITECTURE.md`** — how the system works (diagrams, data model, config)
+- **`docs/ROADMAP.md`** — what is done, what is next, standing risks
+- **`docs/REQUEST-ANATOMY.md`** — measured latency and token cost per turn
+- **`docs/DEPLOY.md`** — production runbook
+- **`docs/UI-AUDIT.md`** — known UI/UX gaps and the standard being applied
+- **`openspec/specs/`** — capability specs (source of truth for behavior)

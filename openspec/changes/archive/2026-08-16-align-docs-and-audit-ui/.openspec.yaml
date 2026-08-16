@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-16
+goal: Bring every document back in line with the code as it actually is, adopt
+  Mermaid so architecture diagrams live in git and are updated with the code
+  that moved, and produce a reviewed UI/UX audit that sets the product bar for
+  the interface work that follows

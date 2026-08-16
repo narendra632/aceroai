@@ -1,9 +1,10 @@
 # backend — aceroai API
 
 FastAPI backend for aceroai: authentication, the "one brain" chat handler, the
-LLM wrapper, and the database layer. Sync SQLAlchemy 2.0 on Postgres 17 +
-pgvector; the LLM is reached through the openai SDK pointed at any
-OpenAI-compatible endpoint (Gemini by default).
+provider layer, and the database. Sync SQLAlchemy 2.0 on Postgres 17 + pgvector.
+Models are reached through `core/providers/`, where **each provider uses its own
+native SDK** — deliberately *not* an OpenAI-compatibility shim (see
+[Model providers](#model-providers) for why that would break tool calling).
 
 > For the *why* behind the architecture (one brain, computed-not-stored,
 > timestamptz, provider swap), see [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
@@ -30,19 +31,24 @@ interactive API explorer).
 ## Request lifecycle (chat)
 
 ```
-POST /api/chat  ->  get_current_user (cookie -> user)
+POST /api/chat  ->  get_current_user (Bearer token -> user)
                 ->  core/handler.handle_message   <- the one brain
                      |- persist user message        (db, via threadpool)
-                     |- core/memory.recall          (embed msg -> pgvector search)
-                     |- core/composer.build_context (SOUL.md + recalled facts + history)
-                     |- core/llm.stream_chat        (AsyncOpenAI -> Gemini, reasoning=low|high)
+                     |- core/memory.recall          (embed msg -> pgvector; 4s cap)
+                     |- core/composer.build_context (SOUL.md + now + open tasks
+                     |                               + recalled facts + history)
+                     |- core/llm.stream_with_tools  (provider, effort=low|high)
+                     |    `- tool calls? run via services/, loop (see below)
                      |- persist assistant message    (db, via threadpool)
+                     |- core/telemetry               (one timing line per turn)
                      |- schedule core/memory.extract_and_store  (background, off-path)
                 ->  route wraps yielded deltas as SSE  ->  browser
 ```
 
-The route is pure transport; all conversation logic lives in the handler so a
-future Telegram channel reuses the exact same brain.
+The route is pure transport; all conversation logic lives in the handler, so the
+Telegram channel reuses the exact same brain. Every stage is timed under logger
+`aceroai.timing` — measured numbers in
+[`../docs/REQUEST-ANATOMY.md`](../docs/REQUEST-ANATOMY.md).
 
 ## Tasks, journal & assistant tools
 
@@ -153,12 +159,13 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/db/session.py` | Engine, `SessionLocal`, `Base`, `get_db` dependency |
 | `app/db/models.py` | The 7 ORM tables (typed `Mapped[]` style) |
+| `app/core/telemetry.py` | `Timeline` — per-turn stage timings, token estimates, context description |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
-| `app/scripts/verify_llm.py` | End-to-end provider smoke test (never prints the key) |
-| `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` (built, Feature 2) |
-| `app/jobs/` | *(planned — Feature 3)* APScheduler + review jobs |
-| `alembic/` | Migrations; `…_001_core_tables.py` = schema + pgvector; `…_002_fact_embeddings.py` = `profile_facts.embedding` + HNSW |
-| `tests/` | `conftest.py` (fake LLM/embeddings + scoped data), `test_auth.py`, `test_chat.py`, `test_memory.py`, `test_telegram.py`, `test_services_*`, `test_api_journal_tasks.py`, `test_tools_loop.py` |
+| `app/scripts/verify_llm.py` | **Legacy** smoke test against the Gemini *Developer* API — does not exercise `core/providers/` |
+| `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` |
+| `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet |
+| `alembic/` | `…_001_core_tables.py` schema + pgvector · `…_002_fact_embeddings.py` `profile_facts.embedding` + HNSW · `…_003_user_model_prefs.py` per-user provider/models |
+| `tests/` | 13 modules: `conftest.py` (fake LLM/embeddings + scoped data), `test_auth`, `test_chat`, `test_memory`, `test_telegram`, `test_providers`, `test_tools_loop`, `test_context_awareness`, `test_services_{tasks,journal}`, `test_api_{journal_tasks,settings}`, `test_prod_config`, `test_health` |
 | `Dockerfile` | Production image (`uv sync --frozen --no-dev`) |
 
 ## Config & secrets
@@ -168,21 +175,43 @@ Secrets never live in code and never leave `.env`. Key vars:
 
 - `DATABASE_URL` — **use host `127.0.0.1`, not `localhost`** on Windows (see
   `../.env.example` note; `localhost` can resolve to IPv6 and stall connects).
-- `JWT_SECRET` — signs the auth cookie.
-- `LLM_BASE_URL` / `LLM_API_KEY` / `MODEL_CHAT` / `MODEL_HEAVY` — the provider
-  swap: change these four, no code changes.
+- `JWT_SECRET` — signs the auth token.
+- `LLM_PROVIDER` / `MODEL_CHAT` / `MODEL_HEAVY` — **defaults only**. The active
+  provider and models are a **per-user** setting stored on `users` (migration 003)
+  and chosen in the Settings screen; `services/user_settings.resolve()` resolves
+  user value → default.
+- `GOOGLE_CLOUD_PROJECT` (ADC, no key) · `OPENAI_API_KEY` — which providers are
+  offered depends on which credentials exist server-side.
 - `REASONING_EFFORT_CHAT` — thinking budget for chat (`low` = fast first token;
   empty = don't send the param). See the "Memory & reasoning" section.
 - `EMBED_MODEL` / `EMBED_DIM` / `MEMORY_RECALL_K` — semantic memory knobs.
   `EMBED_DIM` must match the `profile_facts.embedding` column (768, migration 002).
+- `EMBED_LOCATION` — **latency only**, vectors are identical across regions. Pick
+  the region nearest the *server*: `us-central1` from the Oregon VM, `asia-south1`
+  when developing from India. The `global` endpoint measured **~12 s per call**.
+- `MEMORY_RECALL_TIMEOUT_S` · `TOOLS_MAX_ITERS` · `CONTEXT_TASKS_LIMIT` — the
+  bounds that keep a turn predictable.
+
+> **Legacy:** `LLM_BASE_URL` / `LLM_API_KEY` target the Gemini *Developer* API and
+> are read by **nothing but `app/scripts/verify_llm.py`**. They are not a provider
+> swap — that mechanism no longer exists. Dead config for the running app.
 
 ## Auth in one paragraph
 
-`POST /api/auth/login` verifies the password (bcrypt) and sets a **JWT in an
-httpOnly cookie** (`samesite=lax`, 30-day). Protected routes depend on
-`get_current_user`, which decodes that cookie and 401s if it is missing or
-invalid. `logout` clears the cookie; `me` returns the current email. The cookie
-is httpOnly so browser JavaScript can never read the token.
+`POST /api/auth/login` verifies the password (bcrypt) and returns a **JWT** (HS256,
+30-day). The SPA stores it in `localStorage` and sends it as
+`Authorization: Bearer …`. Protected routes depend on `get_current_user`, which
+accepts that header (and still falls back to a cookie), 401-ing if it is missing or
+invalid. `me` returns the current email.
+
+**Why a bearer token and not an httpOnly cookie:** the frontend (Vercel) and the
+backend (DuckDNS) are different sites, so the login cookie is third-party and is
+**blocked** by Brave and increasingly Chrome — login appeared to work and every
+following request 401'd. **The trade-off is real and accepted:** a `localStorage`
+token *is* readable by JavaScript, so an XSS bug could exfiltrate it, where an
+httpOnly cookie could not. Fine for a single-user app. If this ever goes
+multi-user, serve the UI and API from **one origin** and the first-party httpOnly
+cookie becomes available again.
 
 ## Memory & reasoning
 
@@ -200,8 +229,15 @@ where pgvector does real work.
 - **Recall** — for every incoming message, `memory.recall` embeds the message and
   runs a vector-similarity search (`embedding <=> query`) for the top
   `MEMORY_RECALL_K` **active** facts, which `composer.build_context` injects right
-  after the SOUL.md persona. Recall is best-effort: a quota/network failure just
-  means no facts this turn, never a broken chat.
+  after the SOUL.md persona. Recall is best-effort *and* **time-bounded**
+  (`MEMORY_RECALL_TIMEOUT_S`, 4 s): a quota failure, a network error, or a stall
+  just means no facts this turn — never a broken or slow chat.
+
+**⚠ Embeddings are pinned on purpose.** They do not follow the user's chat-provider
+choice. Every stored vector came from one model, and vectors from different models
+are not comparable — same length, different coordinate space. Switching would not
+raise an error; recall would quietly return nonsense. Changing `EMBED_MODEL` or
+`EMBED_DIM` means re-embedding every stored fact in one deliberate migration.
 
 **Adaptive reasoning:** the chat model is a *thinking* model, so `reasoning_effort`
 is a per-request dial (`REASONING_EFFORT_CHAT=low` for fast chat,
@@ -220,10 +256,13 @@ provider-swap safe). It's *adaptive* because the effort is chosen per turn, two 
 effort — is deferred until billing is enabled, since it adds an API call per
 message and the free tier is tiny.)*
 
-**Cost note:** each message now makes several provider calls (chat + a recall
-embedding + background extraction/embeddings). The Gemini **free tier is ~20
-requests/day**, enough only for light testing — enable **billing → Tier 1** for
-real daily use (pennies/day for one user).
+**Cost note:** each message makes several provider calls (chat + a recall embedding
++ background extraction/embeddings). Google usage runs on **Agent Platform (Vertex)
+billed through Google Cloud Billing**, so Google Cloud credits offset it — this is
+precisely why the provider layer targets Agent Platform rather than the Gemini
+Developer API, whose separate **prepaid balance** the credits cannot pay for.
+OpenAI usage bills to the OpenAI account. Set a **budget alert** so credit
+exhaustion surfaces as a warning rather than as errors.
 
 ## Telegram channel
 
@@ -245,6 +284,12 @@ served.
 Production runs under Docker (`docker-compose.prod.yml`: Caddy auto-HTTPS + api +
 Postgres/pgvector) on a Google Cloud e2-micro, fronted by a DuckDNS subdomain. A
 push to `main` that passes CI auto-deploys (build → GHCR → SSH pull on the VM).
-Prod env vars: `APP_ENV=prod`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE=none`,
-`SOUL_PATH=/docs/SOUL.md`, `SITE_ADDRESS`, `FRONTEND_ORIGIN`. Full runbook:
-[`../docs/DEPLOY.md`](../docs/DEPLOY.md).
+Prod env vars: `APP_ENV=prod`, `SOUL_PATH=/docs/SOUL.md`, `SITE_ADDRESS`,
+`FRONTEND_ORIGIN`, `EMBED_LOCATION=us-central1` (nearest the Oregon VM).
+`COOKIE_SECURE` / `COOKIE_SAMESITE` remain settable but are vestigial — auth is a
+bearer token.
+
+Google auth in production is the VM's own service account via ADC. Note that
+`roles/aiplatform.user` alone is **not enough**: the VM also needs the
+`cloud-platform` **access scope**, a separate gate that requires stopping the
+instance to change. Full runbook: [`../docs/DEPLOY.md`](../docs/DEPLOY.md).

@@ -71,7 +71,7 @@ persist it.
 | `src/hooks/useSmoothReveal.ts` | Steady-rate typewriter reveal of streamed text |
 | `src/hooks/useTheme.ts` | Light/dark toggle + persistence |
 | `src/components/AppShell.tsx` | Top-level shell: view switch + chat state (sessions, streaming, abort) |
-| `src/components/Sidebar.tsx` | Chat/Tasks/Journal nav + (in chat) session list; theme, sign out; mobile drawer |
+| `src/components/Sidebar.tsx` | Chat/Tasks/Journal/Settings nav + (in chat) session list; theme, sign out; mobile drawer |
 | `src/components/TasksView.tsx` | Tasks screen: quick-add, complete, priority, due, delete |
 | `src/components/JournalView.tsx` | Journal screen: dated entries, mood, tags |
 | `src/components/SettingsView.tsx` | Pick AI provider + chat/think-harder models; read-only pinned memory model |
@@ -88,7 +88,18 @@ persist it.
 Beyond React/Vite/Tailwind: `react-markdown` + `remark-gfm` (markdown),
 `lucide-react` (icons), and the shadcn/ui stack (`class-variance-authority`,
 `clsx`, `tailwind-merge`, `tw-animate-css`, `radix-ui`). Charts are intentionally
-not included yet — they'll be chosen against the first data screen (Feature 3).
+not included yet — they'll be chosen against the first data screen.
+
+**`radix-ui` is already installed**, so custom `Select`, `Popover`, `Dialog`, and
+similar controls need **no new dependency** — which is why the audit below treats
+the remaining native `<select>` / `datetime-local` elements as a choice to revisit,
+not a constraint.
+
+## Known UI/UX gaps
+
+The interface is functional but not yet finished to product standard. Every known
+gap is inventoried in [`../docs/UI-AUDIT.md`](../docs/UI-AUDIT.md) — read it before
+adding a screen, so new work meets the standard instead of extending the debt.
 
 ## Config
 

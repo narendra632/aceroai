@@ -22,29 +22,64 @@
   GitHub → GHCR → SSH-deploys to the VM automatically. Auth is a Bearer token
   (localStorage) because the cross-site cookie was blocked by browser privacy
   protections — see [`ARCHITECTURE.md`](ARCHITECTURE.md) / the memory note.
+- **Tasks & journal + assistant tool-use** — a shared `services/` layer backs both
+  the REST API and the assistant's function-calling tools, so the same logic serves
+  web, Telegram, and the model. Task-aware context (open tasks injected each turn).
+- **Multi-provider LLM + Settings** — `core/providers/` behind one interface, each
+  on its **native** SDK (google-genai on Agent Platform via ADC; the openai SDK).
+  Per-user provider/model choice in a Settings view. Embeddings pinned separately.
+  Per-turn telemetry (`aceroai.timing`) — which caught a 12 s embedding stall and
+  took a turn from ~14 s to ~1.9 s in production.
 
 ## Now
 
-- **UI feature set** *(next OpenSpec change)* — the app grows a real product surface. Motivation: the
-   frontend will be wrapped as a **PWA / Capacitor app with push notifications**,
-   which is intended to eventually **make the Telegram channel obsolete** (native
-   notifications instead of a bot).
-   - **Journal / Tasks page** — UI over the existing `journal_entries` and `tasks`
-     tables (today they exist in the schema but have no interface).
-   - **Investments page** — Narendra has **local Markdown research files** describing
-     exactly how he wants this to work. **⚠ ASK HIM for those `.md` files when we
-     reach this feature** — do not design it before reading them.
-   - **Knowledge visualization page** — visualize the memory/`profile_facts` and
-     their **pgvector embeddings** (stored from the memory feature onward) that
-     Acero has learned about Narendra, using a visualization library, so he can
-     *see his knowledge graph grow* over time.
+- **Documentation truth-up + diagrams** *(current OpenSpec change)* — bring every
+  `.md` in the repo back in line with the code as it actually is, then adopt
+  **Mermaid** as the diagram format so architecture pictures live in git, diff
+  reviewably, and are updated in the same change as the code that moved.
+  Every future OpenSpec `tasks.md` carries a "diagrams match the code" checklist
+  item, the same way tests do.
 
 ## Next (planned, in order)
 
-1. **MCP-powered real-world capabilities** — expose the tools Narendra actually
+1. **UI/UX polish pass** — bring the interface to product standard rather than
+   functional standard. The gap is concrete: native `<select>` elements and a native
+   `datetime-local` input (an OS-styled white popup inside a dark UI, with an icon
+   that is invisible on dark), no session rename, and similar rough edges throughout.
+   Radix is already a dependency, so proper custom controls cost no new packages.
+   Principle: **no shortcuts on UI/UX** — the bar is ChatGPT / Claude, not "it works".
+
+2. **Scheduled jobs** — `app/jobs/` exists but is empty; APScheduler is in the stack
+   and unused. A day-end summary and proactive nudges (overdue tasks, journal
+   prompts) would make Acero the first to speak instead of purely reactive.
+
+3. **PWA + web push** — installable app, native notifications. This is the feature
+   that lets the **Telegram channel be retired**; it has been deferred twice and
+   should not slip again.
+
+4. **Investments page** — Narendra has **local Markdown research files** describing
+   exactly how he wants this to work. **⚠ ASK HIM for those `.md` files when we
+   reach this feature** — do not design it before reading them.
+
+5. **Knowledge visualization page** — visualize the memory/`profile_facts` and
+   their **pgvector embeddings** that Acero has learned about Narendra, so he can
+   *see his knowledge graph grow* over time.
+
+6. **MCP-powered real-world capabilities** — expose the tools Narendra actually
    uses through MCP so Acero can act in the real world, not just chat.
 
-2. **Beyond** — additional features as they come up; this list grows over time.
+7. **Beyond** — additional features as they come up; this list grows over time.
+
+## Standing risk — not yet scheduled
+
+- 🔴 **No database backup.** Everything Acero knows — memory/`profile_facts`,
+  journal entries, tasks, chat history — lives on a single 10 GB disk on one
+  `e2-micro`. There is no dump, no snapshot, no off-box copy. If that disk is lost
+  or a migration goes wrong, it is all gone with no way back. Unlike every other
+  item on this list, delay here has **permanent** cost rather than deferred value.
+  Likely shape: a nightly `pg_dump` in the compose stack, retained N days, copied
+  off the VM (Cloud Storage bucket or similar), plus a **rehearsed restore** —
+  a backup nobody has restored from is a hope, not a backup.
 
 ## Future considerations (not scheduled)
 

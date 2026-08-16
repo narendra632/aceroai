@@ -17,7 +17,7 @@ Your message is never sent alone. `core/composer.build_context()` assembles a st
 | 2 | **Current date/time** | computed, your timezone | yes | ~70 chars · ~18 tok |
 | 3 | **Open tasks** | `tasks` table, urgency-ordered, capped at `CONTEXT_TASKS_LIMIT` (30) | yes (DB read) | ~100 chars/task |
 | 4 | **Recalled memory** | `profile_facts` via pgvector similarity to *this* message | yes (embedding + search) | ~90 chars/fact |
-| 5 | **History** | last `HISTORY_LIMIT` (20) messages of this session | yes (DB read) | grows with the chat |
+| 5 | **History** | last 20 messages of this session (`HISTORY_LIMIT`, a **code constant** in `composer.py` — not an env var) | yes (DB read) | grows with the chat |
 | 6 | **Your message** | — | — | — |
 | 7 | **Tool definitions** | `core/tools.TOOLS` (7 tools, names + JSON schemas) | every turn | ~1,300 chars · ~330 tok |
 
@@ -40,23 +40,28 @@ raw ids beyond task ids, or any provider credentials.
 
 ## 2. The pipeline, step by step
 
+```mermaid
+flowchart TD
+    A["POST /api/chat"] --> B["1 · auth<br/><small>decode bearer token → user · ~1 ms</small>"]
+    B --> C["2 · persist_user<br/><small>INSERT message (+session) · ~20-40 ms</small>"]
+    C -.->|SSE 'session'| U1([UI has a session id])
+    C --> D["3 · memory_recall<br/><small>embed + pgvector search</small>"]
+    D --> E["4 · build_context<br/><small>tasks + last 20 messages · ~10-40 ms</small>"]
+    E --> F["5 · llm_round1<br/><small>context + tools → stream · ~1-2 s</small>"]
+    F --> G{text or tool calls?}
+    G -->|text| I["8 · persist_assistant<br/><small>reply + token counts · ~20-45 ms</small>"]
+    G -->|tool calls| H1["6 · tool:name<br/><small>via services/ · ~7-20 ms</small>"]
+    H1 --> H2["7 · llm_round2<br/><small>results → final answer · ~1-2 s</small>"]
+    H2 --> I
+    I -.->|SSE 'done'| U2([reply complete])
+    I --> J["9 · background: extract facts → embed → store<br/><small>after 'done' — never felt</small>"]
+
+    style D fill:#c15f3c,stroke:#8a3f26,color:#fff
 ```
-POST /api/chat
-  │
-  ├─ 1. auth            decode bearer token → user                      ~1 ms
-  ├─ 2. persist_user    INSERT message (+ session if new)              ~20-40 ms
-  │     └─► SSE "session" event  ← the UI now has a session id
-  ├─ 3. memory_recall   embed(your message) → pgvector cosine search   ~1.7-3 s  ⚠ dominant
-  ├─ 4. build_context   read tasks + last 20 messages, assemble blocks  ~10-40 ms
-  ├─ 5. llm_round1      send context + tools → stream tokens back      ~1-2 s
-  │     ├─ if it returns TEXT      → stream to you, done
-  │     └─ if it returns TOOL_CALLS→ SSE "tool" event ("Working…")
-  │          ├─ 6. tool:<name>     run via services/ (a DB write)       ~7-20 ms
-  │          └─ 7. llm_round2      feed results back → final answer    ~1-2 s
-  ├─ 8. persist_assistant  INSERT reply + token counts                 ~20-45 ms
-  │     └─► SSE "done" event
-  └─ 9. background: extract durable facts → embed → store   ← AFTER "done", never felt
-```
+
+**Stage 3 is highlighted because it dominates**: ~1.7–3 s locally, ~340 ms in production.
+Everything our own code does — auth, both DB writes, context assembly — totals under
+100 ms.
 
 **Streaming matters:** you see the first word at `first_token`, not at `total`. The
 reply keeps arriving after that.

@@ -1,3 +1,10 @@
 {
-  "recommendations": ["charliermarsh.ruff", "ms-python.python"]
+  "recommendations": [
+    "charliermarsh.ruff",
+    "ms-python.python",
+    // Renders ```mermaid blocks in the built-in Markdown preview. VS Code has NO
+    // native Mermaid support — without this, docs/ARCHITECTURE.md shows raw code.
+    // (GitHub renders them natively; only the editor needs this.)
+    "bierner.markdown-mermaid"
+  ]
 }
