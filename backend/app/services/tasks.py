@@ -72,17 +72,28 @@ def find_duplicate(db: Session, user_id: uuid.UUID, title: str) -> Task | None:
     return None
 
 
-def get_task(db: Session, user_id: uuid.UUID, task_id: uuid.UUID) -> Task:
+def get_task(
+    db: Session, user_id: uuid.UUID, task_id: uuid.UUID, *, include_deleted: bool = False
+) -> Task:
+    """Fetch one owned task. `include_deleted` is only for restore — to every other
+    caller a deleted task must look exactly like one that never existed."""
     task = db.get(Task, task_id)
     if task is None or task.user_id != user_id:
+        raise NotFound("task not found")
+    if task.deleted_at is not None and not include_deleted:
         raise NotFound("task not found")
     return task
 
 
 def list_tasks(db: Session, user_id: uuid.UUID, status: str | None = None) -> list[Task]:
     """Active tasks (todo + in_progress) by default, ordered by derived urgency.
-    Pass an explicit `status` (e.g. "done") to list a single status instead."""
-    stmt = select(Task).where(Task.user_id == user_id)
+    Pass an explicit `status` (e.g. "done") to list a single status instead.
+
+    Soft-deleted tasks are excluded here, which is what makes them invisible to the REST
+    API, the assistant's tools, and the composer's injected task block alike — every one
+    of those paths reads through this function.
+    """
+    stmt = select(Task).where(Task.user_id == user_id, Task.deleted_at.is_(None))
     if status is not None:
         if status not in _VALID_STATUSES:
             raise Invalid(f"status must be one of {_VALID_STATUSES}")
@@ -174,6 +185,18 @@ def snooze_task(db: Session, user_id: uuid.UUID, task_id: uuid.UUID, until: dt.d
 
 
 def delete_task(db: Session, user_id: uuid.UUID, task_id: uuid.UUID) -> None:
+    """Soft delete, so the deletion can be undone. The row stays; every reader filters
+    it out via `list_tasks` / `get_task`."""
     task = get_task(db, user_id, task_id)
-    db.delete(task)
+    task.deleted_at = _now()
     db.commit()
+
+
+def restore_task(db: Session, user_id: uuid.UUID, task_id: uuid.UUID) -> Task:
+    """Undo a delete. Restoring a task that is already live is a no-op rather than an
+    error, so a double-tap on Undo cannot fail."""
+    task = get_task(db, user_id, task_id, include_deleted=True)
+    task.deleted_at = None
+    db.commit()
+    db.refresh(task)
+    return task

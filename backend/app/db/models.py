@@ -42,6 +42,9 @@ class ChatSession(Base):
     last_active_at: Mapped[dt.datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=now
     )
+    # Soft delete (migration 004) so a deletion can be undone. Readers MUST filter on
+    # this — the filter lives in services/sessions.py, never in a route.
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
 
 
 class Message(Base):
@@ -81,6 +84,9 @@ class Task(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=now, onupdate=now
     )
+    # Soft delete (migration 004) so a deletion can be undone. Readers MUST filter on
+    # this — the filter lives in services/tasks.py, never in a route or a tool.
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
     # NOTE: urgency is derived from due_at + priority at read time. Never store it.
 
 
@@ -95,7 +101,9 @@ class JournalEntry(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), default=list)
     channel: Mapped[str] = mapped_column(sa.Text, default="web")
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
-    # Phase 2 migration adds: embedding vector(N) + HNSW index
+    # Soft delete (migration 004) so a deletion can be undone. Readers MUST filter on
+    # this — the filter lives in services/journal.py, never in a route or a tool.
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
 
 
 class ProfileFact(Base):

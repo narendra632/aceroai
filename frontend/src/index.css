@@ -97,6 +97,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Expand a small control's hit area to ~44px without changing how it looks.
+   Compact icon buttons in dense rows should stay visually small but must still be
+   reliably tappable on a phone. The overlay is centred and does not affect layout. */
+.touch-target {
+  position: relative;
+}
+.touch-target::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
 /* scrollable areas that shouldn't show a bar (session list) — still scrolls */
 .no-scrollbar {
   scrollbar-width: none;          /* Firefox */

@@ -59,4 +59,14 @@ def delete_task(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    """Soft delete — reversible via /restore for as long as the client offers Undo."""
     svc.delete_task(db, user.id, task_id)
+
+
+@router.post("/{task_id}/restore")
+def restore_task(
+    task_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TaskOut:
+    return TaskOut.model_validate(svc.restore_task(db, user.id, task_id))

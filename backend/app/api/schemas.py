@@ -24,6 +24,10 @@ class SessionOut(BaseModel):
     last_active_at: dt.datetime
 
 
+class SessionPatch(BaseModel):
+    title: str
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

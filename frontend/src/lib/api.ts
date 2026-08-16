@@ -77,7 +77,30 @@ export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await req(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
+  const r = await req(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("could not delete the conversation");
+}
+
+/** Undo a delete. The conversation and its messages come back unchanged. */
+export async function restoreSession(sessionId: string): Promise<Session> {
+  const r = await req(`/api/chat/sessions/${sessionId}/restore`, { method: "POST" });
+  if (!r.ok) throw new Error("could not restore the conversation");
+  return r.json();
+}
+
+export async function renameSession(sessionId: string, title: string): Promise<Session> {
+  const r = await req(`/api/chat/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+  if (!r.ok) throw new Error("could not rename the conversation");
+  return r.json();
+}
+
+/** Drop the trailing assistant reply so the turn can be sent again. */
+export async function regenerate(sessionId: string): Promise<void> {
+  const r = await req(`/api/chat/sessions/${sessionId}/regenerate`, { method: "POST" });
+  if (!r.ok) throw new Error("could not regenerate");
 }
 
 // --- tasks ---
@@ -104,7 +127,10 @@ export type TaskInput = {
 
 export async function listTasks(status?: string): Promise<Task[]> {
   const r = await req(`/api/tasks${status ? `?status=${status}` : ""}`);
-  return r.ok ? r.json() : [];
+  // Throw rather than return [] — "we couldn't load this" and "you have nothing"
+  // must never look the same to the user.
+  if (!r.ok) throw new Error("could not load tasks");
+  return r.json();
 }
 
 export async function createTask(input: TaskInput): Promise<Task> {
@@ -126,7 +152,16 @@ export async function completeTask(id: string): Promise<Task> {
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  await req(`/api/tasks/${id}`, { method: "DELETE" });
+  const r = await req(`/api/tasks/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("could not delete the task");
+}
+
+/** Undo a delete. The task returns with the same id, so anything referring to it
+ *  — including the assistant — still points at the same thing. */
+export async function restoreTask(id: string): Promise<Task> {
+  const r = await req(`/api/tasks/${id}/restore`, { method: "POST" });
+  if (!r.ok) throw new Error("could not restore the task");
+  return r.json();
 }
 
 // --- journal ---
@@ -147,9 +182,35 @@ export type JournalInput = {
   tags?: string[];
 };
 
-export async function listJournal(): Promise<JournalEntry[]> {
-  const r = await req("/api/journal");
-  return r.ok ? r.json() : [];
+export type JournalQuery = { q?: string; limit?: number; offset?: number };
+
+export async function listJournal(query: JournalQuery = {}): Promise<JournalEntry[]> {
+  const params = new URLSearchParams();
+  if (query.q) params.set("q", query.q);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.offset) params.set("offset", String(query.offset));
+  const qs = params.toString();
+  const r = await req(`/api/journal${qs ? `?${qs}` : ""}`);
+  // Throw rather than return [] — a failed load must not be indistinguishable
+  // from an empty journal.
+  if (!r.ok) throw new Error("could not load the journal");
+  return r.json();
+}
+
+export async function updateJournalEntry(
+  id: string,
+  patch: Partial<JournalInput>,
+): Promise<JournalEntry> {
+  const r = await req(`/api/journal/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  if (!r.ok) throw new Error("could not update the entry");
+  return r.json();
+}
+
+/** Undo a delete. The entry returns with the same id and its original date. */
+export async function restoreJournalEntry(id: string): Promise<JournalEntry> {
+  const r = await req(`/api/journal/${id}/restore`, { method: "POST" });
+  if (!r.ok) throw new Error("could not restore the entry");
+  return r.json();
 }
 
 export async function addJournalEntry(input: JournalInput): Promise<JournalEntry> {
@@ -159,7 +220,8 @@ export async function addJournalEntry(input: JournalInput): Promise<JournalEntry
 }
 
 export async function deleteJournalEntry(id: string): Promise<void> {
-  await req(`/api/journal/${id}`, { method: "DELETE" });
+  const r = await req(`/api/journal/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("could not delete the entry");
 }
 
 // --- settings (provider + models) ---

@@ -1,27 +1,18 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import get_current_user
-from app.api.schemas import MessageIn, MessageOut, SessionOut
+from app.api.schemas import MessageIn, MessageOut, SessionOut, SessionPatch
 from app.config import settings
 from app.core.handler import handle_message
-from app.db.models import ChatSession, Message, User
+from app.db.models import User
 from app.db.session import get_db
+from app.services import sessions as svc
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-
-_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-
-
-def _owned_session(db: Session, session_id: uuid.UUID, user: User) -> ChatSession:
-    session = db.get(ChatSession, session_id)
-    if session is None or session.user_id != user.id:
-        raise _NOT_FOUND
-    return session
 
 
 @router.post("")
@@ -31,7 +22,7 @@ async def chat(
     db: Session = Depends(get_db),
 ) -> EventSourceResponse:
     if body.session_id is not None:
-        _owned_session(db, body.session_id, user)
+        svc.get_session(db, user.id, body.session_id)
 
     # Explicit user control: "think harder" routes this turn to deeper reasoning.
     effort = settings.reasoning_effort_deep if body.deep else None
@@ -49,16 +40,17 @@ async def chat(
 def list_sessions(
     user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> list[SessionOut]:
-    rows = (
-        db.execute(
-            select(ChatSession)
-            .where(ChatSession.user_id == user.id)
-            .order_by(ChatSession.last_active_at.desc())
-        )
-        .scalars()
-        .all()
-    )
-    return [SessionOut.model_validate(r) for r in rows]
+    return [SessionOut.model_validate(s) for s in svc.list_sessions(db, user.id)]
+
+
+@router.patch("/sessions/{session_id}")
+def rename_session(
+    session_id: uuid.UUID,
+    body: SessionPatch,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SessionOut:
+    return SessionOut.model_validate(svc.rename_session(db, user.id, session_id, body.title))
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -67,12 +59,30 @@ def delete_session(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    """Delete a conversation and its messages. Owner-scoped; learned profile facts are
-    deliberately kept — memory about the user outlives any single conversation."""
-    session = _owned_session(db, session_id, user)
-    db.execute(delete(Message).where(Message.session_id == session.id))
-    db.delete(session)
-    db.commit()
+    """Soft-delete a conversation so it can be undone. Its messages are kept, and
+    learned profile facts are deliberately untouched — memory about the user outlives
+    any single conversation."""
+    svc.delete_session(db, user.id, session_id)
+
+
+@router.post("/sessions/{session_id}/restore")
+def restore_session(
+    session_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SessionOut:
+    return SessionOut.model_validate(svc.restore_session(db, user.id, session_id))
+
+
+@router.post("/sessions/{session_id}/regenerate", status_code=status.HTTP_204_NO_CONTENT)
+def regenerate(
+    session_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Drop the trailing assistant reply so the client can re-send the turn. A no-op if
+    the last message is the user's — there is then nothing to regenerate."""
+    svc.drop_last_reply(db, user.id, session_id)
 
 
 @router.get("/sessions/{session_id}/messages")
@@ -81,12 +91,4 @@ def get_history(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[MessageOut]:
-    _owned_session(db, session_id, user)
-    rows = (
-        db.execute(
-            select(Message).where(Message.session_id == session_id).order_by(Message.created_at)
-        )
-        .scalars()
-        .all()
-    )
-    return [MessageOut.model_validate(r) for r in rows]
+    return [MessageOut.model_validate(m) for m in svc.list_messages(db, user.id, session_id)]

@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-16
+goal: Raise the interface from "functional" to "finished" — replace raw native
+  controls with themed ones, make every action feel instant and reversible,
+  surface the capabilities the backend already has but the UI never exposed,
+  and set a written UI standard so the gap does not reopen

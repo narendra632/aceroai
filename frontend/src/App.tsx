@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { ToastProvider } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AppShell from "./components/AppShell";
 import LoginScreen from "./components/LoginScreen";
@@ -22,16 +23,18 @@ export default function App() {
   }
 
   return (
-    <TooltipProvider delayDuration={200}>
-      {loading ? (
-        <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-          Loading…
-        </div>
-      ) : email ? (
-        <AppShell email={email} onLogout={handleLogout} />
-      ) : (
-        <LoginScreen onLogin={setEmail} />
-      )}
-    </TooltipProvider>
+    <ToastProvider>
+      <TooltipProvider delayDuration={200}>
+        {loading ? (
+          <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+            Loading…
+          </div>
+        ) : email ? (
+          <AppShell email={email} onLogout={handleLogout} />
+        ) : (
+          <LoginScreen onLogin={setEmail} />
+        )}
+      </TooltipProvider>
+    </ToastProvider>
   );
 }
