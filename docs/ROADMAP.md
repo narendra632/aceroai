@@ -30,45 +30,43 @@
   Per-user provider/model choice in a Settings view. Embeddings pinned separately.
   Per-turn telemetry (`aceroai.timing`) — which caught a 12 s embedding stall and
   took a turn from ~14 s to ~1.9 s in production.
+- **Documentation truth-up + diagrams** — every `.md` brought back in line with the
+  code, **Mermaid** adopted for architecture diagrams (in git, diff-reviewable), and
+  a standing "docs and diagrams reflect what was built" item added to every future
+  `tasks.md` so the drift cannot silently return.
+- **UI/UX to product standard** — all 38 findings in [`UI-AUDIT.md`](UI-AUDIT.md)
+  closed. Six shared primitives on Radix (no new dependencies); deleting is now
+  **reversible** via an Undo toast backed by soft delete (migration 004), with the
+  exclusion filter in `services/` so the assistant can never see a deleted record;
+  `notes` and `snoozed_until` finally have a UI; conversations can be renamed and
+  searched; every list has loading, empty and **error** states.
 
 ## Now
 
-- **Documentation truth-up + diagrams** *(current OpenSpec change)* — bring every
-  `.md` in the repo back in line with the code as it actually is, then adopt
-  **Mermaid** as the diagram format so architecture pictures live in git, diff
-  reviewably, and are updated in the same change as the code that moved.
-  Every future OpenSpec `tasks.md` carries a "diagrams match the code" checklist
-  item, the same way tests do.
+*(Nothing in flight — the next change on the list below starts when Narendra says so.)*
 
 ## Next (planned, in order)
 
-1. **UI/UX polish pass** — bring the interface to product standard rather than
-   functional standard. The gap is concrete: native `<select>` elements and a native
-   `datetime-local` input (an OS-styled white popup inside a dark UI, with an icon
-   that is invisible on dark), no session rename, and similar rough edges throughout.
-   Radix is already a dependency, so proper custom controls cost no new packages.
-   Principle: **no shortcuts on UI/UX** — the bar is ChatGPT / Claude, not "it works".
-
-2. **Scheduled jobs** — `app/jobs/` exists but is empty; APScheduler is in the stack
+1. **Scheduled jobs** — `app/jobs/` exists but is empty; APScheduler is in the stack
    and unused. A day-end summary and proactive nudges (overdue tasks, journal
    prompts) would make Acero the first to speak instead of purely reactive.
 
-3. **PWA + web push** — installable app, native notifications. This is the feature
+2. **PWA + web push** — installable app, native notifications. This is the feature
    that lets the **Telegram channel be retired**; it has been deferred twice and
    should not slip again.
 
-4. **Investments page** — Narendra has **local Markdown research files** describing
+3. **Investments page** — Narendra has **local Markdown research files** describing
    exactly how he wants this to work. **⚠ ASK HIM for those `.md` files when we
    reach this feature** — do not design it before reading them.
 
-5. **Knowledge visualization page** — visualize the memory/`profile_facts` and
+4. **Knowledge visualization page** — visualize the memory/`profile_facts` and
    their **pgvector embeddings** that Acero has learned about Narendra, so he can
    *see his knowledge graph grow* over time.
 
-6. **MCP-powered real-world capabilities** — expose the tools Narendra actually
+5. **MCP-powered real-world capabilities** — expose the tools Narendra actually
    uses through MCP so Acero can act in the real world, not just chat.
 
-7. **Beyond** — additional features as they come up; this list grows over time.
+6. **Beyond** — additional features as they come up; this list grows over time.
 
 ## Standing risk — not yet scheduled
 
@@ -94,6 +92,14 @@
      latency *and* recall quality — ⚠ changing the model invalidates every stored
      vector, so it requires a deliberate re-embed migration of `profile_facts`.
   4. **Trim the fixed token floor** (persona + tool schemas are re-sent every turn).
+
+- **Semantic journal search.** Search is currently `ILIKE`, a plain substring match —
+  cheap and honest, but it finds "errands" when you search "ran", and misses "I ran 5k"
+  when you search "running". Postgres full-text (`tsvector`) would fix both, but the
+  better end-state is **semantic search over the embeddings this app already produces**,
+  which would find "times I felt burnt out" in an entry that never uses those words.
+  Spending a migration on `tsvector` first would be paying for a stepping stone we
+  intend to step over.
 
 - **Public / multi-user app** — Narendra may later open this up to other users.
   If so, the auth and user model (currently deliberately single-user: one seeded

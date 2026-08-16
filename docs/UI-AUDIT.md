@@ -1,9 +1,19 @@
 # UI-AUDIT.md — the gap between "it works" and "it's finished"
 
-> **Status: for review.** This is an inventory, not a plan of record. Narendra strikes,
-> adds, and reorders; what survives becomes the scope of the UI change that follows.
+> ## ✅ Closed — all 38 findings resolved in `polish-ui-to-product-standard` (2026-08-17)
 >
-> *Audited 2026-08-16 against all 14 components.*
+> This file is kept as the **record of what was wrong and why**, because the reasoning
+> is more reusable than the list. The three habits named below are the ones to watch
+> for in new work; golden rule 12 in `AGENTS.md` exists because of them.
+>
+> **What changed, in one line each:** four native `<select>`s and a native
+> `datetime-local` became themed Radix controls · every list mutation became optimistic
+> with rollback · deleting became reversible via an Undo toast backed by soft delete ·
+> `notes` and `snoozed_until` finally became visible · conversations became renameable
+> and searchable · auto-scroll stopped fighting the reader · the composer draft stopped
+> vanishing on view switch · loading, empty and **error** states landed everywhere.
+>
+> *Originally audited 2026-08-16 against all 14 components.*
 
 ## How to read this
 

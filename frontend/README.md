@@ -81,7 +81,34 @@ persist it.
 | `src/components/ThinkingDots.tsx` | Animated first-token indicator |
 | `src/components/Composer.tsx` | Auto-grow input; send / stop button |
 | `src/components/LoginScreen.tsx` | Sign-in card |
-| `src/components/ui/*` | shadcn primitives (button, tooltip, dropdown-menu) |
+| `src/components/TaskSheet.tsx` | Task detail panel — title, notes, due, priority, status, snooze |
+| `src/components/ui/*` | Shared primitives (below) |
+| `src/hooks/useOptimisticList.ts` | Instant list mutations with rollback on failure |
+| `src/hooks/useToast.ts` | Toast context + `useToast()` (kept apart from the provider so HMR works) |
+
+## Shared primitives
+
+Built once and used by every screen, so the same interaction cannot behave two ways.
+All are composed from **`radix-ui`, which was already a dependency** — none of them
+required a new package.
+
+| Primitive | Why it exists |
+|---|---|
+| `ui/select.tsx` | A native `<select>` delegates its popup to the OS, so it ignores the palette entirely — a white list inside a dark app |
+| `ui/date-picker.tsx` | Hand-built calendar on Radix Popover + Today/Tomorrow/Next-week presets. Formats **local** time; `toISOString()` would shift to UTC and can land a due date on the wrong day |
+| `ui/sheet.tsx` | Detail panel — bottom on mobile, right on desktop. Radix Dialog supplies focus trapping, Escape, and scroll lock |
+| `ui/toast.tsx` | The only feedback channel, and the carrier for **Undo** |
+| `ui/states.tsx` | `ListSkeleton` / `EmptyState` / `ErrorState`. The last one matters: a failed load used to render the empty state, telling the user "you have nothing" when the request had failed |
+| `ui/tag-input.tsx` | Tag chips with suggestions from tags already in use |
+
+**Deleting is reversible, not confirmed.** Delete happens immediately and a toast
+offers Undo for ~7 s — the Gmail/Linear pattern. It adds no friction to the
+intentional case while still covering the mistake you notice a second later. The
+backend soft-deletes and `POST …/restore` brings the record back **with the same
+id**, so anything referring to it still points at the same thing.
+
+**Touch targets** reach the ~44 px guideline through a `.touch-target` hit-area
+overlay rather than by growing the visible control, so dense rows stay dense.
 
 ## Dependencies
 

@@ -1,10 +1,14 @@
+import { type KeyboardEvent, useMemo, useState } from "react";
 import {
   BookOpen,
+  Check,
   ListTodo,
   LogOut,
   MessageSquare,
   Moon,
+  Pencil,
   Plus,
+  Search,
   Settings as SettingsIcon,
   Sun,
   Trash2,
@@ -26,6 +30,23 @@ const NAV: { view: View; label: string; icon: ComponentType<{ className?: string
   { view: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
+const DAY_MS = 86_400_000;
+
+/** Group conversations the way a person thinks about them, not as one flat list. */
+function bucketOf(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = today.getTime();
+  if (d.getTime() >= start) return "Today";
+  if (d.getTime() >= start - DAY_MS) return "Yesterday";
+  if (d.getTime() >= start - 7 * DAY_MS) return "Previous 7 days";
+  if (d.getTime() >= start - 30 * DAY_MS) return "Previous 30 days";
+  return "Older";
+}
+
+const BUCKET_ORDER = ["Today", "Yesterday", "Previous 7 days", "Previous 30 days", "Older"];
+
 type Props = {
   email: string;
   view: View;
@@ -34,7 +55,8 @@ type Props = {
   open: boolean;
   onNavigate: (view: View) => void;
   onSelect: (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete: (session: Session) => void;
+  onRename: (id: string, title: string) => void;
   onNewChat: () => void;
   onClose: () => void;
   onLogout: () => void;
@@ -49,11 +71,39 @@ export default function Sidebar({
   onNavigate,
   onSelect,
   onDelete,
+  onRename,
   onNewChat,
   onClose,
   onLogout,
 }: Props) {
   const { theme, toggle } = useTheme();
+  const [filter, setFilter] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+
+  const groups = useMemo(() => {
+    const term = filter.trim().toLowerCase();
+    const matched = term
+      ? sessions.filter((s) => (s.title ?? "").toLowerCase().includes(term))
+      : sessions;
+    const by = new Map<string, Session[]>();
+    for (const s of matched) {
+      const b = bucketOf(s.last_active_at);
+      by.set(b, [...(by.get(b) ?? []), s]);
+    }
+    return BUCKET_ORDER.filter((b) => by.has(b)).map((b) => [b, by.get(b)!] as const);
+  }, [sessions, filter]);
+
+  function commitRename(id: string) {
+    const title = draft.trim();
+    if (title) onRename(id, title);
+    setEditing(null);
+  }
+
+  function onRenameKey(e: KeyboardEvent<HTMLInputElement>, id: string) {
+    if (e.key === "Enter") commitRename(id);
+    if (e.key === "Escape") setEditing(null);
+  }
 
   return (
     <>
@@ -84,7 +134,6 @@ export default function Sidebar({
           </div>
         </div>
 
-        {/* primary navigation */}
         <nav className="flex flex-col gap-1 px-3">
           {NAV.map(({ view: v, label, icon: Icon }) => (
             <button
@@ -102,50 +151,112 @@ export default function Sidebar({
           ))}
         </nav>
 
-        {/* conversations — only relevant on the Chat view */}
         {view === "chat" && (
           <>
-            <div className="mt-4 px-3">
+            <div className="mt-4 space-y-2 px-3">
               <Button variant="outline" onClick={onNewChat} className="w-full justify-start gap-2">
                 <Plus /> New chat
               </Button>
+              {sessions.length > 5 && (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5">
+                  <Search className="size-3.5 shrink-0 text-muted-foreground" />
+                  <input
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    placeholder="Search chats"
+                    aria-label="Search conversations"
+                    className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none"
+                  />
+                </div>
+              )}
             </div>
+
             <div className="no-scrollbar mt-2 flex-1 overflow-y-auto px-3 pb-3">
               {sessions.length === 0 ? (
                 <p className="px-2 py-4 text-sm text-faint">No conversations yet.</p>
+              ) : groups.length === 0 ? (
+                <p className="px-2 py-4 text-sm text-faint">No chats match that.</p>
               ) : (
-                <ul className="space-y-1">
-                  {sessions.map((s) => (
-                    <li key={s.id} className="group relative">
-                      <button
-                        onClick={() => onSelect(s.id)}
-                        title={s.title ?? "Untitled"}
-                        className={cn(
-                          "w-full truncate rounded-lg py-2.5 pr-9 pl-3 text-left text-sm transition",
-                          s.id === currentId
-                            ? "bg-accent text-accent-foreground"
-                            : "text-muted-foreground hover:bg-accent/60",
-                        )}
-                      >
-                        {s.title ?? "Untitled"}
-                      </button>
-                      <button
-                        onClick={() => onDelete(s.id)}
-                        aria-label="Delete conversation"
-                        title="Delete conversation"
-                        className={cn(
-                          "absolute top-1/2 right-1 grid size-7 -translate-y-1/2 place-items-center",
-                          "rounded-md text-muted-foreground transition hover:bg-destructive/15",
-                          "hover:text-destructive focus-visible:opacity-100",
-                          // stays reachable on touch, unobtrusive on desktop
-                          "opacity-0 group-hover:opacity-100 max-md:opacity-60",
-                        )}
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                groups.map(([bucket, items]) => (
+                  <div key={bucket} className="mb-3">
+                    <h3 className="px-2 py-1 text-[11px] font-medium tracking-wide text-faint uppercase">
+                      {bucket}
+                    </h3>
+                    <ul className="space-y-1">
+                      {items.map((s) => (
+                        <li key={s.id} className="group relative">
+                          {editing === s.id ? (
+                            <div className="flex items-center gap-1 rounded-lg bg-background px-2 py-1">
+                              <input
+                                autoFocus
+                                value={draft}
+                                onChange={(e) => setDraft(e.target.value)}
+                                onKeyDown={(e) => onRenameKey(e, s.id)}
+                                onBlur={() => commitRename(s.id)}
+                                aria-label="Conversation name"
+                                className="min-w-0 flex-1 bg-transparent py-1 text-sm outline-none"
+                              />
+                              <button
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => commitRename(s.id)}
+                                aria-label="Save name"
+                                className="grid size-7 shrink-0 place-items-center rounded-md text-primary hover:bg-accent"
+                              >
+                                <Check className="size-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => onSelect(s.id)}
+                                onDoubleClick={() => {
+                                  setEditing(s.id);
+                                  setDraft(s.title ?? "");
+                                }}
+                                title={s.title ?? "Untitled"}
+                                className={cn(
+                                  "w-full truncate rounded-lg py-2.5 pr-16 pl-3 text-left text-sm transition",
+                                  s.id === currentId
+                                    ? "bg-accent text-accent-foreground"
+                                    : "text-muted-foreground hover:bg-accent/60",
+                                )}
+                              >
+                                {s.title ?? "Untitled"}
+                              </button>
+                              <div
+                                className={cn(
+                                  "absolute top-1/2 right-1 flex -translate-y-1/2 items-center",
+                                  "opacity-0 transition group-hover:opacity-100 focus-within:opacity-100",
+                                  "max-md:opacity-60",
+                                )}
+                              >
+                                <button
+                                  onClick={() => {
+                                    setEditing(s.id);
+                                    setDraft(s.title ?? "");
+                                  }}
+                                  aria-label={`Rename "${s.title ?? "Untitled"}"`}
+                                  title="Rename"
+                                  className="touch-target grid size-7 place-items-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                                >
+                                  <Pencil className="size-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => onDelete(s)}
+                                  aria-label={`Delete "${s.title ?? "Untitled"}"`}
+                                  title="Delete"
+                                  className="touch-target grid size-7 place-items-center rounded-md text-muted-foreground transition hover:bg-destructive/15 hover:text-destructive"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
               )}
             </div>
           </>

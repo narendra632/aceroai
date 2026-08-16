@@ -261,6 +261,13 @@ a deliberate re-embed migration of every row.
 ~0.5–2 s for a region. Pick the region nearest the **server** — see
 [`REQUEST-ANATOMY.md`](REQUEST-ANATOMY.md).
 
+> **Known limit — regenerating does not retract learned facts.** Extraction runs in the
+> background after `done`, so by the time a reply is regenerated, any durable facts it
+> contained may already be stored. They are not removed. This is accepted rather than
+> overlooked: facts are deduplicated and supersedable, so a stale one is corrected by the
+> next contradicting statement rather than persisting as truth. Worth revisiting if
+> regeneration ever becomes a common action.
+
 ## 5. Data model
 
 ```mermaid
@@ -289,6 +296,7 @@ erDiagram
         text channel "web | telegram"
         text title
         timestamptz last_active_at
+        timestamptz deleted_at "soft delete — undo"
     }
     messages {
         uuid id PK
@@ -308,6 +316,7 @@ erDiagram
         timestamptz due_at
         timestamptz snoozed_until
         timestamptz completed_at
+        timestamptz deleted_at "soft delete — undo"
     }
     journal_entries {
         uuid id PK
@@ -316,6 +325,7 @@ erDiagram
         text content
         smallint mood "1-5, optional"
         text_array tags
+        timestamptz deleted_at "soft delete — undo"
     }
     profile_facts {
         uuid id PK
@@ -352,6 +362,13 @@ Why it is shaped this way:
   `valid_from` timelines. `source` + `confidence` let the composer weigh how firmly to
   assert something; `rejected` records what the user explicitly denied, so it is never
   re-inferred.
+- **Deleting is reversible** (migration 004) — `DELETE` stamps `deleted_at` rather than
+  removing the row, so the UI can offer Undo. **The exclusion filter lives only in the
+  `services/` query builders**, which the REST API, the assistant's tools, and the
+  composer's task block all read through. That is deliberate: a query that forgot
+  `deleted_at IS NULL` would leak deleted records into the model's context, where the
+  assistant would act confidently on something the user believes is gone. Deleting a
+  conversation keeps its messages, so a restore returns it intact.
 - **`generated_reviews` exists but is unwritten** — the table is ready; no job writes to it
   yet (`app/jobs/` is empty).
 

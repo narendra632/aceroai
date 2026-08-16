@@ -1,12 +1,23 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ErrorState } from "@/components/ui/states";
+import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
 import type { Settings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_LABEL: Record<string, string> = { google: "Google (Gemini)", openai: "OpenAI" };
+const CUSTOM = "__custom__";
 
 /** A model picker that also accepts a model we don't list yet, so a newly released
  *  model is usable before the catalog is updated. */
@@ -24,28 +35,46 @@ function ModelField({
   onChange: (v: string) => void;
 }) {
   const known = options.includes(value);
+  // Remember that the user chose "custom" even while the box is briefly empty,
+  // so the field doesn't snap back to the dropdown mid-typing.
+  const [custom, setCustom] = useState(!known && value !== "");
+  const showCustom = custom || (!known && value !== "");
+
   return (
     <div>
-      <label className="text-sm font-medium">{label}</label>
+      <span className="text-sm font-medium">{label}</span>
       <p className="mt-0.5 mb-2 text-xs text-muted-foreground">{hint}</p>
-      <select
-        value={known ? value : "__custom__"}
-        onChange={(e) => onChange(e.target.value === "__custom__" ? "" : e.target.value)}
-        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+      <Select
+        value={showCustom ? CUSTOM : value}
+        onValueChange={(v) => {
+          if (v === CUSTOM) {
+            setCustom(true);
+          } else {
+            setCustom(false);
+            onChange(v);
+          }
+        }}
       >
-        {options.map((m) => (
-          <option key={m} value={m}>
-            {m}
-          </option>
-        ))}
-        <option value="__custom__">Other…</option>
-      </select>
-      {!known && (
+        <SelectTrigger className="w-full" aria-label={label}>
+          <SelectValue placeholder="Choose a model" />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((m) => (
+            <SelectItem key={m} value={m}>
+              {m}
+            </SelectItem>
+          ))}
+          <SelectSeparator />
+          <SelectItem value={CUSTOM}>Another model…</SelectItem>
+        </SelectContent>
+      </Select>
+      {showCustom && (
         <input
-          value={value}
+          value={known ? "" : value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="exact model id"
-          className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+          placeholder="exact model id, e.g. gemini-3.9-flash"
+          aria-label={`${label} — custom model id`}
+          className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
         />
       )}
     </div>
@@ -59,46 +88,96 @@ export default function SettingsView() {
   const [deep, setDeep] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [switchNote, setSwitchNote] = useState<string | null>(null);
 
-  function apply(s: Settings) {
+  // Remembers each provider's models, so switching away and back doesn't silently
+  // throw your choices away.
+  const remembered = useRef<Record<string, { chat: string; deep: string }>>({});
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toast = useToast();
+
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
+
+  const apply = useCallback((s: Settings) => {
     setData(s);
     setProvider(s.provider);
     setChat(s.model_chat);
     setDeep(s.model_deep);
-  }
-
-  useEffect(() => {
-    api.getSettings().then(apply).catch(() => setError("Could not load settings."));
+    remembered.current[s.provider] = { chat: s.model_chat, deep: s.model_deep };
   }, []);
+
+  const load = useCallback(() => {
+    setLoadError(false);
+    api
+      .getSettings()
+      .then(apply)
+      .catch(() => setLoadError(true));
+  }, [apply]);
+
+  useEffect(load, [load]);
+
+  function pickProvider(p: string) {
+    if (p === provider || !data) return;
+    remembered.current[provider] = { chat, deep };
+    const catalog = data.model_catalog[p] ?? [];
+    const prior = remembered.current[p];
+    if (prior) {
+      setChat(prior.chat);
+      setDeep(prior.deep);
+      setSwitchNote(null);
+    } else {
+      setChat(catalog[0] ?? "");
+      setDeep(catalog[0] ?? "");
+      // Say it out loud rather than silently replacing what the user picked.
+      setSwitchNote(
+        `Models set to ${PROVIDER_LABEL[p] ?? p} defaults — ${catalog[0] ?? "none available"}.`,
+      );
+    }
+    setProvider(p);
+  }
 
   async function save() {
     setSaving(true);
-    setError(null);
     try {
       apply(await api.updateSettings({ provider, model_chat: chat, model_deep: deep }));
+      setSwitchNote(null);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save settings.");
+      toast.error(e instanceof Error ? e.message : "Could not save settings.");
     } finally {
       setSaving(false);
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-2xl px-4 py-6">
+          <ErrorState
+            title="Couldn't load settings"
+            detail="Your saved provider and models are unchanged."
+            onRetry={load}
+          />
+        </div>
+      </div>
+    );
   }
 
   if (!data) {
     return (
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-2xl px-4 py-6 text-sm text-muted-foreground">
-          {error ?? "Loading…"}
+          Loading…
         </div>
       </div>
     );
   }
 
   const models = data.model_catalog[provider] ?? [];
-  const dirty =
-    provider !== data.provider || chat !== data.model_chat || deep !== data.model_deep;
+  const dirty = provider !== data.provider || chat !== data.model_chat || deep !== data.model_deep;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -115,8 +194,7 @@ export default function SettingsView() {
             <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
           </span>
           <span className="text-sm">
-            Answering with{" "}
-            <strong>{PROVIDER_LABEL[data.provider] ?? data.provider}</strong>
+            Answering with <strong>{PROVIDER_LABEL[data.provider] ?? data.provider}</strong>
             <span className="text-muted-foreground"> · </span>
             <span className="font-mono text-xs">{data.model_chat}</span>
           </span>
@@ -136,15 +214,9 @@ export default function SettingsView() {
               return (
                 <button
                   key={p}
-                  onClick={() => {
-                    setProvider(p);
-                    // jump to that provider's defaults so the models always match
-                    const next = data.model_catalog[p] ?? [];
-                    setChat(next[0] ?? "");
-                    setDeep(next[0] ?? "");
-                  }}
+                  onClick={() => pickProvider(p)}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition",
+                    "flex min-h-11 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition",
                     picked
                       ? "border-primary bg-primary text-primary-foreground"
                       : "border-border hover:bg-accent",
@@ -166,6 +238,9 @@ export default function SettingsView() {
               );
             })}
           </div>
+
+          {switchNote && <p className="mt-3 text-xs text-muted-foreground">{switchNote}</p>}
+
           {data.available_providers.length < 2 && (
             <p className="mt-3 text-xs text-faint">
               Only providers with credentials configured on the server are shown. Add another
@@ -199,7 +274,6 @@ export default function SettingsView() {
                 <Check className="size-4" /> Saved
               </span>
             )}
-            {error && <span className="text-sm text-destructive">{error}</span>}
           </div>
         </section>
 
@@ -220,6 +294,25 @@ export default function SettingsView() {
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             {data.embedding.note}
           </p>
+        </section>
+
+        <section className="mt-4 rounded-xl border border-border p-4">
+          <h2 className="mb-2 font-medium">Keyboard shortcuts</h2>
+          <dl className="grid gap-1.5 text-sm sm:grid-cols-2">
+            {[
+              ["Ctrl / ⌘ + K", "New chat"],
+              ["/", "Jump to the message box"],
+              ["Enter", "Send · Shift+Enter for a new line"],
+              ["Esc", "Close the menu or a panel"],
+            ].map(([key, what]) => (
+              <div key={key} className="flex items-center gap-2">
+                <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-xs">
+                  {key}
+                </kbd>
+                <dd className="text-muted-foreground">{what}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
       </div>
     </div>

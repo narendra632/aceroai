@@ -87,9 +87,31 @@ The action policy (act on clear requests, offer on vague ones, confirm destructi
 ones) lives in `../docs/SOUL.md`.
 
 Endpoints: `GET/POST /api/tasks`, `PATCH/DELETE /api/tasks/{id}`,
-`POST /api/tasks/{id}/complete`; `GET/POST /api/journal`,
-`PATCH/DELETE /api/journal/{id}`. All are owner-scoped; service-layer domain
-errors map to `404` / `400` in `main.py`.
+`POST /api/tasks/{id}/complete`, `POST /api/tasks/{id}/restore`;
+`GET/POST /api/journal` (`?q=` search, `limit`/`offset`),
+`PATCH/DELETE /api/journal/{id}`, `POST /api/journal/{id}/restore`;
+`GET/PATCH/DELETE /api/chat/sessions/{id}` (rename via PATCH),
+`POST /api/chat/sessions/{id}/restore`, `POST /api/chat/sessions/{id}/regenerate`.
+All are owner-scoped; service-layer domain errors map to `404` / `400` in `main.py`.
+
+## Deleting is reversible
+
+`DELETE` on a task, journal entry, or conversation **soft-deletes** it (migration
+004 adds `deleted_at`), so the UI can offer Undo instead of a confirmation dialog.
+`POST …/restore` clears it.
+
+**The exclusion filter lives only in the `services/` query builders.** That is the
+whole safety argument: the REST API, the assistant's tools, and
+`composer.build_context`'s injected task block all read through that one layer, so
+none of them can forget it. The composer path is the one that matters most — a leak
+there would put a deleted task into the model's context, where Acero would act on
+something the user believes is gone. `tests/test_soft_delete.py` checks each reader
+separately.
+
+Deleting a conversation **keeps its messages**, or a restore would hand back an
+empty conversation. `services/sessions.py` exists for the same reason the other
+services do: before it, `api/chat.py` queried `ChatSession` directly in its routes,
+which would have put this filter in two places.
 
 ## Model providers
 

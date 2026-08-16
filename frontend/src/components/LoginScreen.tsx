@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api";
@@ -8,6 +9,7 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [show, setShow] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -44,16 +46,33 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
           <label className="block text-sm font-medium text-muted-foreground" htmlFor="password">
             Password
           </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-          />
-          {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+          <div className="relative mt-1">
+            <input
+              id="password"
+              type={show ? "text" : "password"}
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full rounded-lg border border-border bg-background py-2.5 pr-12 pl-3 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            />
+            <button
+              type="button"
+              onClick={() => setShow((s) => !s)}
+              aria-label={show ? "Hide password" : "Show password"}
+              aria-pressed={show}
+              className="absolute top-1/2 right-1 grid size-10 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
+          {/* role="alert" so a screen reader announces the failure rather than
+              leaving the user wondering why nothing happened */}
+          {error && (
+            <p role="alert" className="mt-3 text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <Button type="submit" disabled={busy} size="lg" className="mt-5 w-full">
             {busy ? "Signing in…" : "Sign in"}
           </Button>
