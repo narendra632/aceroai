@@ -236,7 +236,22 @@ different, unrelated pot). Auth is **Application Default Credentials**, so there
    (IAM → find the VM's service account → Edit → Add role). This is what lets the
    backend authenticate with no key file: ADC resolves through the VM's metadata
    server automatically.
-3. Set a **budget alert** on the billing account, so an exhausted credit shows up as a
+3. **Widen the VM's access scopes to `cloud-platform`** — ⚠ *this is a second,
+   separate gate and the role alone is not enough.* A GCE VM's **access scopes** limit
+   which APIs it may even request a token for, independently of IAM. The default
+   scopes exclude Vertex AI, so calls fail with:
+   `403 PERMISSION_DENIED … ACCESS_TOKEN_SCOPE_INSUFFICIENT`.
+   Scopes **cannot be changed while the VM is running**:
+   ```bash
+   gcloud compute instances stop  <vm> --zone <zone>
+   gcloud compute instances set-service-account <vm> --zone <zone> \
+     --scopes=https://www.googleapis.com/auth/cloud-platform
+   gcloud compute instances start <vm> --zone <zone>
+   ```
+   (Console equivalent: stop the VM → Edit → **Access scopes → Allow full access to
+   all Cloud APIs** → Save → Start.) A reserved static IP survives stop/start, so DNS
+   and TLS are unaffected; containers restart on their own.
+4. Set a **budget alert** on the billing account, so an exhausted credit shows up as a
    warning rather than as failed chats.
 
 **In the server `.env`** (you edit it; never committed):
