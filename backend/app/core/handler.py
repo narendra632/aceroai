@@ -291,6 +291,22 @@ async def handle_message(
         tl.note(error=type(exc).__name__)
         tl.emit()
         yield "error", _user_error(exc)
+        # Record the failure too. A dashboard that only shows successful turns hides the
+        # thing you most need to see, and a failed turn still consumed tokens.
+        await telemetry.record(
+            tl,
+            user.id,
+            "chat",
+            session_id=session_id,
+            channel=channel,
+            provider=provider,
+            model=model,
+            effort=effort,
+            usage=usage,
+            rounds=rounds,
+            ok=False,
+            error_type=type(exc).__name__,
+        )
         return
 
     reply = "".join(parts)
@@ -307,8 +323,26 @@ async def handle_message(
         reply_chars=len(reply),
         tokens_in=usage.get("tokens_in", "-"),
         tokens_out=usage.get("tokens_out", "-"),
+        tokens_thinking=usage.get("tokens_thinking", "-"),
     )
     tl.emit()
+    tl.annotate("memory_recall", facts=len(facts))
+    tl.annotate("build_context", approx_tokens=shape["approx_tokens"], messages=shape["messages"])
+
+    # AFTER the final SSE event, in its own session, failures swallowed. The reply is
+    # already delivered, so nothing here can delay or break it.
+    await telemetry.record(
+        tl,
+        user.id,
+        "chat",
+        session_id=session_id,
+        channel=channel,
+        provider=provider,
+        model=model,
+        effort=effort,
+        usage=usage,
+        rounds=rounds,
+    )
 
     # Learn durable facts from this turn, off the reply path — deliberately AFTER
     # "done", so its latency is never felt by the user.

@@ -90,7 +90,7 @@ def test_store_inserts_new_fact_with_embedding(db, user):
 
 
 def test_extract_and_store_persists_extracted_facts(monkeypatch, db, user):
-    async def fake_complete(messages, model=None, effort=None, provider=None):
+    async def fake_complete(messages, model=None, effort=None, provider=None, usage=None):
         return '[{"fact": "User loves hiking", "category": "preference", "confidence": 0.9}]'
 
     monkeypatch.setattr("app.core.llm.complete", fake_complete)
@@ -104,7 +104,7 @@ def test_extract_and_store_persists_extracted_facts(monkeypatch, db, user):
 
 
 def test_extract_and_store_swallows_errors(monkeypatch, db, user):
-    async def boom(messages, model=None, effort=None, provider=None):
+    async def boom(messages, model=None, effort=None, provider=None, usage=None):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr("app.core.llm.complete", boom)
@@ -116,7 +116,7 @@ def test_extract_and_store_swallows_errors(monkeypatch, db, user):
 
 
 def test_extract_ignores_empty_extraction(monkeypatch, db, user):
-    async def empty(messages, model=None, effort=None, provider=None):
+    async def empty(messages, model=None, effort=None, provider=None, usage=None):
         return "[]"
 
     monkeypatch.setattr("app.core.llm.complete", empty)

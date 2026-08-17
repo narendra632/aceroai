@@ -1,9 +1,10 @@
 import datetime as dt
 import uuid
+from decimal import Decimal
 
 import sqlalchemy as sa
 from pgvector.sqlalchemy import Vector
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.config import settings
@@ -167,3 +168,60 @@ class GeneratedReview(Base):
     content: Mapped[str] = mapped_column(sa.Text)
     delivered_to: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), default=list)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Turn(Base):
+    """One model call — including the ones the user never sees (migration 007).
+
+    A single user message can trigger four provider calls: an embedding for recall, the
+    reply itself, the fact extractor, and an embedding for any new facts. Only the reply
+    produces a `messages` row, so `kind` is what makes the other three attributable rather
+    than invisible spend.
+
+    Records shape, counts and durations. Never prompt or response text — `messages` already
+    holds the content, and duplicating it here would double both the disk footprint and the
+    blast radius of a leak.
+    """
+
+    __tablename__ = "turns"
+    __table_args__ = (
+        sa.CheckConstraint("kind in ('chat','memory_extract','embed','job')", name="turns_kind"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id"))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
+    channel: Mapped[str | None] = mapped_column(sa.Text)
+    kind: Mapped[str] = mapped_column(sa.Text)
+    provider: Mapped[str | None] = mapped_column(sa.Text)
+    model: Mapped[str | None] = mapped_column(sa.Text)
+    effort: Mapped[str | None] = mapped_column(sa.Text)
+    started_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+    duration_ms: Mapped[int | None]
+    ttft_ms: Mapped[int | None]
+    rounds: Mapped[int | None] = mapped_column(sa.SmallInteger)
+    tokens_in: Mapped[int | None]
+    tokens_out: Mapped[int | None]
+    tokens_thinking: Mapped[int | None]
+    tokens_cached: Mapped[int | None]
+    # NULL = no price known for this model. Never 0 — a zero is a lie that silently
+    # understates the total, while a gap is visible and gets fixed.
+    cost_usd: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 6))
+    # Which price list produced cost_usd, so any figure on screen can be explained.
+    pricing_version: Mapped[str | None] = mapped_column(sa.Text)
+    ok: Mapped[bool] = mapped_column(sa.Boolean, default=True)
+    error_type: Mapped[str | None] = mapped_column(sa.Text)
+
+
+class Span(Base):
+    """One stage within a turn — what draws the per-turn waterfall (migration 007)."""
+
+    __tablename__ = "spans"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    turn_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("turns.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(sa.Text)
+    seq: Mapped[int] = mapped_column(sa.SmallInteger)
+    duration_ms: Mapped[int | None]
+    # Counts and identifiers only, never message text.
+    meta: Mapped[dict | None] = mapped_column(JSONB)

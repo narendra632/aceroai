@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core import llm
+from app.core import llm, telemetry
 from app.db.models import ProfileFact, User
 from app.db.session import SessionLocal
 from app.services import memory as svc
@@ -98,10 +98,12 @@ async def recall(db: Session, user: User, query_text: str, k: int | None = None)
     k = settings.memory_recall_k if k is None else k
     if k <= 0 or not query_text.strip():
         return []
+    usage: dict = {}
+    tl = telemetry.Timeline()
     try:
         t0 = time.perf_counter()
         vecs = await asyncio.wait_for(
-            llm.embed([query_text]), timeout=settings.memory_recall_timeout_s
+            llm.embed([query_text], usage=usage), timeout=settings.memory_recall_timeout_s
         )
         t1 = time.perf_counter()
         facts = await run_in_threadpool(recall_facts, db, user, vecs[0], k)
@@ -114,6 +116,18 @@ async def recall(db: Session, user: User, query_text: str, k: int | None = None)
             (t1 - t0) * 1000,
             (t2 - t1) * 1000,
             len(facts),
+        )
+        # An embedding on EVERY message, previously billed and never counted.
+        tl.stages.append(("embed", (t1 - t0) * 1000))
+        tl.stages.append(("pgvector", (t2 - t1) * 1000))
+        tl.annotate("pgvector", facts=len(facts))
+        await telemetry.record(
+            tl,
+            user.id,
+            "embed",
+            provider=settings.embed_provider,
+            model=settings.embed_model,
+            usage=usage,
         )
         return facts
     except TimeoutError:
@@ -291,7 +305,9 @@ def _parse_facts(raw: str) -> list[dict]:
     return out
 
 
-async def _extract(user_text: str, reply_text: str, known: Sequence[str]) -> list[dict]:
+async def _extract(
+    user_text: str, reply_text: str, known: Sequence[str], usage: dict | None = None
+) -> list[dict]:
     known_block = "\n".join(f"- {k}" for k in known) or "(none yet)"
     user_msg = (
         f"Known facts:\n{known_block}\n\n"
@@ -305,6 +321,7 @@ async def _extract(user_text: str, reply_text: str, known: Sequence[str]) -> lis
         ],
         model=settings.model_memory or settings.model_chat,
         effort=settings.reasoning_effort_chat,
+        usage=usage,
     )
     return _parse_facts(raw)
 
@@ -334,12 +351,19 @@ async def extract_and_store(
     `source_ref` is the message this turn came from, recorded so the user can ask "where did
     you get that?" and be shown the conversation.
     """
+    tl = telemetry.Timeline()
+    usage: dict = {}
+    ok, error_type = True, None
     try:
-        facts = await _extract(user_text, reply_text, known)
+        with tl.stage("extract"):
+            facts = await _extract(user_text, reply_text, known, usage=usage)
+        tl.annotate("extract", proposed=len(facts), known_shown=len(known))
         if not facts:
             return
-        vectors = await llm.embed([f["fact"] for f in facts])
+        with tl.stage("embed_facts"):
+            vectors = await llm.embed([f["fact"] for f in facts], usage=usage)
         counts = await run_in_threadpool(_store, user_id, facts, vectors, source_ref)
+        tl.annotate("extract", **counts)
         if any(counts.values()):
             log.info(
                 "memory: stored=%d superseded=%d skipped_duplicate=%d",
@@ -347,5 +371,20 @@ async def extract_and_store(
                 counts["superseded"],
                 counts["skipped"],
             )
-    except Exception:
+    except Exception as exc:
+        ok, error_type = False, type(exc).__name__
         log.warning("memory extraction failed", exc_info=True)
+    finally:
+        # A second full model call fires after EVERY message to learn from it. It was
+        # billed and completely uncounted — the largest invisible line in the bill.
+        await telemetry.record(
+            tl,
+            user_id,
+            "memory_extract",
+            provider=settings.llm_provider,
+            model=settings.model_memory or settings.model_chat,
+            effort=settings.reasoning_effort_chat,
+            usage=usage,
+            ok=ok,
+            error_type=error_type,
+        )

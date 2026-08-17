@@ -38,7 +38,7 @@ def _fact(user, text, vec, **kw):
 
 
 def _extractor(payload):
-    async def fake(messages, model=None, effort=None, provider=None):
+    async def fake(messages, model=None, effort=None, provider=None, usage=None):
         return json.dumps(payload)
 
     return fake
@@ -52,7 +52,7 @@ def _embedder(*vectors):
     on top of the stored one, which means saying so explicitly.
     """
 
-    async def fake(texts):
+    async def fake(texts, usage=None):
         return list(vectors)
 
     return fake
@@ -257,7 +257,7 @@ def test_extraction_prompt_contains_only_the_facts_it_was_given(monkeypatch, db,
 
     seen = {}
 
-    async def capture(messages, model=None, effort=None, provider=None):
+    async def capture(messages, model=None, effort=None, provider=None, usage=None):
         seen["prompt"] = messages[-1]["content"]
         return "[]"
 
@@ -299,7 +299,7 @@ def test_extraction_prompt_shows_the_known_facts_it_must_match(monkeypatch, db, 
     prompt where the model can see their wording."""
     seen = {}
 
-    async def capture(messages, model=None, effort=None, provider=None):
+    async def capture(messages, model=None, effort=None, provider=None, usage=None):
         seen["prompt"] = messages[-1]["content"]
         return "[]"
 

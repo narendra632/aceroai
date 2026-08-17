@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
 from app.core.security import hash_password
-from app.db.models import ChatSession, JournalEntry, Message, ProfileFact, Task, User
+from app.db.models import ChatSession, JournalEntry, Message, ProfileFact, Span, Task, Turn, User
 from app.db.session import SessionLocal
 from app.main import app
 
@@ -27,6 +27,12 @@ def _purge(db):
         ]
         if sids:
             db.execute(delete(Message).where(Message.session_id.in_(sids)))
+        # Traces reference the user, so they must go before it. Spans cascade from turns,
+        # but are deleted explicitly so a future change to that FK cannot leave orphans.
+        turn_ids = [t.id for t in db.execute(select(Turn).where(Turn.user_id == u.id)).scalars()]
+        if turn_ids:
+            db.execute(delete(Span).where(Span.turn_id.in_(turn_ids)))
+        db.execute(delete(Turn).where(Turn.user_id == u.id))
         db.execute(delete(ChatSession).where(ChatSession.user_id == u.id))
         db.execute(delete(ProfileFact).where(ProfileFact.user_id == u.id))
         db.execute(delete(Task).where(Task.user_id == u.id))
@@ -94,10 +100,10 @@ def fake_llm(monkeypatch):
         for tok in ["Hello", ", ", "there", "."]:
             yield "delta", tok
 
-    async def _fake_embed(texts):
+    async def _fake_embed(texts, usage=None):
         return [fake_embed_vec(t) for t in texts]
 
-    async def _fake_complete(messages, model=None, effort=None, provider=None):
+    async def _fake_complete(messages, model=None, effort=None, provider=None, usage=None):
         return "[]"  # no facts by default; memory tests override this
 
     monkeypatch.setattr("app.core.llm.stream_with_tools", _fake_stream_with_tools)

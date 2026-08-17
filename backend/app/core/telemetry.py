@@ -11,11 +11,20 @@ it returns them. `approx_tokens` is only a *local estimate* for the per-block br
 approximate wherever it is shown.
 """
 
+import datetime as dt
 import logging
 import time
+import uuid
 from contextlib import contextmanager
 
+from fastapi.concurrency import run_in_threadpool
+
+from app.core import pricing
+from app.db.models import Span, Turn
+from app.db.session import SessionLocal
+
 log = logging.getLogger("aceroai.timing")
+persist_log = logging.getLogger(__name__)
 
 # Rough bytes-per-token for English prose. Real tokenizers differ per model; this is a
 # sizing aid for the context breakdown, never billing.
@@ -31,8 +40,12 @@ class Timeline:
 
     def __init__(self) -> None:
         self.t0 = time.perf_counter()
+        # perf_counter has no relation to wall time, so a real timestamp is kept for the
+        # stored trace — you cannot chart "spend in March" against a monotonic counter.
+        self.started_at = dt.datetime.now(dt.UTC)
         self.stages: list[tuple[str, float]] = []
         self.notes: dict[str, object] = {}
+        self.span_meta: dict[str, dict] = {}
 
     @contextmanager
     def stage(self, name: str):
@@ -49,6 +62,14 @@ class Timeline:
     def note(self, **kwargs: object) -> None:
         self.notes.update(kwargs)
 
+    def annotate(self, stage: str, **meta: object) -> None:
+        """Attach counts to a stage — retries, facts recalled, duplicates discarded.
+
+        These are signals that were previously logged and then lost. Counting them here
+        makes questions like "how often does a retry happen?" answerable from data rather
+        than from grepping."""
+        self.span_meta.setdefault(stage, {}).update(meta)
+
     @property
     def total_ms(self) -> float:
         return (time.perf_counter() - self.t0) * 1000
@@ -57,6 +78,104 @@ class Timeline:
         parts = " ".join(f"{name}={ms:.0f}ms" for name, ms in self.stages)
         extra = " ".join(f"{k}={v}" for k, v in self.notes.items())
         log.info("turn total=%.0fms %s %s", self.total_ms, parts, extra)
+
+    # --- persistence ----------------------------------------------------------------
+
+    def persist(
+        self,
+        user_id: uuid.UUID,
+        kind: str,
+        *,
+        session_id: uuid.UUID | None = None,
+        channel: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        usage: dict | None = None,
+        rounds: int | None = None,
+        ok: bool = True,
+        error_type: str | None = None,
+    ) -> uuid.UUID | None:
+        """Store this trace as one `turns` row plus one `spans` row per stage.
+
+        MUST be called after the response is complete. Opens its own session and swallows
+        every failure: an observability system that can slow down or break the thing it
+        observes is worse than no observability system. Returns the turn id, or None if
+        writing failed.
+
+        Sync on purpose — callers in async code wrap it in `run_in_threadpool`, the same as
+        every other DB touchpoint.
+        """
+        usage = usage or {}
+        db = SessionLocal()
+        try:
+            turn = Turn(
+                user_id=user_id,
+                session_id=session_id,
+                channel=channel,
+                kind=kind,
+                provider=provider,
+                model=model,
+                effort=effort or None,
+                started_at=self.started_at,
+                duration_ms=round(self.total_ms),
+                ttft_ms=next(
+                    (round(ms) for name, ms in self.stages if name == "first_token"), None
+                ),
+                rounds=rounds,
+                tokens_in=usage.get("tokens_in"),
+                tokens_out=usage.get("tokens_out"),
+                tokens_thinking=usage.get("tokens_thinking"),
+                tokens_cached=usage.get("tokens_cached"),
+                cost_usd=pricing.estimate_cost(
+                    provider,
+                    model,
+                    tokens_in=usage.get("tokens_in"),
+                    tokens_out=usage.get("tokens_out"),
+                    tokens_thinking=usage.get("tokens_thinking"),
+                    tokens_cached=usage.get("tokens_cached"),
+                    when=self.started_at,
+                ),
+                pricing_version=pricing.PRICING_VERSION,
+                ok=ok,
+                error_type=error_type,
+            )
+            db.add(turn)
+            db.flush()
+            for seq, (name, ms) in enumerate(self.stages):
+                db.add(
+                    Span(
+                        turn_id=turn.id,
+                        name=name,
+                        seq=seq,
+                        duration_ms=round(ms),
+                        meta=self.span_meta.get(name) or None,
+                    )
+                )
+            db.commit()
+            return turn.id
+        except Exception:
+            persist_log.warning("failed to persist trace; the reply is unaffected", exc_info=True)
+            db.rollback()
+            return None
+        finally:
+            db.close()
+
+
+async def record(tl: "Timeline", *args, **kwargs) -> None:
+    """Persist a trace off the reply path, swallowing absolutely everything.
+
+    `Timeline.persist` already guards its own database work, but that only covers failures
+    it anticipated. This wrapper is the guarantee itself: no defect in trace recording —
+    a bad column, a type error, a broken session — can reach the code that was producing a
+    reply. Enforced by a test that replaces `persist` with a function that always raises.
+
+    Every caller uses this rather than `persist` directly.
+    """
+    try:
+        await run_in_threadpool(tl.persist, *args, **kwargs)
+    except Exception:
+        persist_log.warning("trace recording failed; the reply is unaffected", exc_info=True)
 
 
 def describe_context(messages: list[dict]) -> dict:
