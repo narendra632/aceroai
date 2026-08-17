@@ -130,22 +130,26 @@ async def recall(db: Session, user: User, query_text: str, k: int | None = None)
 # --- extraction + storage (background; each helper owns its own DB session) ---
 
 
-def _too_similar(db: Session, user_id: uuid.UUID, vec: list[float]) -> bool:
-    nearest = (
-        db.execute(
-            live(select(ProfileFact.embedding.cosine_distance(vec)))
-            .where(
-                ProfileFact.user_id == user_id,
-                ProfileFact.status == "active",
-                ProfileFact.embedding.isnot(None),
-            )
-            .order_by(ProfileFact.embedding.cosine_distance(vec))
-            .limit(1)
+def _nearest_active(
+    db: Session, user_id: uuid.UUID, vec: list[float]
+) -> tuple[ProfileFact, float] | None:
+    """The closest active fact to `vec`, with its distance. None if there are none."""
+    row = db.execute(
+        live(select(ProfileFact, ProfileFact.embedding.cosine_distance(vec).label("d")))
+        .where(
+            ProfileFact.user_id == user_id,
+            ProfileFact.status == "active",
+            ProfileFact.embedding.isnot(None),
         )
-        .scalars()
-        .first()
-    )
-    return nearest is not None and nearest < settings.memory_dedup_distance
+        .order_by(ProfileFact.embedding.cosine_distance(vec))
+        .limit(1)
+    ).first()
+    return (row[0], float(row[1])) if row is not None else None
+
+
+def _too_similar(db: Session, user_id: uuid.UUID, vec: list[float]) -> bool:
+    nearest = _nearest_active(db, user_id, vec)
+    return nearest is not None and nearest[1] < settings.memory_dedup_distance
 
 
 def _normalise(text: str) -> str:
@@ -212,7 +216,21 @@ def _store(
                 # guessing which one it meant, and fall through to the normal path.
                 log.info("memory: `replaces` target not found, treating as new: %r", replaces)
 
-            if _too_similar(db, user_id, vec):
+            near = _nearest_active(db, user_id, vec)
+            if near is not None and near[1] < settings.memory_dedup_distance:
+                # Record WHAT was discarded, not just that something was. This branch
+                # assumes the fact is a restatement, and distance alone provably cannot
+                # tell a restatement from a change: measured, real restatements span
+                # 0.020-0.028 and real changes span 0.029-0.118, which overlap. The
+                # `replaces` hint above is what actually separates them, so if it ever
+                # misses, a true correction dies here. Silently, until now — the counter
+                # this used to increment left no way to ever discover it happened.
+                log.info(
+                    "memory: discarded as duplicate (distance %.3f) %r — nearest was %r",
+                    near[1],
+                    fact["fact"],
+                    near[0].fact,
+                )
                 counts["skipped"] += 1
                 continue
             db.add(
