@@ -124,3 +124,88 @@ class SettingsOut(BaseModel):
     model_catalog: dict[str, list[str]]
     defaults: dict[str, str]
     embedding: EmbeddingInfo
+
+
+# --- memory / knowledge graph ---
+
+
+class FactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    fact: str
+    category: str
+    # Reads ProfileFact.effective_confidence, not the stored column: a confirmed fact is
+    # certain by definition, while the column keeps the model's original estimate so
+    # un-confirming can restore it.
+    confidence: float = Field(validation_alias="effective_confidence")
+    source: str  # "inferred" (the assistant concluded it) | "stated" (the user confirmed it)
+    status: str  # "active" | "superseded" | "rejected"
+    superseded_by: uuid.UUID | None
+    valid_from: dt.datetime
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class FactDetailOut(FactOut):
+    """Everything the detail panel needs, resolved server-side.
+
+    `source_session_id` turns `source_ref` (a message id) into something the UI can link to,
+    and `previous` makes a superseded fact's history reachable rather than merely stored.
+    """
+
+    source_session_id: uuid.UUID | None = None
+    previous: FactOut | None = None
+
+
+class FactPatch(BaseModel):
+    # Changing `fact` supersedes the row (and needs a fresh embedding); changing only the
+    # metadata updates it in place. See services/memory.update_fact.
+    fact: str | None = None
+    category: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class GraphNode(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    fact: str
+    category: str
+    confidence: float
+    source: str
+    valid_from: dt.datetime
+
+
+class GraphEdge(BaseModel):
+    source: uuid.UUID
+    target: uuid.UUID
+    distance: float  # cosine distance: 0 = identical meaning, 1 = unrelated
+
+
+class GraphOut(BaseModel):
+    """Deliberately carries no embeddings — the 768-dimensional vectors never leave the
+    server. The client receives only what it needs to draw."""
+
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    # True when more facts exist than the graph will draw. Silently showing a subset of
+    # someone's memory as if it were all of it is the kind of quiet lie that erodes trust
+    # in the whole view.
+    truncated: bool = False
+    total: int = 0
+    # The rendering ceiling, sent so the interface can name the actual number rather than
+    # hard-coding a copy of it that drifts.
+    render_limit: int = 0
+    # True once the memory approaches or passes that ceiling. Surfaced in the UI on
+    # purpose: the moment to switch the layout to a Barnes-Hut quadtree should announce
+    # itself where it will be seen, not sit in a document nobody re-reads.
+    needs_faster_layout: bool = False
+
+
+class MemoryStatsOut(BaseModel):
+    total: int
+    by_category: dict[str, int]
+    by_source: dict[str, int]
+    by_status: dict[str, int]
+    per_day: list[dict]
