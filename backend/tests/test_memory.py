@@ -66,22 +66,22 @@ def test_store_skips_semantic_duplicate(db, user):
     db.add(_fact(user, "likes tea", _onehot(5)))
     db.commit()
 
-    stored = memory._store(
+    counts = memory._store(
         user.id, [{"fact": "enjoys tea", "category": "preference", "confidence": 0.8}], [_onehot(5)]
     )
 
-    assert stored == 0
+    assert counts == {"stored": 0, "superseded": 0, "skipped": 1}
     assert _active_count(db, user) == 1
 
 
 def test_store_inserts_new_fact_with_embedding(db, user):
-    stored = memory._store(
+    counts = memory._store(
         user.id,
         [{"fact": "plays guitar", "category": "preference", "confidence": 0.8}],
         [_onehot(10)],
     )
 
-    assert stored == 1
+    assert counts == {"stored": 1, "superseded": 0, "skipped": 0}
     row = db.execute(select(ProfileFact).where(ProfileFact.user_id == user.id)).scalars().first()
     assert row.fact == "plays guitar"
     assert row.source == "inferred"

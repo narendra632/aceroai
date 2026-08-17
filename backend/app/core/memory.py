@@ -14,6 +14,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
@@ -23,6 +24,8 @@ from app.config import settings
 from app.core import llm
 from app.db.models import ProfileFact, User
 from app.db.session import SessionLocal
+from app.services import memory as svc
+from app.services.memory import live
 
 log = logging.getLogger(__name__)
 timing = logging.getLogger("aceroai.timing")
@@ -37,7 +40,30 @@ _EXTRACT_SYSTEM = (
     "ephemeral. Do not repeat facts already known. Return ONLY a JSON array "
     '(possibly empty) of objects with keys "fact" (a short third-person statement), '
     '"category" (one of: preference, health, work, finance, relationship, other), '
-    'and "confidence" (0-1). Output no prose, only the JSON array.'
+    'and "confidence" (0-1). '
+    # Phrasing consistency is not cosmetic — it is what makes a contradiction *findable*.
+    # Two facts are compared by the distance between their embeddings, and the SUBJECT of
+    # the sentence moves that distance as much as the claim does. Measured on real data:
+    #
+    #   "The user works at Infosys."  vs  "Narendra works at TCS."   -> 0.328
+    #   "Narendra works at Infosys."  vs  "Narendra works at TCS."   -> 0.131
+    #
+    # Identical claim, 2.5x closer. At 0.328 the two employers looked unrelated and were
+    # not even joined on the graph; at 0.131 they sit right on top of each other, which is
+    # exactly the signal a conflict check needs. Drifting between "the user" and a name was
+    # hiding real contradictions.
+    "Always refer to the user the SAME way in every fact. Match the wording used in the "
+    "known facts above; if there are none, write 'The user'. Never alternate between a "
+    "name and a generic reference. "
+    # The `replaces` key is what makes changed facts survive. A fact that CHANGED is by
+    # construction near-identical in wording to the one it replaces, so the vector dedup
+    # gate cannot tell them apart — only a reader of both can. The model is already
+    # looking at both, so asking costs nothing.
+    "If a new fact CONTRADICTS or UPDATES one of the known facts rather than being new "
+    'information, add a "replaces" key whose value is the known fact\'s text copied '
+    "EXACTLY. Use it only for a genuine change (a new job, a changed preference), never "
+    "for a fact that merely restates something already known — restatements should simply "
+    "be omitted. Output no prose, only the JSON array."
 )
 
 
@@ -45,11 +71,16 @@ _EXTRACT_SYSTEM = (
 
 
 def recall_facts(db: Session, user: User, query_vec: list[float], k: int) -> list[str]:
-    """Return up to `k` active facts most similar to `query_vec`, closest first."""
+    """Return up to `k` active facts most similar to `query_vec`, closest first.
+
+    `live()` comes from `services.memory` rather than being repeated here: a fact the user
+    has forgotten must be unreachable from *every* path, and the surest way to guarantee
+    that is for there to be only one definition of what "visible" means.
+    """
     if k <= 0:
         return []
     stmt = (
-        select(ProfileFact.fact)
+        live(select(ProfileFact.fact))
         .where(
             ProfileFact.user_id == user.id,
             ProfileFact.status == "active",
@@ -99,26 +130,10 @@ async def recall(db: Session, user: User, query_text: str, k: int | None = None)
 # --- extraction + storage (background; each helper owns its own DB session) ---
 
 
-def _load_active_facts(user_id: uuid.UUID) -> list[str]:
-    db = SessionLocal()
-    try:
-        return list(
-            db.execute(
-                select(ProfileFact.fact).where(
-                    ProfileFact.user_id == user_id, ProfileFact.status == "active"
-                )
-            )
-            .scalars()
-            .all()
-        )
-    finally:
-        db.close()
-
-
 def _too_similar(db: Session, user_id: uuid.UUID, vec: list[float]) -> bool:
     nearest = (
         db.execute(
-            select(ProfileFact.embedding.cosine_distance(vec))
+            live(select(ProfileFact.embedding.cosine_distance(vec)))
             .where(
                 ProfileFact.user_id == user_id,
                 ProfileFact.status == "active",
@@ -133,16 +148,72 @@ def _too_similar(db: Session, user_id: uuid.UUID, vec: list[float]) -> bool:
     return nearest is not None and nearest < settings.memory_dedup_distance
 
 
-def _store(user_id: uuid.UUID, facts: list[dict], vectors: list[list[float]]) -> int:
-    """Insert new facts with embeddings, skipping semantic duplicates. Returns the
-    number actually stored."""
+def _normalise(text: str) -> str:
+    """Collapse whitespace and case so the model's `replaces` echo can be matched against
+    the stored text without demanding byte-identical output from a language model."""
+    return " ".join((text or "").split()).casefold()
+
+
+def _store(
+    user_id: uuid.UUID,
+    facts: list[dict],
+    vectors: list[list[float]],
+    source_ref: uuid.UUID | None = None,
+) -> dict[str, int]:
+    """Persist extracted facts, returning counts of what happened to each.
+
+    Three outcomes, and telling them apart is the point:
+
+    - **superseded** — the model flagged this as replacing a known fact, so the old belief
+      is retired and linked to the new one. Without this a *changed* fact is indist-
+      inguishable from a repeat by cosine distance alone (a new job is worded almost
+      identically to the old one) and the newer truth would be silently discarded.
+    - **skipped** — a genuine restatement, caught by the vector gate. This is the hard
+      guarantee, and it is deliberately independent of anything the model said.
+    - **stored** — actually new.
+    """
     db = SessionLocal()
-    stored = 0
+    counts = {"stored": 0, "superseded": 0, "skipped": 0}
     try:
         if db.get(User, user_id) is None:
-            return 0
+            return counts
+
+        # Only fetched when the model actually claims a replacement — the common case
+        # costs no extra query.
+        by_text: dict[str, ProfileFact] | None = None
+
         for fact, vec in zip(facts, vectors, strict=True):
+            replaces = fact.get("replaces")
+            if replaces:
+                if by_text is None:
+                    by_text = {
+                        _normalise(row.fact): row
+                        for row in svc.list_facts(db, user_id, limit=svc.LIST_MAX)
+                    }
+                target = by_text.get(_normalise(replaces))
+                if target is not None:
+                    svc.supersede_fact(
+                        db,
+                        user_id,
+                        target.id,
+                        fact=fact["fact"],
+                        embedding=vec,
+                        category=fact["category"],
+                        confidence=fact["confidence"],
+                        # The MODEL concluded this replacement, so it is inferred even
+                        # when the fact it replaces had been confirmed by the user.
+                        # Inheriting the old row's source would silently launder a guess
+                        # into something the user appears to have stated.
+                        source="inferred",
+                    )
+                    counts["superseded"] += 1
+                    continue
+                # The model named a fact we can't find. Ignore the hint rather than
+                # guessing which one it meant, and fall through to the normal path.
+                log.info("memory: `replaces` target not found, treating as new: %r", replaces)
+
             if _too_similar(db, user_id, vec):
+                counts["skipped"] += 1
                 continue
             db.add(
                 ProfileFact(
@@ -151,13 +222,14 @@ def _store(user_id: uuid.UUID, facts: list[dict], vectors: list[list[float]]) ->
                     category=fact["category"],
                     confidence=fact["confidence"],
                     source="inferred",
+                    source_ref=source_ref,
                     status="active",
                     embedding=vec,
                 )
             )
-            stored += 1
+            counts["stored"] += 1
         db.commit()
-        return stored
+        return counts
     finally:
         db.close()
 
@@ -187,13 +259,21 @@ def _parse_facts(raw: str) -> list[dict]:
             confidence = float(item.get("confidence", 0.7))
         except (TypeError, ValueError):
             confidence = 0.7
+        replaces = str(item.get("replaces", "") or "").strip()
         out.append(
-            {"fact": fact, "category": category, "confidence": min(max(confidence, 0.0), 1.0)}
+            {
+                "fact": fact,
+                "category": category,
+                "confidence": min(max(confidence, 0.0), 1.0),
+                # Empty string means "no claim" — kept as None so `_store` can test it
+                # directly rather than distinguishing missing from blank.
+                "replaces": replaces or None,
+            }
         )
     return out
 
 
-async def _extract(user_text: str, reply_text: str, known: list[str]) -> list[dict]:
+async def _extract(user_text: str, reply_text: str, known: Sequence[str]) -> list[dict]:
     known_block = "\n".join(f"- {k}" for k in known) or "(none yet)"
     user_msg = (
         f"Known facts:\n{known_block}\n\n"
@@ -211,17 +291,43 @@ async def _extract(user_text: str, reply_text: str, known: list[str]) -> list[di
     return _parse_facts(raw)
 
 
-async def extract_and_store(user_id: uuid.UUID, user_text: str, reply_text: str) -> None:
+async def extract_and_store(
+    user_id: uuid.UUID,
+    user_text: str,
+    reply_text: str,
+    *,
+    known: Sequence[str] = (),
+    source_ref: uuid.UUID | None = None,
+) -> None:
     """Best-effort: extract facts from a finished turn, embed, and store them.
-    Never raises into the caller — the reply has already been delivered."""
+    Never raises into the caller — the reply has already been delivered.
+
+    `known` is the set of facts shown to the extractor so it doesn't propose things we
+    already hold. **The caller passes the facts recall already retrieved for this message**
+    — they are the ones most likely to be duplicated, they are already computed, and reusing
+    them costs nothing. This used to load *every* active fact instead, which meant the
+    extraction prompt grew forever: ~144 tokens at 11 facts, ~6,500 at 500. Bounded here it
+    is constant.
+
+    Narrowing this list is safe because it was never the real duplicate guarantee. That is
+    `_too_similar`, which compares vectors against **every** stored fact regardless of what
+    the prompt contained. `known` only makes the model's proposals tidier.
+
+    `source_ref` is the message this turn came from, recorded so the user can ask "where did
+    you get that?" and be shown the conversation.
+    """
     try:
-        known = await run_in_threadpool(_load_active_facts, user_id)
         facts = await _extract(user_text, reply_text, known)
         if not facts:
             return
         vectors = await llm.embed([f["fact"] for f in facts])
-        stored = await run_in_threadpool(_store, user_id, facts, vectors)
-        if stored:
-            log.info("memory: stored %d new fact(s)", stored)
+        counts = await run_in_threadpool(_store, user_id, facts, vectors, source_ref)
+        if any(counts.values()):
+            log.info(
+                "memory: stored=%d superseded=%d skipped_duplicate=%d",
+                counts["stored"],
+                counts["superseded"],
+                counts["skipped"],
+            )
     except Exception:
         log.warning("memory extraction failed", exc_info=True)

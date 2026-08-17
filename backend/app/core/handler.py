@@ -52,9 +52,19 @@ def _user_error(exc: Exception) -> str:
     return "Something went wrong reaching the model. Please try again."
 
 
-def _schedule_extraction(user_id: uuid.UUID, user_text: str, reply_text: str) -> None:
+def _schedule_extraction(
+    user_id: uuid.UUID,
+    user_text: str,
+    reply_text: str,
+    known: list[str],
+    source_ref: uuid.UUID | None,
+) -> None:
     try:
-        task = asyncio.create_task(memory.extract_and_store(user_id, user_text, reply_text))
+        task = asyncio.create_task(
+            memory.extract_and_store(
+                user_id, user_text, reply_text, known=known, source_ref=source_ref
+            )
+        )
     except RuntimeError:  # no running loop (shouldn't happen from the async handler)
         return
     _bg_tasks.add(task)
@@ -102,7 +112,12 @@ def _decode_args(raw: str) -> dict | None:
 
 def _persist_user_turn(
     db: Session, user: User, text: str, channel: str, session_id: uuid.UUID | None
-) -> uuid.UUID:
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Returns `(session_id, user_message_id)`.
+
+    The message id is returned so a fact learned from this turn can record where it came
+    from — provenance the user can follow back to the conversation.
+    """
     if session_id is not None:
         session = db.get(ChatSession, session_id)
         if session is None or session.user_id != user.id:
@@ -111,10 +126,11 @@ def _persist_user_turn(
         session = ChatSession(user_id=user.id, channel=channel, title=_title_from(text))
         db.add(session)
         db.flush()
-    db.add(Message(session_id=session.id, role="user", content=text))
+    message = Message(session_id=session.id, role="user", content=text)
+    db.add(message)
     session.last_active_at = func.now()
     db.commit()
-    return session.id
+    return session.id, message.id
 
 
 def _persist_assistant_turn(
@@ -169,7 +185,7 @@ async def handle_message(
     tl.note(provider=provider, model=model, effort=effort or "-", channel=channel)
 
     with tl.stage("persist_user"):
-        session_id = await run_in_threadpool(
+        session_id, user_message_id = await run_in_threadpool(
             _persist_user_turn, db, user, text, channel, session_id
         )
     yield "session", str(session_id)
@@ -283,5 +299,10 @@ async def handle_message(
 
     # Learn durable facts from this turn, off the reply path — deliberately AFTER
     # "done", so its latency is never felt by the user.
+    #
+    # `facts` is handed straight to the extractor: recall already embedded this message and
+    # retrieved the facts most related to it, which are exactly the ones a new fact might
+    # duplicate. Reusing them costs nothing and keeps the extraction prompt a fixed size
+    # instead of one that grows with everything ever learned.
     if settings.memory_extraction_enabled and reply:
-        _schedule_extraction(user.id, text, reply)
+        _schedule_extraction(user.id, text, reply, facts, user_message_id)
