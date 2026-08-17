@@ -37,6 +37,17 @@
      series on purpose — see design.md 6b for why category is a filter, not a hue. */
   --viz-node: #c15f3c;
   --viz-edge: #cbbfae;
+
+  /* Chart series, in FIXED order — a hue follows the entity, never its rank, so
+     filtering out a series must not repaint the survivors. Validated all-pairs against
+     this surface: worst CVD dE 8.6, worst normal-vision dE 24.0. The green sits at 2.82:1
+     contrast, under the 3:1 bar, which is why every series is also directly labelled
+     rather than identified by colour alone. */
+  --series-1: #c15f3c;  /* chat — the reply you waited for */
+  --series-2: #2a78d6;  /* embed — recall */
+  --series-3: #1baf7a;  /* memory_extract — learning */
+  --chart-grid: #ece7dc;
+  --chart-axis: #d8d1c2;
 }
 
 .dark {
@@ -63,6 +74,15 @@
 
   --viz-node: #d1704e;
   --viz-edge: #4a463e;
+
+  /* The same three hues re-stepped for the dark surface, not an automatic flip.
+     Validated: all three clear 3:1 here; worst CVD dE 7.0 sits in the band that is only
+     legal with secondary encoding, which the direct labels provide. */
+  --series-1: #d1704e;
+  --series-2: #3987e5;
+  --series-3: #199e70;
+  --chart-grid: #34322c;
+  --chart-axis: #45423a;
 }
 
 @theme inline {

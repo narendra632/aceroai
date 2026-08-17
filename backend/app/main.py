@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, chat, journal, memory, tasks
+from app.api import auth, chat, insights, journal, memory, tasks
 from app.api import settings as settings_api
 from app.channels import telegram
 from app.config import DEV_JWT_SECRET, settings
@@ -64,6 +64,7 @@ app.include_router(chat.router)
 app.include_router(tasks.router)
 app.include_router(journal.router)
 app.include_router(memory.router)
+app.include_router(insights.router)
 app.include_router(settings_api.router)
 
 

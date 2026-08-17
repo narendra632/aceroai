@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useMemo, useState } from "react";
 import {
+  Activity,
   BookOpen,
   Brain,
   Check,
@@ -22,13 +23,14 @@ import { useTheme } from "@/hooks/useTheme";
 import type { Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export type View = "chat" | "tasks" | "journal" | "knowledge" | "settings";
+export type View = "chat" | "tasks" | "journal" | "knowledge" | "insights" | "settings";
 
 const NAV: { view: View; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { view: "chat", label: "Chat", icon: MessageSquare },
   { view: "tasks", label: "Tasks", icon: ListTodo },
   { view: "journal", label: "Journal", icon: BookOpen },
   { view: "knowledge", label: "Knowledge", icon: Brain },
+  { view: "insights", label: "Insights", icon: Activity },
   { view: "settings", label: "Settings", icon: SettingsIcon },
 ];
 

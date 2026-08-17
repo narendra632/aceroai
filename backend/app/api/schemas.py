@@ -1,5 +1,6 @@
 import datetime as dt
 import uuid
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -209,3 +210,108 @@ class MemoryStatsOut(BaseModel):
     by_source: dict[str, int]
     by_status: dict[str, int]
     per_day: list[dict]
+
+
+# --- insights (read-only) ---
+
+
+class InsightsSummary(BaseModel):
+    calls: int
+    cost_usd: Decimal
+    tokens_in: int
+    tokens_out: int
+    tokens_thinking: int
+    failed: int
+    error_rate: float
+    # Percentiles, never a mean — one slow turn would hide what a typical turn feels like.
+    p50_ms: int | None
+    p95_ms: int | None
+    p50_ttft_ms: int | None
+    # Calls whose model had no known price, so a total can say how complete it is.
+    unpriced: int
+
+
+class SeriesPoint(BaseModel):
+    day: str
+    kind: str
+    calls: int
+    cost_usd: Decimal
+
+
+class ModelUsage(BaseModel):
+    provider: str | None
+    model: str | None
+    calls: int
+    cost_usd: Decimal
+    tokens_in: int
+    tokens_out: int
+
+
+class ProviderComparison(BaseModel):
+    provider: str | None
+    calls: int
+    cost_usd: Decimal
+    cost_per_call: Decimal
+    p50_ms: int | None
+    p50_ttft_ms: int | None
+    error_rate: float
+
+
+class ErrorCount(BaseModel):
+    error_type: str
+    count: int
+
+
+class TurnOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    provider: str | None
+    model: str | None
+    effort: str | None
+    session_id: uuid.UUID | None
+    started_at: dt.datetime
+    duration_ms: int | None
+    ttft_ms: int | None
+    rounds: int | None
+    tokens_in: int | None
+    tokens_out: int | None
+    tokens_thinking: int | None
+    tokens_cached: int | None
+    cost_usd: Decimal | None
+    pricing_version: str | None
+    ok: bool
+    error_type: str | None
+
+
+class SpanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    seq: int
+    duration_ms: int | None
+    meta: dict | None
+
+
+class TurnDetail(BaseModel):
+    turn: TurnOut
+    spans: list[SpanOut]
+
+
+class InsightsOverview(BaseModel):
+    """Everything the page needs in ONE request.
+
+    Six round-trips on a page load would each pay the same cold-connection cost to a VM in
+    Oregon. The queries are cheap; the latency is not.
+    """
+
+    summary: InsightsSummary
+    series: list[SeriesPoint]
+    by_model: list[ModelUsage]
+    by_provider: list[ProviderComparison]
+    errors: list[ErrorCount]
+    # When recording began, so the page never implies it covers a period it does not.
+    data_start: dt.datetime | None
+    # Cost is an estimate; this names the price list behind it.
+    pricing_version: str

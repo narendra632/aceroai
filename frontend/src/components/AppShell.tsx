@@ -8,6 +8,7 @@ import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
 import Composer, { type ComposerHandle } from "./Composer";
 import JournalView from "./JournalView";
+import InsightsView from "./InsightsView";
 import KnowledgeView from "./KnowledgeView";
 import MessageList from "./MessageList";
 import type { UIMessage } from "./MessageBubble";
@@ -254,6 +255,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     tasks: "Tasks",
     journal: "Journal",
     knowledge: "Knowledge",
+    insights: "Insights",
     settings: "Settings",
   };
 
@@ -312,6 +314,8 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           <TasksView />
         ) : view === "journal" ? (
           <JournalView />
+        ) : view === "insights" ? (
+          <InsightsView />
         ) : view === "knowledge" ? (
           // `openSession` is exactly what a fact's provenance link needs: switch to chat
           // and load the conversation the belief came from.

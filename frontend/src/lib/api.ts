@@ -460,3 +460,109 @@ export async function restoreFact(id: string): Promise<Fact> {
   if (!r.ok) throw new Error("Could not restore that fact");
   return r.json();
 }
+
+// --- insights (read-only) ---
+
+export type InsightsSummary = {
+  calls: number;
+  cost_usd: string;
+  tokens_in: number;
+  tokens_out: number;
+  tokens_thinking: number;
+  failed: number;
+  error_rate: number;
+  /** Percentiles, never a mean — one slow turn would hide the typical one. */
+  p50_ms: number | null;
+  p95_ms: number | null;
+  p50_ttft_ms: number | null;
+  /** Calls whose model had no known price, so a total can admit its gaps. */
+  unpriced: number;
+};
+
+export type TurnKind = "chat" | "embed" | "memory_extract" | "job";
+
+export type SeriesPoint = { day: string; kind: TurnKind; calls: number; cost_usd: string };
+
+export type ModelUsage = {
+  provider: string | null;
+  model: string | null;
+  calls: number;
+  cost_usd: string;
+  tokens_in: number;
+  tokens_out: number;
+};
+
+export type ProviderComparison = {
+  provider: string | null;
+  calls: number;
+  cost_usd: string;
+  cost_per_call: string;
+  p50_ms: number | null;
+  p50_ttft_ms: number | null;
+  error_rate: number;
+};
+
+export type TurnRow = {
+  id: string;
+  kind: TurnKind;
+  provider: string | null;
+  model: string | null;
+  effort: string | null;
+  session_id: string | null;
+  started_at: string;
+  duration_ms: number | null;
+  ttft_ms: number | null;
+  rounds: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  tokens_thinking: number | null;
+  tokens_cached: number | null;
+  cost_usd: string | null;
+  pricing_version: string | null;
+  ok: boolean;
+  error_type: string | null;
+};
+
+export type TurnSpan = {
+  name: string;
+  seq: number;
+  duration_ms: number | null;
+  meta: Record<string, unknown> | null;
+};
+
+export type InsightsOverview = {
+  summary: InsightsSummary;
+  series: SeriesPoint[];
+  by_model: ModelUsage[];
+  by_provider: ProviderComparison[];
+  errors: { error_type: string; count: number }[];
+  /** When recording began — the page states this so it never implies a longer history. */
+  data_start: string | null;
+  pricing_version: string;
+};
+
+export async function getInsights(range: {
+  days?: number;
+  allTime?: boolean;
+}): Promise<InsightsOverview> {
+  const r = await req(
+    `/api/insights/overview${qs({
+      days: range.allTime ? undefined : (range.days ?? 30),
+      all_time: range.allTime ? "true" : undefined,
+    })}`,
+  );
+  if (!r.ok) throw new Error("Could not load your usage");
+  return r.json();
+}
+
+export async function listTurns(limit = 50, kind?: string): Promise<TurnRow[]> {
+  const r = await req(`/api/insights/turns${qs({ limit, kind })}`);
+  if (!r.ok) throw new Error("Could not load recent activity");
+  return r.json();
+}
+
+export async function getTurn(id: string): Promise<{ turn: TurnRow; spans: TurnSpan[] }> {
+  const r = await req(`/api/insights/turns/${id}`);
+  if (!r.ok) throw new Error("Could not load that call");
+  return r.json();
+}
