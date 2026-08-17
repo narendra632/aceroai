@@ -253,6 +253,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     chat: "aceroai",
     tasks: "Tasks",
     journal: "Journal",
+    knowledge: "Knowledge",
     settings: "Settings",
   };
 
