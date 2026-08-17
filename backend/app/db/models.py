@@ -132,6 +132,25 @@ class ProfileFact(Base):
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
     # Semantic memory: fact embedding for pgvector similarity search (migration 002).
     embedding: Mapped[list[float] | None] = mapped_column(Vector(settings.embed_dim))
+    # A fact the user can edit needs to say when it last changed (migration 005).
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=now, onupdate=now
+    )
+
+    # Soft delete (migration 005) so forgetting a fact can be undone. Readers MUST filter
+    # this — the filter lives in services/memory.py, never in a route, a tool, or recall.
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
+    @property
+    def effective_confidence(self) -> float:
+        """What this fact is actually worth believing.
+
+        `confidence` stores the *model's* estimate and is never overwritten — so
+        confirming a fact and later un-confirming it restores the original number
+        instead of losing it. A fact the user has stated is certain by definition, which
+        makes this a derived value, computed rather than stored (golden rule 2).
+        """
+        return 1.0 if self.source == "stated" else self.confidence
 
 
 class GeneratedReview(Base):
