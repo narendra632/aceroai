@@ -79,6 +79,48 @@
   off the VM (Cloud Storage bucket or similar), plus a **rehearsed restore** —
   a backup nobody has restored from is a hope, not a backup.
 
+## Triggered work — scheduled by a measurement, not a date
+
+These are not "someday" items. Each has a **numeric trigger**, and the knowledge graph
+tells you in the interface when one fires.
+
+- **Barnes-Hut quadtree for the graph layout.** The force simulation compares every fact
+  with every other one — O(n²). Measured per frame (desktop, physics only, drawing not
+  included): 0.22 ms @200 · 1.0 ms @400 · 3.5 ms @800 · 9.4 ms @1500, against a 16.7 ms
+  frame budget. A quadtree treats a distant cluster as one blob and turns this into
+  roughly n·log n. **Trigger: the Knowledge page says so** — it warns at 80% of the 800
+  ceiling, before anything is hidden. Scope is one function; the rest of the page is
+  untouched.
+
+- **Conflict review for the memory.** Acero can hold two contradicting beliefs at once and
+  use either. Found live: *"Narendra works at TCS"* (stated) and *"The user works at
+  Infosys"* (inferred), both active. The contradiction handling built into extraction only
+  fires when the model volunteers a `replaces` hint at the moment a fact is written — it
+  does nothing about conflicts already stored, or ones created by confirming/editing in the
+  interface.
+
+  **Partly mitigated already:** the extractor is now required to phrase every fact with the
+  same subject, because that alone was hiding the conflict — the identical claim measured
+  0.328 apart with drifting wording and **0.131** with consistent wording.
+
+  The remaining piece is a **"Review conflicts" action** on the Knowledge page, shaped as:
+  distance narrows the candidates (each fact's single nearest neighbour, in a band close
+  enough to be about the same thing but too far to be a repeat) → **one batched model call**
+  judges which candidates genuinely conflict, because distance provably cannot (*"has
+  sisters"* and *"celebrates Rakshabandhan"* sit at 0.189 and are complementary, not
+  contradictory) → **the user picks which is true**, and the loser is superseded, never
+  deleted. **Trigger: seeing a wrong belief in conversation, or two rival facts in the
+  graph.** Cheap filter, sparing use of the expensive judge, human as the authority.
+
+- **Precompute graph edges on write.** The edge query asks each fact for its nearest
+  neighbours, so it is N×N in Postgres. Migration 006's partial HNSW index made that
+  survivable (5619 ms → 170 ms at 800 facts), but there is a **planner-crossover hump**
+  between roughly 300 and 700 facts where Postgres still prefers a sequential scan:
+  measured 277 ms @200 → **1111 ms @400** → 243 ms @800. It self-corrects, so this is not
+  urgent. The durable fix is computing a fact's neighbours once when it is stored and
+  keeping them in an `fact_edges` table, making reads a plain select.
+  **Trigger: the Knowledge page taking more than ~2 s to load.**
+
 ## Future considerations (not scheduled)
 
 - **Further latency work on memory recall.** After moving embeddings off the `global`
