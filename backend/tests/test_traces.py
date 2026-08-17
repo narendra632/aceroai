@@ -193,3 +193,33 @@ def test_cost_is_frozen_with_the_pricing_version_that_produced_it(auth_client, d
     assert turn.pricing_version == pricing.PRICING_VERSION
     # The fake provider reports real token counts, and the default model is priced.
     assert turn.cost_usd is not None
+
+
+def test_a_cancelled_extraction_is_not_recorded_as_a_success(db, user, monkeypatch):
+    """Every server restart cancels pending extractions. `CancelledError` derives from
+    BaseException, so it slips past `except Exception` — without an explicit branch those
+    turns were stored as successful and free, quietly diluting the error rate."""
+    import asyncio as aio
+
+    from app.core import memory
+
+    async def hang(*args, **kwargs):
+        await aio.sleep(60)
+
+    monkeypatch.setattr("app.core.llm.complete", hang)
+
+    async def run():
+        task = aio.create_task(memory.extract_and_store(user.id, "hi", "hello", known=[]))
+        await aio.sleep(0.1)
+        task.cancel()
+        try:
+            await task
+        except aio.CancelledError:
+            pass
+
+    aio.run(run())
+
+    rows = _turns(db, user, kind="memory_extract")
+    assert rows, "a cancelled extraction still consumed time and must be recorded"
+    assert rows[0].ok is False
+    assert rows[0].error_type == "CancelledError"

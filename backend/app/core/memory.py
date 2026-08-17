@@ -371,6 +371,13 @@ async def extract_and_store(
                 counts["superseded"],
                 counts["skipped"],
             )
+    except asyncio.CancelledError:
+        # Cancellation is not failure-by-exception and does NOT match `except Exception`,
+        # so without this branch a task killed mid-flight (every server restart cancels
+        # pending extractions) would be recorded as a successful, zero-cost turn. Re-raised
+        # because swallowing cancellation breaks shutdown.
+        ok, error_type = False, "CancelledError"
+        raise
     except Exception as exc:
         ok, error_type = False, type(exc).__name__
         log.warning("memory extraction failed", exc_info=True)
