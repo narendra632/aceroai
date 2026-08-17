@@ -27,9 +27,30 @@ from app.core.providers.base import (
     ProviderError,
     RateLimitError,
     TransientError,
+    set_usage,
 )
 
 log = logging.getLogger(__name__)
+
+
+def _read_usage(usage: dict | None, um) -> None:
+    """Translate Gemini's usage_metadata into the shared shape.
+
+    `candidates_token_count` counts only VISIBLE output — thinking is reported separately
+    as `thoughts_token_count` and was previously dropped entirely. Both are billed at the
+    output rate, so ignoring the second understates the expensive half of every turn on a
+    model with a thinking budget, which is every turn this app makes.
+    """
+    if um is None:
+        return
+    set_usage(
+        usage,
+        tokens_in=getattr(um, "prompt_token_count", None),
+        tokens_out=getattr(um, "candidates_token_count", None),
+        tokens_thinking=getattr(um, "thoughts_token_count", None),
+        tokens_cached=getattr(um, "cached_content_token_count", None),
+    )
+
 
 MAX_OUTPUT_TOKENS = 8192
 # Verified against the live endpoint: 0 (fast) and 4096 (deeper) are both accepted.
@@ -199,10 +220,8 @@ class GoogleProvider:
                 model=model or settings.model_chat, contents=contents, config=cfg
             )
             async for chunk in stream:
-                if usage is not None and getattr(chunk, "usage_metadata", None):
-                    um = chunk.usage_metadata
-                    usage["tokens_in"] = getattr(um, "prompt_token_count", None)
-                    usage["tokens_out"] = getattr(um, "candidates_token_count", None)
+                if getattr(chunk, "usage_metadata", None):
+                    _read_usage(usage, chunk.usage_metadata)
                 for cand in chunk.candidates or []:
                     content = getattr(cand, "content", None)
                     for part in (content.parts or []) if content else []:
@@ -231,24 +250,34 @@ class GoogleProvider:
             yield "tool_calls", calls
 
     async def complete(
-        self, messages: list[dict], model: str | None = None, effort: str | None = None
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        effort: str | None = None,
+        usage: dict | None = None,
     ) -> str:
         cfg, contents = self._config(messages, None, effort)
         try:
             resp = await self._get().aio.models.generate_content(
                 model=model or settings.model_chat, contents=contents, config=cfg
             )
+            _read_usage(usage, getattr(resp, "usage_metadata", None))
             return resp.text or ""
         except Exception as exc:  # noqa: BLE001
             raise _classify(exc) from exc
 
-    async def embed(self, texts: list[str], model: str, dim: int) -> list[list[float]]:
+    async def embed(
+        self, texts: list[str], model: str, dim: int, usage: dict | None = None
+    ) -> list[list[float]]:
         try:
             resp = await self._get_embed().aio.models.embed_content(
                 model=model,
                 contents=texts,
                 config=types.EmbedContentConfig(output_dimensionality=dim),
             )
+            # Embeddings are input-only; there is no output to bill.
+            meta = getattr(resp, "metadata", None)
+            set_usage(usage, tokens_in=getattr(meta, "billable_character_count", None))
             return [list(e.values) for e in resp.embeddings]
         except Exception as exc:  # noqa: BLE001
             raise _classify(exc) from exc

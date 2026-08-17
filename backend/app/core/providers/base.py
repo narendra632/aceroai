@@ -21,6 +21,49 @@ from typing import Protocol
 EFFORT_LOW = "low"
 EFFORT_HIGH = "high"
 
+# The keys every provider reports usage under, named after OpenTelemetry's GenAI
+# semantic conventions so exporting later is a formatting change, not a redesign.
+USAGE_KEYS = ("tokens_in", "tokens_out", "tokens_thinking", "tokens_cached")
+
+
+def set_usage(usage: dict | None, **counts: int | None) -> None:
+    """Record ONE request's totals into `usage`, ignoring keys the provider didn't report.
+
+    Deliberately assignment, not addition. Providers report *cumulative* totals for a
+    request — Google repeats a running total on successive stream chunks, OpenAI sends one
+    final tally — so within a request the last report is the answer. Summing chunk by chunk
+    would wildly overcount.
+
+    Adding *across* requests is a different problem and belongs one level up, in `core.llm`:
+    a turn that calls tools makes several requests, and the turn's cost is their sum. Those
+    two levels were previously conflated into one dict that each round overwrote, so a
+    three-round turn reported only its last round.
+
+    `tokens_out` means VISIBLE output on every provider. Thinking tokens are billed at the
+    output rate but are controllable separately (via the effort setting), so they are kept
+    apart — which is what makes "is deep reasoning worth it?" an answerable question.
+    """
+    if usage is None:
+        return
+    for key, value in counts.items():
+        if value is not None:
+            usage[key] = value
+
+
+def add_usage(total: dict | None, request: dict) -> None:
+    """Fold ONE request's totals into a running total across several requests.
+
+    The companion to `set_usage`, and the distinction between them is the whole of defect
+    B: assignment *within* a request (providers repeat cumulative totals), addition
+    *across* requests (a tool-using turn makes several). One dict served both jobs, so each
+    round overwrote the last and a turn billed 2,500/130 recorded 1,500/90.
+    """
+    if total is None:
+        return
+    for key, value in request.items():
+        if value is not None:
+            total[key] = total.get(key, 0) + value
+
 
 class ProviderError(Exception):
     """Base for provider failures, carrying a cause the UI can be honest about."""
@@ -44,7 +87,13 @@ class BillingError(ProviderError):
 
 
 class Provider(Protocol):
-    """What every provider must implement."""
+    """What every provider must implement.
+
+    Every method takes `usage`. It used to be on `stream_with_tools` alone, which meant the
+    two *non-streaming* calls had nowhere to put a number — so the extractor and the
+    embedder, which together run on every single message, were billed and never counted.
+    The contract could not express their cost, so nothing did.
+    """
 
     name: str
 
@@ -60,11 +109,17 @@ class Provider(Protocol):
         ...
 
     async def complete(
-        self, messages: list[dict], model: str | None = None, effort: str | None = None
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        effort: str | None = None,
+        usage: dict | None = None,
     ) -> str:
         """Non-streaming completion, for structured background work."""
         ...
 
-    async def embed(self, texts: list[str], model: str, dim: int) -> list[list[float]]:
+    async def embed(
+        self, texts: list[str], model: str, dim: int, usage: dict | None = None
+    ) -> list[list[float]]:
         """Embed texts (order preserved) at exactly `dim` dimensions."""
         ...

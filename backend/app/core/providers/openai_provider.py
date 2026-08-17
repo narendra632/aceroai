@@ -21,7 +21,34 @@ from app.core.providers.base import (
     ProviderError,
     RateLimitError,
     TransientError,
+    set_usage,
 )
+
+
+def _read_usage(usage: dict | None, u) -> None:
+    """Translate OpenAI's usage into the shared shape.
+
+    The packaging differs from Gemini's in a way that matters: `completion_tokens` INCLUDES
+    reasoning tokens (`completion_tokens_details.reasoning_tokens` is a subfield of it),
+    whereas Gemini reports thinking separately. Copying the raw field across would make the
+    two providers silently incomparable — the same work would look more expensive on one of
+    them purely because of how the numbers are grouped. Subtracting keeps `tokens_out`
+    meaning VISIBLE output everywhere.
+    """
+    if u is None:
+        return
+    details = getattr(u, "completion_tokens_details", None)
+    thinking = getattr(details, "reasoning_tokens", None) or 0
+    completion = getattr(u, "completion_tokens", None)
+    prompt_details = getattr(u, "prompt_tokens_details", None)
+    set_usage(
+        usage,
+        tokens_in=getattr(u, "prompt_tokens", None),
+        tokens_out=None if completion is None else max(0, completion - thinking),
+        tokens_thinking=thinking or None,
+        tokens_cached=getattr(prompt_details, "cached_tokens", None),
+    )
+
 
 log = logging.getLogger(__name__)
 
@@ -143,9 +170,8 @@ class OpenAIProvider:
                 **self._effort(effort),
             )
             async for chunk in stream:
-                if usage is not None and getattr(chunk, "usage", None):
-                    usage["tokens_in"] = chunk.usage.prompt_tokens
-                    usage["tokens_out"] = chunk.usage.completion_tokens
+                if getattr(chunk, "usage", None):
+                    _read_usage(usage, chunk.usage)
                 for choice in chunk.choices:
                     delta = choice.delta
                     if not delta:
@@ -171,7 +197,11 @@ class OpenAIProvider:
             yield "tool_calls", calls
 
     async def complete(
-        self, messages: list[dict], model: str | None = None, effort: str | None = None
+        self,
+        messages: list[dict],
+        model: str | None = None,
+        effort: str | None = None,
+        usage: dict | None = None,
     ) -> str:
         try:
             resp = await self._create(
@@ -179,13 +209,19 @@ class OpenAIProvider:
                 messages=self._clean(messages),
                 **self._effort(effort),
             )
+            _read_usage(usage, getattr(resp, "usage", None))
             return resp.choices[0].message.content or ""
         except Exception as exc:  # noqa: BLE001
             raise _classify(exc) from exc
 
-    async def embed(self, texts: list[str], model: str, dim: int) -> list[list[float]]:
+    async def embed(
+        self, texts: list[str], model: str, dim: int, usage: dict | None = None
+    ) -> list[list[float]]:
         try:
             resp = await self._get().embeddings.create(model=model, input=texts, dimensions=dim)
+            u = getattr(resp, "usage", None)
+            # Embeddings are input-only; there is no output to bill.
+            set_usage(usage, tokens_in=getattr(u, "prompt_tokens", None))
             return [d.embedding for d in resp.data]
         except Exception as exc:  # noqa: BLE001
             raise _classify(exc) from exc

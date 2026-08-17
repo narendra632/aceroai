@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from app.config import settings
 from app.core.providers import get_provider
-from app.core.providers.base import TransientError
+from app.core.providers.base import TransientError, add_usage
 
 log = logging.getLogger(__name__)
 
@@ -56,12 +56,19 @@ async def stream_with_tools(
 
     A plain chat turn yields only `"delta"` events. Passing `tools=None` forces a text
     answer (used to close out a capped tool loop).
+
+    `usage` receives THIS request's totals by assignment. Summing them into a turn is the
+    caller's job — see `core.handler`, which owns the concept of a turn and passes a fresh
+    dict per round. Accumulating here instead would put the logic behind the seam every
+    test replaces, leaving the arithmetic that caused defect B permanently unexercised.
     """
     impl = get_provider(_resolve(provider))
     attempts = settings.llm_max_retries + 1
     for attempt in range(attempts):
         produced = False
         try:
+            # A retried attempt overwrites the abandoned one's counts rather than adding to
+            # them, which is correct: the provider reports a cumulative total per request.
             async for kind, payload in impl.stream_with_tools(
                 messages, tools=tools, model=model, effort=effort, usage=usage
             ):
@@ -81,13 +88,24 @@ async def complete(
     model: str | None = None,
     effort: str | None = None,
     provider: str | None = None,
+    usage: dict | None = None,
 ) -> str:
-    """Non-streaming completion — used for structured background work (fact extraction)."""
+    """Non-streaming completion — used for structured background work (fact extraction).
+
+    This runs after **every** message, to learn durable facts from the turn. It is a real,
+    billed model call that until now had no way to report what it cost.
+    """
     impl = get_provider(_resolve(provider))
-    return await _with_retry(lambda: impl.complete(messages, model=model, effort=effort))
+    request_usage: dict = {}
+    try:
+        return await _with_retry(
+            lambda: impl.complete(messages, model=model, effort=effort, usage=request_usage)
+        )
+    finally:
+        add_usage(usage, request_usage)
 
 
-async def embed(texts: list[str]) -> list[list[float]]:
+async def embed(texts: list[str], usage: dict | None = None) -> list[list[float]]:
     """Embed texts (order preserved).
 
     Deliberately ignores the user's chat-provider choice: every stored `profile_facts`
@@ -96,6 +114,15 @@ async def embed(texts: list[str]) -> list[list[float]]:
     nonsense. Changing the embedding model is a deliberate re-embed migration.
     """
     impl = get_provider(settings.embed_provider)
-    return await _with_retry(
-        lambda: impl.embed(texts, model=settings.embed_model, dim=settings.embed_dim)
-    )
+    request_usage: dict = {}
+    try:
+        return await _with_retry(
+            lambda: impl.embed(
+                texts,
+                model=settings.embed_model,
+                dim=settings.embed_dim,
+                usage=request_usage,
+            )
+        )
+    finally:
+        add_usage(usage, request_usage)

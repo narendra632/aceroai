@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core import composer, llm, memory, telemetry, tools
-from app.core.providers.base import BillingError, RateLimitError
+from app.core.providers.base import BillingError, RateLimitError, add_usage
 from app.db.models import ChatSession, Message, User
 from app.services import user_settings
 
@@ -223,11 +223,16 @@ async def handle_message(
             round_start = time.perf_counter()
             round_text: list[str] = []
             tool_calls: list[dict] | None = None
+            # A FRESH dict per round, folded into the turn's total below. Reusing one dict
+            # across rounds is what made every tool-using turn under-report: providers
+            # assign a cumulative total per request, so round 3 simply overwrote rounds 1
+            # and 2 and the recorded cost was the last round alone.
+            round_usage: dict = {}
             async for kind, payload in llm.stream_with_tools(
                 messages,
                 tools=tools.TOOLS,
                 model=model,
-                usage=usage,
+                usage=round_usage,
                 effort=effort,
                 provider=provider,
             ):
@@ -241,6 +246,7 @@ async def handle_message(
                     yield "delta", payload
                 else:  # "tool_calls" — end of this round
                     tool_calls = payload
+            add_usage(usage, round_usage)
             tl.stages.append((f"llm_round{rounds}", (time.perf_counter() - round_start) * 1000))
             if not tool_calls:
                 break  # the model answered; done
@@ -267,12 +273,19 @@ async def handle_message(
         else:
             # Hit the round cap while still calling tools: force a final text answer
             # (no tools) so the turn never ends mid-action.
+            final_usage: dict = {}
             async for kind, payload in llm.stream_with_tools(
-                messages, tools=None, model=model, usage=usage, effort=effort, provider=provider
+                messages,
+                tools=None,
+                model=model,
+                usage=final_usage,
+                effort=effort,
+                provider=provider,
             ):
                 if kind == "delta":
                     parts.append(payload)
                     yield "delta", payload
+            add_usage(usage, final_usage)
     except Exception as exc:  # noqa: BLE001 - one place to catch any provider failure
         log.warning("generation failed for session %s", session_id, exc_info=True)
         tl.note(error=type(exc).__name__)
