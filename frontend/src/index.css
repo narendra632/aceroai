@@ -30,6 +30,13 @@
   --ring: #c15f3c;
 
   --faint: #9a927f;
+
+  /* Knowledge-graph marks. Deliberately NOT --primary: the dark accent (#d97757)
+     measures OKLCH L 0.672, just outside the 0.48-0.67 band a dark chart surface
+     needs, so the graph uses the nearest step that passes. The graph is a single
+     series on purpose — see design.md 6b for why category is a filter, not a hue. */
+  --viz-node: #c15f3c;
+  --viz-edge: #cbbfae;
 }
 
 .dark {
@@ -53,6 +60,9 @@
   --ring: #d97757;
 
   --faint: #7d7666;
+
+  --viz-node: #d1704e;
+  --viz-edge: #4a463e;
 }
 
 @theme inline {

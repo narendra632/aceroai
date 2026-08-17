@@ -8,6 +8,7 @@ import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
 import Composer, { type ComposerHandle } from "./Composer";
 import JournalView from "./JournalView";
+import KnowledgeView from "./KnowledgeView";
 import MessageList from "./MessageList";
 import type { UIMessage } from "./MessageBubble";
 import SettingsView from "./SettingsView";
@@ -310,6 +311,10 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           <TasksView />
         ) : view === "journal" ? (
           <JournalView />
+        ) : view === "knowledge" ? (
+          // `openSession` is exactly what a fact's provenance link needs: switch to chat
+          // and load the conversation the belief came from.
+          <KnowledgeView onOpenSession={(id) => void openSession(id)} />
         ) : (
           <SettingsView />
         )}

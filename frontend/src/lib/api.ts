@@ -311,3 +311,152 @@ export async function* streamChat(
     }
   }
 }
+
+// --- memory / knowledge graph ---
+
+export type FactCategory =
+  | "preference"
+  | "health"
+  | "work"
+  | "finance"
+  | "relationship"
+  | "other";
+
+export type Fact = {
+  id: string;
+  fact: string;
+  category: FactCategory;
+  confidence: number;
+  /** "inferred" = the assistant concluded it; "stated" = you confirmed it. */
+  source: "inferred" | "stated";
+  status: "active" | "superseded" | "rejected";
+  superseded_by: string | null;
+  valid_from: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FactDetail = Fact & {
+  /** The conversation this was learned from, when it came from one. */
+  source_session_id: string | null;
+  /** The belief this one replaced, so history is reachable and not merely stored. */
+  previous: Fact | null;
+};
+
+export type GraphNode = {
+  id: string;
+  fact: string;
+  category: FactCategory;
+  confidence: number;
+  source: "inferred" | "stated";
+  valid_from: string;
+};
+
+/** Cosine distance: 0 = same meaning, 1 = unrelated. Never carries the vectors. */
+export type GraphEdge = { source: string; target: string; distance: number };
+
+export type Graph = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  /** True when more facts exist than the graph draws — never truncate silently. */
+  truncated: boolean;
+  total: number;
+  /** How many the graph will draw, sent so the UI never hard-codes a stale copy. */
+  render_limit: number;
+  /** Set once the memory nears that ceiling: time to move the layout to Barnes-Hut. */
+  needs_faster_layout: boolean;
+};
+
+export type MemoryStats = {
+  total: number;
+  by_category: Record<string, number>;
+  by_source: Record<string, number>;
+  by_status: Record<string, number>;
+  per_day: { day: string; count: number }[];
+};
+
+export type FactQuery = {
+  category?: string;
+  status?: string;
+  source?: string;
+  min_confidence?: number;
+  q?: string;
+  limit?: number;
+  offset?: number;
+};
+
+/** One page of the fact list. Matches the server default; a page is a scrolling
+ *  decision, unrelated to what the graph can draw. */
+export const FACT_PAGE_SIZE = 100;
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") search.set(k, String(v));
+  }
+  const s = search.toString();
+  return s ? `?${s}` : "";
+}
+
+export async function listFacts(query: FactQuery = {}): Promise<Fact[]> {
+  const r = await req(`/api/memory/facts${qs(query)}`);
+  if (!r.ok) throw new Error("Could not load what Acero has learned");
+  return r.json();
+}
+
+export async function getFact(id: string): Promise<FactDetail> {
+  const r = await req(`/api/memory/facts/${id}`);
+  if (!r.ok) throw new Error("Could not load that fact");
+  return r.json();
+}
+
+export async function getGraph(maxDistance?: number): Promise<Graph> {
+  const r = await req(`/api/memory/graph${qs({ max_distance: maxDistance })}`);
+  if (!r.ok) throw new Error("Could not load the knowledge graph");
+  return r.json();
+}
+
+export async function getMemoryStats(): Promise<MemoryStats> {
+  const r = await req("/api/memory/stats");
+  if (!r.ok) throw new Error("Could not load memory stats");
+  return r.json();
+}
+
+export async function updateFact(
+  id: string,
+  patch: { fact?: string; category?: string; confidence?: number },
+): Promise<Fact> {
+  const r = await req(`/api/memory/facts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) {
+    // 503 means the re-index failed, so nothing was saved — say that rather than
+    // leaving the user thinking an edit landed when it didn't.
+    const msg =
+      r.status === 503
+        ? "Couldn't save that edit — the search index was unreachable. Try again shortly."
+        : "Could not save that change";
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+/** Confirming is a toggle: one click in, one click out, so a misclick isn't permanent. */
+export async function setFactConfirmed(id: string, confirmed: boolean): Promise<Fact> {
+  const path = confirmed ? "confirm" : "unconfirm";
+  const r = await req(`/api/memory/facts/${id}/${path}`, { method: "POST" });
+  if (!r.ok) throw new Error(confirmed ? "Could not confirm that fact" : "Could not undo that");
+  return r.json();
+}
+
+export async function forgetFact(id: string): Promise<void> {
+  const r = await req(`/api/memory/facts/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("Could not forget that fact");
+}
+
+export async function restoreFact(id: string): Promise<Fact> {
+  const r = await req(`/api/memory/facts/${id}/restore`, { method: "POST" });
+  if (!r.ok) throw new Error("Could not restore that fact");
+  return r.json();
+}
