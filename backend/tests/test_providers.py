@@ -11,11 +11,13 @@ import asyncio
 import json
 import types as pytypes
 
+import pytest
+
 from app.config import MODEL_CATALOG, settings
 from app.core.providers.base import BillingError, ProviderError, RateLimitError, TransientError
 from app.core.providers.google import GoogleProvider
 from app.core.providers.google import _classify as classify_google
-from app.core.providers.openai_provider import OpenAIProvider
+from app.core.providers.openai_provider import OpenAIProvider, _to_input
 from app.core.providers.openai_provider import _classify as classify_openai
 from app.services import user_settings
 
@@ -50,14 +52,27 @@ def _google_part(text=None, call=None, signature=None):
     return pytypes.SimpleNamespace(text=text, function_call=fc, thought_signature=signature)
 
 
-def _openai_chunk(content=None, tool_frags=None):
-    delta = pytypes.SimpleNamespace(content=content, tool_calls=tool_frags)
-    return pytypes.SimpleNamespace(choices=[pytypes.SimpleNamespace(delta=delta)], usage=None)
+def _openai_text(delta):
+    """A visible-text delta event from the Responses stream."""
+    return pytypes.SimpleNamespace(type="response.output_text.delta", delta=delta)
 
 
-def _openai_frag(index, id_=None, name=None, args=None):
-    fn = pytypes.SimpleNamespace(name=name, arguments=args)
-    return pytypes.SimpleNamespace(index=index, id=id_, function=fn)
+def _openai_item(**fields):
+    """A completed output item — reasoning, function_call or message.
+
+    Responses delivers a tool call whole, in one `output_item.done`, rather than as the
+    argument fragments Chat Completions streamed.
+    """
+    return pytypes.SimpleNamespace(
+        type="response.output_item.done", item=pytypes.SimpleNamespace(**fields)
+    )
+
+
+def _openai_done(status="completed", usage=None, **fields):
+    return pytypes.SimpleNamespace(
+        type=f"response.{status}",
+        response=pytypes.SimpleNamespace(status=status, usage=usage, **fields),
+    )
 
 
 def _stub_google(monkeypatch, chunks):
@@ -78,8 +93,11 @@ def _stub_google(monkeypatch, chunks):
     return provider
 
 
-def _stub_openai(monkeypatch, chunks):
+def _stub_openai(monkeypatch, chunks, seen=None):
     async def fake_create(**kwargs):
+        if seen is not None:
+            seen.append(kwargs)
+
         async def gen():
             for c in chunks:
                 yield c
@@ -87,10 +105,19 @@ def _stub_openai(monkeypatch, chunks):
         return gen()
 
     provider = OpenAIProvider()
-    client = pytypes.SimpleNamespace(
-        chat=pytypes.SimpleNamespace(completions=pytypes.SimpleNamespace(create=fake_create))
-    )
+    client = pytypes.SimpleNamespace(responses=pytypes.SimpleNamespace(create=fake_create))
     monkeypatch.setattr(provider, "_get", lambda: client)
+    return provider
+
+
+def _stub_openai_create(monkeypatch, create):
+    """A provider whose `responses.create` is the given function."""
+    provider = OpenAIProvider()
+    monkeypatch.setattr(
+        provider,
+        "_get",
+        lambda: pytypes.SimpleNamespace(responses=pytypes.SimpleNamespace(create=create)),
+    )
     return provider
 
 
@@ -114,7 +141,7 @@ def test_text_streaming_conformance(monkeypatch):
         monkeypatch,
         [_google_chunk([_google_part(text="He")]), _google_chunk([_google_part(text="llo")])],
     )
-    o = _stub_openai(monkeypatch, [_openai_chunk("He"), _openai_chunk("llo")])
+    o = _stub_openai(monkeypatch, [_openai_text("He"), _openai_text("llo")])
     for provider in (g, o):
         text, calls = asyncio.run(_drain(provider))
         assert text == "Hello"
@@ -132,7 +159,14 @@ def test_tool_call_conformance(monkeypatch):
     )
     o = _stub_openai(
         monkeypatch,
-        [_openai_chunk(tool_frags=[_openai_frag(0, "c1", "create_task", '{"title": "X"}')])],
+        [
+            _openai_item(
+                type="function_call",
+                call_id="c1",
+                name="create_task",
+                arguments='{"title": "X"}',
+            )
+        ],
     )
     for provider in (g, o):
         _, calls = asyncio.run(_drain(provider, tools=TOOLS))
@@ -142,17 +176,45 @@ def test_tool_call_conformance(monkeypatch):
         assert calls[0]["id"]  # every call is addressable
 
 
-def test_streamed_tool_arguments_are_reassembled(monkeypatch):
-    """OpenAI splits arguments across chunks; they must arrive as one JSON string."""
-    o = _stub_openai(
-        monkeypatch,
-        [
-            _openai_chunk(tool_frags=[_openai_frag(0, "c1", "create_task", '{"tit')]),
-            _openai_chunk(tool_frags=[_openai_frag(0, None, None, 'le": "X"}')]),
-        ],
+def test_openai_sends_tools_and_effort_the_way_responses_wants_them(monkeypatch):
+    """The bug this endpoint move fixes, pinned.
+
+    On /v1/chat/completions the gpt-5.4 and 5.5 family returns 400 for function tools and
+    a reasoning effort in the SAME request — and this app sends tools on every turn, so
+    every message failed. Responses accepts both, but spells them differently: tools are
+    flat rather than nested under "function", and the effort is a nested `reasoning`
+    object rather than a top-level `reasoning_effort` string.
+    """
+    seen: list[dict] = []
+    o = _stub_openai(monkeypatch, [_openai_text("hi")], seen=seen)
+    asyncio.run(_drain(o, tools=TOOLS, effort="high"))
+
+    sent = seen[0]
+    assert sent["tools"] == [
+        {
+            "type": "function",
+            "name": "create_task",
+            "description": "Add a task.",
+            "parameters": {"type": "object", "properties": {"title": {"type": "string"}}},
+        }
+    ]
+    assert sent["reasoning"] == {"effort": "high"}
+    assert "reasoning_effort" not in sent  # the chat-completions spelling, which 400s
+    assert sent["store"] is False, "a personal journal is never retained by the provider"
+
+
+def test_openai_reasoning_gets_its_own_output_budget(monkeypatch):
+    """Gemini's thinking budget is separate from max_output_tokens; OpenAI's is not.
+    Sending the same 8192 to both would let a high-effort turn spend the entire allowance
+    thinking and return an empty reply."""
+    plain: list[dict] = []
+    thinking: list[dict] = []
+    asyncio.run(_drain(_stub_openai(monkeypatch, [_openai_text("x")], seen=plain)))
+    asyncio.run(
+        _drain(_stub_openai(monkeypatch, [_openai_text("x")], seen=thinking), effort="high")
     )
-    _, calls = asyncio.run(_drain(o, tools=TOOLS))
-    assert json.loads(calls[0]["arguments"]) == {"title": "X"}
+
+    assert thinking[0]["max_output_tokens"] > plain[0]["max_output_tokens"]
 
 
 def test_google_returns_native_turn_for_thought_signature(monkeypatch):
@@ -167,20 +229,120 @@ def test_google_returns_native_turn_for_thought_signature(monkeypatch):
     assert any(getattr(p, "thought_signature", None) == b"sig-123" for p in native.parts)
 
 
-def test_openai_needs_no_native_echo(monkeypatch):
+def test_openai_returns_its_reasoning_for_the_next_round(monkeypatch):
+    """The second reason for moving to Responses: reasoning survives a tool round.
+
+    Chat Completions threw the model's reasoning away between rounds, so a turn that
+    called three tools re-derived its thinking three times. Responses hands the reasoning
+    item back (encrypted — we cannot read it, the model can), and it must reach the raw
+    echo alongside the call so the next request can replay it.
+    """
     o = _stub_openai(
-        monkeypatch, [_openai_chunk(tool_frags=[_openai_frag(0, "c1", "create_task", "{}")])]
+        monkeypatch,
+        [
+            _openai_item(type="reasoning", id="rs_1", encrypted_content="opaque"),
+            _openai_item(type="function_call", call_id="c1", name="create_task", arguments="{}"),
+        ],
     )
     _, calls = asyncio.run(_drain(o, tools=TOOLS))
-    assert calls[0]["raw"] is None
+
+    echoed = calls[0]["raw"]
+    assert [i["type"] for i in echoed] == ["reasoning", "function_call"]
+    assert echoed[0]["encrypted_content"] == "opaque"
 
 
-def test_openai_strips_provider_raw_before_sending():
-    """`_provider_raw` is ours, not OpenAI's — it must never be sent upstream."""
-    cleaned = OpenAIProvider._clean(
-        [{"role": "assistant", "content": "x", "_provider_raw": object()}]
+def test_openai_echoes_provider_raw_verbatim_on_the_next_request():
+    """Those items go back untouched. Rebuilding them from our own chat-shaped copy would
+    drop the reasoning, which is the only part we cannot reconstruct."""
+    native = [
+        {"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"},
+        {"type": "function_call", "call_id": "c1", "name": "create_task", "arguments": "{}"},
+    ]
+    items = _to_input(
+        [
+            {"role": "user", "content": "add a task"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "create_task", "arguments": "{}"},
+                    }
+                ],
+                "_provider_raw": native,
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "c1",
+                "name": "create_task",
+                "content": '{"ok": true}',
+            },
+        ]
     )
-    assert cleaned == [{"role": "assistant", "content": "x"}]
+
+    assert items[1:3] == native  # verbatim, reasoning included
+    assert items[3] == {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": '{"ok": true}',
+    }
+
+
+def test_openai_rebuilds_a_tool_turn_that_has_no_native_copy():
+    """History reloaded from the database has no `_provider_raw`. The call must still be
+    reconstructed, or the model sees a tool result answering nothing."""
+    items = _to_input(
+        [
+            {
+                "role": "assistant",
+                "content": "one moment",
+                "tool_calls": [
+                    {
+                        "id": "c9",
+                        "type": "function",
+                        "function": {"name": "list_tasks", "arguments": "{}"},
+                    }
+                ],
+            }
+        ]
+    )
+    assert items == [
+        {"role": "assistant", "content": "one moment"},
+        {"type": "function_call", "call_id": "c9", "name": "list_tasks", "arguments": "{}"},
+    ]
+
+
+def test_openai_empty_response_is_a_failure_not_an_empty_bubble(monkeypatch):
+    """A run can end `incomplete` — usually reasoning ate the whole output allowance — and
+    the SDK does not raise. Left alone the user gets a blank reply that Insights records as
+    a success, which is the worst of both worlds."""
+    o = _stub_openai(
+        monkeypatch,
+        [
+            _openai_done(
+                "incomplete", incomplete_details=pytypes.SimpleNamespace(reason="max_output_tokens")
+            )
+        ],
+    )
+    with pytest.raises(ProviderError, match="max_output_tokens"):
+        asyncio.run(_drain(o, tools=TOOLS))
+
+
+def test_openai_keeps_partial_output_when_a_run_is_cut_short(monkeypatch):
+    """If words did arrive, truncation is worth a log line, not throwing them away."""
+    o = _stub_openai(
+        monkeypatch,
+        [
+            _openai_text("half a sen"),
+            _openai_done(
+                "incomplete", incomplete_details=pytypes.SimpleNamespace(reason="max_output_tokens")
+            ),
+        ],
+    )
+    text, _ = asyncio.run(_drain(o))
+    assert text == "half a sen"
 
 
 def _bad_request(param: str):
@@ -200,46 +362,40 @@ def _bad_request(param: str):
     return openai.BadRequestError("unsupported", response=response, body=body)
 
 
-def test_openai_renames_max_tokens_for_newer_models(monkeypatch):
-    """gpt-5.x rejects max_tokens and wants max_completion_tokens; older hosts want the
-    legacy name. We send the modern form and adapt to whatever the API says."""
+def test_openai_renames_max_output_tokens_for_legacy_hosts(monkeypatch):
+    """We send the modern name and adapt to whatever the API says, rather than keeping a
+    model->capability table that rots every release."""
     seen: list[dict] = []
 
     async def create(**kwargs):
         seen.append(kwargs)
-        if "max_completion_tokens" in kwargs:
-            raise _bad_request("max_completion_tokens")  # legacy host
+        if "max_output_tokens" in kwargs:
+            raise _bad_request("max_output_tokens")  # legacy host
         return "ok"
 
-    provider = OpenAIProvider()
-    client = pytypes.SimpleNamespace(
-        chat=pytypes.SimpleNamespace(completions=pytypes.SimpleNamespace(create=create))
-    )
-    monkeypatch.setattr(provider, "_get", lambda: client)
+    provider = _stub_openai_create(monkeypatch, create)
 
-    assert asyncio.run(provider._create(model="m", messages=[])) == "ok"
-    assert "max_completion_tokens" in seen[0]  # modern name tried first
-    assert seen[1]["max_tokens"] == seen[0]["max_completion_tokens"]  # renamed, not lost
+    assert asyncio.run(provider._create(model="m", input=[])) == "ok"
+    assert "max_output_tokens" in seen[0]  # modern name tried first
+    assert seen[1]["max_tokens"] == seen[0]["max_output_tokens"]  # renamed, not lost
 
 
-def test_openai_drops_reasoning_effort_when_model_rejects_it(monkeypatch):
-    """Older models (e.g. gpt-4o) 400 on reasoning_effort — drop it and continue."""
+def test_openai_drops_reasoning_when_a_model_rejects_the_nested_field(monkeypatch):
+    """gpt-4.1 on Responses complains about `reasoning.effort` — a NESTED name, while the
+    argument we actually sent is `reasoning`. Matching only exact names left the retry
+    unable to act and the request failed outright."""
     seen: list[dict] = []
 
     async def create(**kwargs):
         seen.append(kwargs)
-        if "reasoning_effort" in kwargs:
-            raise _bad_request("reasoning_effort")
+        if "reasoning" in kwargs:
+            raise _bad_request("reasoning.effort")
         return "ok"
 
-    provider = OpenAIProvider()
-    client = pytypes.SimpleNamespace(
-        chat=pytypes.SimpleNamespace(completions=pytypes.SimpleNamespace(create=create))
-    )
-    monkeypatch.setattr(provider, "_get", lambda: client)
+    provider = _stub_openai_create(monkeypatch, create)
 
-    assert asyncio.run(provider._create(model="m", messages=[], reasoning_effort="low")) == "ok"
-    assert "reasoning_effort" not in seen[-1]
+    assert asyncio.run(provider._create(model="m", input=[], reasoning={"effort": "low"})) == "ok"
+    assert "reasoning" not in seen[-1]
 
 
 def test_openai_reads_param_from_message_when_body_is_empty(monkeypatch):
@@ -266,14 +422,10 @@ def test_openai_reraises_unrelated_bad_request(monkeypatch):
     async def create(**kwargs):
         raise _bad_request("some_param_we_never_send")
 
-    provider = OpenAIProvider()
-    client = pytypes.SimpleNamespace(
-        chat=pytypes.SimpleNamespace(completions=pytypes.SimpleNamespace(create=create))
-    )
-    monkeypatch.setattr(provider, "_get", lambda: client)
+    provider = _stub_openai_create(monkeypatch, create)
 
     try:
-        asyncio.run(provider._create(model="m", messages=[]))
+        asyncio.run(provider._create(model="m", input=[]))
     except openai.BadRequestError:
         return
     raise AssertionError("expected the error to propagate")

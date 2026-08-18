@@ -48,7 +48,7 @@ flowchart TB
 
     LLM["core/llm<br/><small>facade</small>"]
     GOOG["providers/google<br/><small>google-genai → Agent Platform</small>"]
-    OAI["providers/openai_provider<br/><small>openai SDK</small>"]
+    OAI["providers/openai_provider<br/><small>openai SDK → Responses API</small>"]
 
     SVC["services/<br/><small>tasks · journal · user_settings</small>"]
     DB[("Postgres 17 + pgvector")]
@@ -100,7 +100,7 @@ by the assistant are validated identically.
 | `app/core/llm.py` | Facade over the providers (`stream_with_tools`, `complete`, `embed`) + shared retry/backoff |
 | `app/core/providers/base.py` | The provider contract + the error taxonomy |
 | `app/core/providers/google.py` | Native `google-genai` → Agent Platform (Vertex) via ADC; `thought_signature` round-trip |
-| `app/core/providers/openai_provider.py` | Native `openai` SDK; adapts to per-model parameter differences |
+| `app/core/providers/openai_provider.py` | Native `openai` SDK on the **Responses** API; reasoning round-trip; adapts to per-model parameter differences |
 | `app/core/tools.py` | Assistant tool definitions + fault-tolerant dispatch |
 | `app/core/memory.py` | Extract facts → embed → store (pgvector) → semantic recall, time-bounded |
 | `app/core/telemetry.py` | `Timeline` — per-turn stage timings, token estimates, context description |

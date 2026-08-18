@@ -165,7 +165,7 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/main.py` | FastAPI app: CORS, router includes, `/health`, lifespan hook |
 | `app/config.py` | `Settings` — every env-driven knob (DB, JWT, LLM, timezone) |
 | `app/core/llm.py` | Facade over the providers: `stream_with_tools`, `complete`, `embed` + shared retry/backoff |
-| `app/core/providers/` | One contract (`base.py`), two **native** implementations: `google.py` (google-genai / Agent Platform) and `openai_provider.py` |
+| `app/core/providers/` | One contract (`base.py`), two **native** implementations: `google.py` (google-genai / Agent Platform) and `openai_provider.py` (openai SDK on the **Responses** API — Chat Completions rejects tools + reasoning together on gpt-5.4+) |
 | `app/core/composer.py` | Builds model context: `SOUL.md` persona + current date/time + recalled facts + recent messages |
 | `app/core/handler.py` | `handle_message` — the one brain; the bounded tool-use loop; yields SSE events |
 | `app/core/tools.py` | Assistant tools (create/list/update/complete task, add/list journal) + fault-tolerant dispatch |
