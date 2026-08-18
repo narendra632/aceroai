@@ -493,6 +493,8 @@ export type ModelUsage = {
   cost_usd: string;
   tokens_in: number;
   tokens_out: number;
+  /** The embedding model, which is not selectable. */
+  pinned: boolean;
 };
 
 export type ProviderComparison = {

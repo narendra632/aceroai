@@ -93,6 +93,11 @@ export function StackedArea({
 
   if (width === 0) return <div ref={ref} style={{ height }} className={className} />;
 
+  // A single bucket has no line to draw between points, so the area path collapses to
+  // nothing and the chart renders blank — which is what a first day of recording looks
+  // like. Draw it as a column instead: one day of data is still data.
+  const singleBucket = data.length === 1;
+
   return (
     <div ref={ref} className={cn("relative", className)}>
       <svg
@@ -134,7 +139,28 @@ export function StackedArea({
             </g>
           ))}
 
-          {bands.map(({ series: s, lower, upper }) => {
+          {singleBucket &&
+            bands.map(({ series: s, lower, upper }) => {
+              const top = y(upper[0]);
+              const bottom = y(lower[0]);
+              if (bottom - top < 0.5) return null;
+              return (
+                <rect
+                  key={s.key}
+                  x={plotW / 2 - 18}
+                  width={36}
+                  y={top}
+                  height={Math.max(1, bottom - top)}
+                  fill={s.color}
+                  stroke="var(--card)"
+                  strokeWidth={2}
+                  rx={2}
+                />
+              );
+            })}
+
+          {!singleBucket &&
+            bands.map(({ series: s, lower, upper }) => {
             const top = upper.map((v, i) => `${x(i)},${y(v)}`).join(" L ");
             const bottom = [...lower].reverse().map((v, i) => {
               const idx = lower.length - 1 - i;
@@ -229,7 +255,7 @@ export function StackedArea({
 // --- horizontal bars ----------------------------------------------------------------
 
 type BarsProps = {
-  data: { label: string; value: number; hint?: string }[];
+  data: { label: string; value: number; hint?: string; tag?: string }[];
   format?: (n: number) => string;
   className?: string;
 };
@@ -244,7 +270,14 @@ export function Bars({ data, format = formatUSD, className }: BarsProps) {
       {data.map((d) => (
         <li key={d.label}>
           <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="min-w-0 truncate">{d.label}</span>
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate">{d.label}</span>
+              {d.tag && (
+                <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-xs text-secondary-foreground">
+                  {d.tag}
+                </span>
+              )}
+            </span>
             <span
               className="shrink-0 text-muted-foreground"
               style={{ fontVariantNumeric: "tabular-nums" }}

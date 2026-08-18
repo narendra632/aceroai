@@ -95,13 +95,14 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Selectable models per provider, shown in Settings. Model names churn, so this is a
-# starting list, not a whitelist — the API also accepts a model outside it so a
-# brand-new release is usable before this list is updated.
+# Selectable models per provider, shown in Settings. Not a whitelist — the API also
+# accepts a model outside this list, so a brand-new release is usable before this is
+# updated.
 #
-# Curated deliberately: previous-generation models (gemini-2.5-*, gpt-4o) are left out.
-# They still work if typed in, but offering them invites picking something strictly worse
-# for the same money.
+# VERIFIED against each provider's live model list on 2026-08-18, after an earlier
+# hand-written version offered `gpt-5.1-mini`, which does not exist. Every entry below
+# was returned by the provider for this account. Ordered newest first, because that is
+# the order a person scanning a dropdown expects.
 MODEL_CATALOG: dict[str, list[str]] = {
     "google": [
         "gemini-3.7-flash",
@@ -109,11 +110,15 @@ MODEL_CATALOG: dict[str, list[str]] = {
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite",
     ],
     "openai": [
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+        "gpt-5.2",
         "gpt-5.1",
-        "gpt-5.1-mini",
-        "gpt-5",
         "gpt-4.1",
     ],
 }

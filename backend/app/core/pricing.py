@@ -65,12 +65,18 @@ PRICING: dict[str, list[Rate]] = {
     "google/gemini-2.5-pro": [_r("2026-01-01", "1.25", "10.00", "0.31")],
     # Embeddings: input only, no output to bill.
     "google/gemini-embedding-001": [_r("2026-01-01", "0.15", "0")],
+    "google/gemini-3.1-flash-lite": [_r("2026-01-01", "0.10", "0.40", "0.025")],
     # --- OpenAI ---
+    # ⚠ Frontier rates change often and these are transcribed, not fetched. They exist to
+    # make relative cost visible; treat the absolute number as indicative.
+    "openai/gpt-5.5": [_r("2026-01-01", "1.75", "14.00", "0.175")],
+    "openai/gpt-5.4": [_r("2026-01-01", "1.50", "12.00", "0.150")],
+    "openai/gpt-5.4-mini": [_r("2026-01-01", "0.30", "2.40", "0.030")],
+    "openai/gpt-5.4-nano": [_r("2026-01-01", "0.10", "0.80", "0.010")],
+    "openai/gpt-5.2": [_r("2026-01-01", "1.25", "10.00", "0.125")],
     "openai/gpt-5.1": [_r("2026-01-01", "1.25", "10.00", "0.125")],
-    "openai/gpt-5.1-mini": [_r("2026-01-01", "0.25", "2.00", "0.025")],
     "openai/gpt-5": [_r("2026-01-01", "1.25", "10.00", "0.125")],
     "openai/gpt-4.1": [_r("2026-01-01", "2.00", "8.00", "0.50")],
-    "openai/gpt-4o": [_r("2026-01-01", "2.50", "10.00", "1.25")],
 }
 
 

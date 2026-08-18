@@ -7,7 +7,7 @@ import { Bars, Legend, Sparkline, StackedArea, type Series } from "@/components/
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { Waterfall } from "@/components/ui/waterfall";
-import { formatINR, formatMs, formatUSD, localDayKey } from "@/lib/format";
+import { USD_TO_INR, formatINR, formatMs, formatUSD, localDayKey } from "@/lib/format";
 import * as api from "@/lib/api";
 import type { InsightsOverview, TurnRow, TurnSpan } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -290,9 +290,8 @@ export default function InsightsView() {
                       <strong className="font-medium text-foreground">
                         {pct(backgroundShare)} of this spend is work you never see
                       </strong>{" "}
-                      — recalling what Acero knows before it answers, and a second model
-                      call afterwards to learn from the turn. Both were billed and
-                      uncounted until now.
+                      — recalling what Acero knows before it answers, and learning from the
+                      turn afterwards.
                     </p>
                   </div>
                 )}
@@ -314,6 +313,8 @@ export default function InsightsView() {
                         label: m.model ?? "unknown",
                         value: Number(m.cost_usd),
                         hint: `${m.calls}×`,
+                        // Marked in place rather than explained in a paragraph below.
+                        tag: m.pinned ? "Fixed" : undefined,
                       }))}
                     />
                   </section>
@@ -341,9 +342,8 @@ export default function InsightsView() {
                   <section className="rounded-xl border border-border bg-card p-4">
                     <h2 className="text-sm font-medium">Providers, side by side</h2>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Replies only — embeddings are pinned to one provider regardless of
-                      your choice, so counting them would blame it for work the setting
-                      never touched.
+                      Replies only. Embeddings are excluded — they always run on a fixed
+                      model.
                     </p>
                     <div className="mt-3 overflow-x-auto">
                       <table className="w-full text-sm">
@@ -437,13 +437,11 @@ export default function InsightsView() {
                     <strong className="font-medium text-foreground">
                       All costs are estimates.
                     </strong>{" "}
-                    Both providers bill through accounts this app cannot see. Figures use
-                    price list <code>{data.pricing_version}</code>, frozen at the moment
-                    each call was recorded, so a later price change never rewrites history.
+                    Providers bill through accounts this app cannot see. Figures use price
+                    list <code>{data.pricing_version}</code>, fixed at the time of each
+                    call. Rupees converted at ${"₹"}
+                    {USD_TO_INR} per US dollar.
                   </p>
-                  {data.data_start && (
-                    <p>Recording began {whenFrom(data.data_start)}. Nothing before that exists.</p>
-                  )}
                 </footer>
               </>
             )}
@@ -479,9 +477,7 @@ export default function InsightsView() {
                   <dd style={{ fontVariantNumeric: "tabular-nums" }}>
                     {openTurn.turn.cost_usd == null
                       ? "no known price"
-                      : `${formatUSD(Number(openTurn.turn.cost_usd))} · ≈ ${formatINR(
-                          Number(openTurn.turn.cost_usd),
-                        )}`}
+                      : formatUSD(Number(openTurn.turn.cost_usd))}
                   </dd>
                 </div>
                 {!openTurn.turn.ok && (

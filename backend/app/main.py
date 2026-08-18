@@ -20,8 +20,11 @@ from app.services.errors import Duplicate, Invalid, NotFound
 _SECRET_PATTERNS = [
     # api.telegram.org/bot<id>:<secret>/method
     re.compile(r"(bot\d+:)[A-Za-z0-9_-]{20,}"),
-    # ?key=... / &api_key=... / token=... in any URL
-    re.compile(r"((?:api[_-]?key|token|access_token)=)[^&\s'\"]+", re.IGNORECASE),
+    # ?key=... / &api_key=... / token=... in any URL.
+    # The lookbehind matters: without it this also ate `first_token=2584ms` out of the
+    # per-turn timing line, silently destroying telemetry to protect a secret that was
+    # never there. Redaction that removes real data is its own kind of bug.
+    re.compile(r"(?<![\w-])((?:api[_-]?key|token|access_token)=)[^&\s'\"]+", re.IGNORECASE),
 ]
 
 

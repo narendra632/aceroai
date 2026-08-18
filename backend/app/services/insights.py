@@ -20,6 +20,7 @@ from decimal import Decimal
 from sqlalchemy import Float, case, cast, func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.models import Span, Turn
 
 # Latency is reported as percentiles, never a mean. One 30-second turn drags an average
@@ -166,6 +167,10 @@ def by_model(
             "cost_usd": Decimal(r.cost or 0),
             "tokens_in": int(r.tokens_in or 0),
             "tokens_out": int(r.tokens_out or 0),
+            # The embedding model is not selectable: every stored memory was written by it,
+            # and swapping it would make them unreadable. Flagged so the interface can mark
+            # the row rather than explaining the exception in prose underneath.
+            "pinned": r.model == settings.embed_model,
         }
         for r in rows
     ]

@@ -249,6 +249,8 @@ class ModelUsage(BaseModel):
     cost_usd: Decimal
     tokens_in: int
     tokens_out: int
+    # True for the embedding model, which is not selectable.
+    pinned: bool = False
 
 
 class ProviderComparison(BaseModel):

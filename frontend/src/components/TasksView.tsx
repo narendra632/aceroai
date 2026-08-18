@@ -38,6 +38,16 @@ const SORTS: { value: SortKey; label: string }[] = [
   { value: "created", label: "Recently added" },
 ];
 
+/** Whole calendar days from today to `due`, ignoring clock time.
+ *
+ *  Rounding the raw millisecond gap is what made a task due 19 Aug at 11:00 read as
+ *  "Today" when it was 23:26 on the 18th: the gap was 11.5 hours, which rounds to 0 days.
+ *  "Tomorrow" is a statement about the calendar, not about elapsed hours. */
+function calendarDaysUntil(due: Date): number {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((midnight(due) - midnight(new Date())) / DAY_MS);
+}
+
 /** What to say about a task's dates.
  *
  *  A FINISHED task is never "overdue". The word means "you still owe this and the deadline
@@ -56,9 +66,9 @@ function dueLabel(task: Task): string | null {
   }
   if (!task.due_at) return null;
   const due = new Date(task.due_at);
-  const days = Math.round((due.getTime() - Date.now()) / DAY_MS);
   const date = due.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   if (due.getTime() < Date.now()) return `Overdue · ${date}`;
+  const days = calendarDaysUntil(due);
   if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
   return date;
