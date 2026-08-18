@@ -132,6 +132,35 @@ along with the tool result.
 **Also billed, off the reply path:** memory extraction after `done` (one `complete()`
 call plus an embedding per new fact), and one embedding per message for recall.
 
+Measured over 128 real calls: background work is **4.4 % of spend but a third of all
+calls** — 47 embeddings and 31 extractions against 50 chat turns. It used to be billed and
+counted nowhere.
+
+### The extraction prompt: a line that grew forever, made flat
+
+The fact extractor was shown **every** stored fact on every message, so that it would not
+re-learn something already known. That block grew with the memory itself, forever.
+
+Measured on the real database, twice, three days apart:
+
+| | Facts | `known_block` |
+|---|---|---|
+| **Before** (2026-08-16) | 11 | **144 tok/message** |
+| **Before** (2026-08-19) | 22 | **275 tok/message** |
+| Projected, unbounded | 100 | 1,253 tok/message |
+| | 500 | 6,267 tok/message |
+| **After** (Decision 8) | any | **~150 tok/message, constant** |
+
+The fix reuses the facts `memory_recall` already fetched for this turn, capped at
+`MEMORY_RECALL_K` (12), instead of loading them all again. Those are the facts most
+semantically similar to what was just said — which are exactly the ones a duplicate would
+collide with — so the guard against re-learning gets *stronger* relative to its cost.
+
+**Read this honestly: it saved nothing on the day it shipped.** At 22 facts the cap is
+barely reached. Its whole value is the shape of the line, and the two "before" rows show
+the growth is real rather than theoretical — the cost nearly doubled in three days of
+ordinary use.
+
 ---
 
 ## 5. Verify it yourself

@@ -268,6 +268,59 @@ a deliberate re-embed migration of every row.
 > next contradicting statement rather than persisting as truth. Worth revisiting if
 > regeneration ever becomes a common action.
 
+### (d) The knowledge map
+
+The Knowledge page draws stored facts as a graph. Edges are not stored — they are computed
+from the same vectors recall already uses, so the map cannot drift out of step with what
+the assistant actually knows.
+
+```mermaid
+flowchart LR
+    F[(profile_facts<br/><small>live + active only</small>)] --> K["cosine kNN<br/><small>lateral join, k=3</small>"]
+    K --> C{"distance &lt; 0.32?"}
+    C -->|no| X[no edge]
+    C -->|yes| E["edge, both ends<br/>scoped to drawn nodes"]
+    F --> N["nodes<br/><small>capped at 800</small>"]
+    N --> UI["browser force simulation<br/><small>canvas, deterministic seed</small>"]
+    E --> UI
+```
+
+Two numbers here were measured, not chosen: the **0.32** cutoff (a first guess of 0.55
+excluded nothing — real facts about one person cluster between 0.13 and 0.48), and the
+**800**-node cap, above which the layout stops holding a 60 fps frame budget. Past 80 % of
+the cap the interface says so rather than quietly degrading.
+
+Edges are scoped to the drawn nodes at *both* ends. Without that, capping the node list
+produces edges pointing at facts that are not on screen.
+
+### (e) Trace capture
+
+Every provider call — including the ones nobody sees — records what it cost and where its
+time went. Writing happens **after** the reply, and cannot affect it.
+
+```mermaid
+flowchart TD
+    T["turn begins<br/><small>Timeline()</small>"] --> S["stages timed in order<br/><small>recall · context · llm_roundN · tool:*</small>"]
+    S --> R["reply delivered to the user"]
+    R --> P["telemetry.record<br/><small>off the critical path, swallows everything</small>"]
+    P --> COST["cost frozen at write time<br/><small>pricing_version recorded</small>"]
+    COST --> DB[("turns + spans")]
+    P --> H{"first call today?"}
+    H -->|yes| SW["retention sweep<br/><small>roll up, then prune</small>"]
+    SW --> DU[("daily_usage<br/><small>kept forever</small>")]
+```
+
+Three properties this shape buys, each learned from a defect:
+
+- **Usage is summed across rounds, not overwritten.** A provider reports a cumulative
+  total per *request*; a tool-using turn makes several. One dict served both jobs, so a
+  turn that billed 2,500 in / 130 out recorded 1,500 / 90.
+- **Background work is attributable.** Only the reply produces a `messages` row, so `kind`
+  is what makes the embedding and the fact extractor visible instead of free.
+- **A failure in recording can never reach the reply.** `telemetry.record` guarantees this
+  at the call site, not inside `persist` — proven by a test that replaces `persist` with a
+  function that always raises.
+
 ## 5. Data model
 
 ```mermaid
@@ -277,8 +330,11 @@ erDiagram
     users ||--o{ journal_entries : writes
     users ||--o{ profile_facts : "is described by"
     users ||--o{ generated_reviews : receives
+    users ||--o{ turns : "is billed for"
+    users ||--o{ daily_usage : "is summarised by"
     chat_sessions ||--o{ messages : contains
     profile_facts ||--o| profile_facts : "superseded_by"
+    turns ||--o{ spans : "breaks down into"
 
     users {
         uuid id PK
@@ -346,6 +402,42 @@ erDiagram
         timestamptz period_end
         text_array delivered_to
     }
+    turns {
+        uuid id PK
+        uuid user_id FK
+        text kind "chat|memory_extract|embed|job"
+        text provider
+        text model
+        int duration_ms
+        int ttft_ms "time to first word"
+        int tokens_in
+        int tokens_out
+        int tokens_thinking "billed as output, controlled separately"
+        numeric cost_usd "null = no price known, never 0"
+        text pricing_version "which price list produced it"
+        bool ok
+        text error_type
+    }
+    spans {
+        uuid id PK
+        uuid turn_id FK
+        text name "stage: memory_recall, llm_round1, tool:..."
+        smallint seq
+        int duration_ms
+        jsonb meta "counts only, never message text"
+    }
+    daily_usage {
+        uuid id PK
+        uuid user_id FK
+        date day "bucketed in app_timezone"
+        text kind
+        text provider
+        text model
+        int calls
+        int failed
+        int unpriced
+        numeric cost_usd
+    }
 ```
 
 Why it is shaped this way:
@@ -371,6 +463,19 @@ Why it is shaped this way:
   conversation keeps its messages, so a restore returns it intact.
 - **`generated_reviews` exists but is unwritten** — the table is ready; no job writes to it
   yet (`app/jobs/` is empty).
+- **Traces are three tiers, not one table** — `spans` hold per-stage detail and are pruned
+  after 30 days; `turns` hold one row per model call and are pruned after 400; `daily_usage`
+  is the rollup and is kept forever. `services/retention.py` sweeps them once a local day,
+  and always rolls a day up **before** the turns behind it can be deleted. The Insights
+  page reads whichever tier owns a given day, so **pruning never changes a spend figure** —
+  only how far back the waterfall and the latency percentiles reach.
+- **`turns.cost_usd` is nullable and never zero** — NULL means no price was known for that
+  model. A zero would silently understate a total; a gap is visible, counted as `unpriced`,
+  and gets fixed. Cost is frozen at write time with the `pricing_version` that produced it,
+  so a price change today cannot rewrite last month's spend.
+- **Traces record shape, never content** — counts, durations, model names. The prompt and
+  the reply already live in `messages`; copying them here would double both the disk
+  footprint and the blast radius of a leak.
 
 ## 6. Config & secrets
 

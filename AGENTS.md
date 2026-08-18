@@ -53,16 +53,23 @@ incremental change.
 ## Layout
 - backend/app/core/     handler.py (the one brain), composer.py (context builder),
                         llm.py (provider facade), tools.py (assistant tools),
-                        memory.py (extract/embed/recall), telemetry.py, security.py
+                        memory.py (extract/embed/recall), telemetry.py (traces),
+                        pricing.py (dated price list; cost frozen at write time),
+                        security.py
 - backend/app/core/providers/  base.py (contract + error taxonomy),
-                        google.py (native google-genai), openai_provider.py
-- backend/app/services/ tasks.py, journal.py, user_settings.py, errors.py —
+                        google.py (native google-genai),
+                        openai_provider.py (openai SDK on the Responses API)
+- backend/app/services/ tasks.py, journal.py, memory.py (fact rules + graph),
+                        insights.py (trace aggregates), retention.py (rollup + prune),
+                        user_settings.py, errors.py —
                         the single source of truth for the API *and* the tools
-- backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal, settings)
+- backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal, settings,
+                        memory, insights)
 - backend/app/channels/ telegram.py long-poller
 - backend/app/jobs/     empty package — no scheduled job built yet
-- backend/app/db/       models.py (7 tables), session.py
-- frontend/src/         Vite SPA — components/ (14), hooks/, lib/api.ts
+                        (retention currently sweeps from telemetry.record instead)
+- backend/app/db/       models.py (10 tables), session.py
+- frontend/src/         Vite SPA — components/, hooks/, lib/api.ts
 - docs/SOUL.md          assistant persona (read by composer every turn)
 - openspec/             specs (source of truth) + changes
 

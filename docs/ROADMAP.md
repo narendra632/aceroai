@@ -40,6 +40,25 @@
   exclusion filter in `services/` so the assistant can never see a deleted record;
   `notes` and `snoozed_until` finally have a UI; conversations can be renamed and
   searched; every list has loading, empty and **error** states.
+- **Knowledge visualization** — the memory has a page and an API of its own. Facts
+  are drawn as a kNN force graph built from the *same* pgvector embeddings recall
+  uses, so the picture cannot drift from what Acero actually knows; a list view is
+  the default on narrow screens. Facts can be edited, confirmed, forgotten and
+  restored, and editing supersedes rather than overwrites, so history survives.
+- **Observability** — every provider call is now traced: cost, tokens, latency,
+  and a per-stage waterfall. This closed three real accounting defects — a
+  tool-using turn recorded only its **last** round; embeddings and fact extraction
+  were **billed and never counted** (they are ~4 % of spend and a third of all
+  calls); and thinking tokens were dropped on one provider while being billed at
+  the output rate. Traces are pruned on a schedule with a permanent daily rollup
+  behind them, so the tables cannot outgrow the 10 GB disk.
+
+  **What observability does *not* do:** no alerting, no external exporter, no
+  sampling, no per-user quotas or spend caps. Cost is an **estimate** frozen at
+  write time from a hand-maintained price list — both providers bill through
+  accounts this app never sees, so it will not match an invoice to the cent.
+  Latency percentiles and error kinds exist only within the trace-retention
+  window; past it, spend and volume survive and speed does not.
 
 ## Now
 
@@ -59,25 +78,20 @@
    exactly how he wants this to work. **⚠ ASK HIM for those `.md` files when we
    reach this feature** — do not design it before reading them.
 
-4. **Knowledge visualization page** — visualize the memory/`profile_facts` and
-   their **pgvector embeddings** that Acero has learned about Narendra, so he can
-   *see his knowledge graph grow* over time.
-
-5. **MCP-powered real-world capabilities** — expose the tools Narendra actually
+4. **MCP-powered real-world capabilities** — expose the tools Narendra actually
    uses through MCP so Acero can act in the real world, not just chat.
 
-6. **Beyond** — additional features as they come up; this list grows over time.
+5. **Beyond** — additional features as they come up; this list grows over time.
 
-## Standing risk — not yet scheduled
+## Deliberately deferred
 
-- 🔴 **No database backup.** Everything Acero knows — memory/`profile_facts`,
-  journal entries, tasks, chat history — lives on a single 10 GB disk on one
-  `e2-micro`. There is no dump, no snapshot, no off-box copy. If that disk is lost
-  or a migration goes wrong, it is all gone with no way back. Unlike every other
-  item on this list, delay here has **permanent** cost rather than deferred value.
-  Likely shape: a nightly `pg_dump` in the compose stack, retained N days, copied
-  off the VM (Cloud Storage bucket or similar), plus a **rehearsed restore** —
-  a backup nobody has restored from is a hope, not a backup.
+- **Database backup.** Everything Acero knows lives on a single 10 GB disk with no
+  off-box copy. This is a **priced, deliberate choice** rather than an oversight:
+  the data is currently recoverable by re-stating it, and the cost of losing it is
+  accepted until the Investments page ships, at which point the calculus changes.
+  Likely shape when it is scheduled: a nightly `pg_dump` in the compose stack,
+  copied off the VM, plus a **rehearsed restore** — a backup nobody has restored
+  from is a hope, not a backup.
 
 ## Triggered work — scheduled by a measurement, not a date
 

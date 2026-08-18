@@ -171,21 +171,24 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/core/tools.py` | Assistant tools (create/list/update/complete task, add/list journal) + fault-tolerant dispatch |
 | `app/core/memory.py` | Cross-session memory: extract → embed → store facts (pgvector) → semantic recall |
 | `app/core/security.py` | bcrypt hashing + JWT create/decode (HS256, 30-day) |
-| `app/services/` | Single source of truth for `tasks`, `journal`, and `user_settings` (used by the API *and* the tools/handler) |
+| `app/services/` | Single source of truth for `tasks`, `journal`, `memory` (fact rules + the kNN graph), `insights` (trace aggregates), `retention` (rollup + prune), and `user_settings` — used by the API *and* the tools/handler |
+| `app/core/pricing.py` | Dated price list per provider/model. Cost is computed once, at write time, and frozen with its `pricing_version`, so a price change today cannot rewrite last month's spend. An unknown model costs `None`, never `0` |
 | `app/api/deps.py` | `get_current_user` — auth guard (Bearer header or cookie) |
 | `app/api/auth.py` | `POST /api/auth/login` · `/logout` · `GET /api/auth/me` |
 | `app/api/chat.py` | `POST /api/chat` (SSE) · session list · history (owner-checked) |
 | `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` (owner-scoped) |
 | `app/api/journal.py` | `/api/journal` CRUD (owner-scoped) |
 | `app/api/settings.py` | `GET/PATCH /api/settings` — provider + model selection |
+| `app/api/memory.py` | `/api/memory/facts` list/search/detail/edit/confirm/forget/restore · `/api/memory/graph` · `/api/memory/stats` (owner-scoped) |
+| `app/api/insights.py` | `/api/insights/overview` · `/turns` · `/turns/{id}` — **read-only**; no route here mutates anything |
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/db/session.py` | Engine, `SessionLocal`, `Base`, `get_db` dependency |
-| `app/db/models.py` | The 7 ORM tables (typed `Mapped[]` style) |
-| `app/core/telemetry.py` | `Timeline` — per-turn stage timings, token estimates, context description |
+| `app/db/models.py` | The 10 ORM tables (typed `Mapped[]` style) — including `turns`, `spans` and `daily_usage` |
+| `app/core/telemetry.py` | `Timeline` — per-turn stage timings and context description; `record()` persists a trace **after** the reply and guarantees a failure there can never reach it |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
 | `app/scripts/verify_llm.py` | **Legacy** smoke test against the Gemini *Developer* API — does not exercise `core/providers/` |
 | `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` |
-| `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet |
+| `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet. Retention currently sweeps opportunistically from `telemetry.record` instead — see the TODO in `services/retention.py` |
 | `alembic/` | `…_001_core_tables.py` schema + pgvector · `…_002_fact_embeddings.py` `profile_facts.embedding` + HNSW · `…_003_user_model_prefs.py` per-user provider/models |
 | `tests/` | 13 modules: `conftest.py` (fake LLM/embeddings + scoped data), `test_auth`, `test_chat`, `test_memory`, `test_telegram`, `test_providers`, `test_tools_loop`, `test_context_awareness`, `test_services_{tasks,journal}`, `test_api_{journal_tasks,settings}`, `test_prod_config`, `test_health` |
 | `Dockerfile` | Production image (`uv sync --frozen --no-dev`) |

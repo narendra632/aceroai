@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:5173"
     telegram_bot_token: str = ""
 
+    # --- trace retention (migration 008) ---
+    # Observability must not consume the storage the application depends on. Spans are
+    # ~8 rows per turn and carry the least long-term value: nobody asks about the latency
+    # of one turn from eight months ago. Turns are kept far longer because they answer
+    # questions people do ask. Beyond both, the `daily_usage` rollup is kept forever.
+    span_retention_days: int = 30
+    turn_retention_days: int = 400  # over a year, so year-on-year comparisons stay live
+
     # --- production ---
     app_env: str = "dev"  # "prod" enables the startup secret check
     # The auth cookie. In prod behind HTTPS with a cross-site frontend (Vercel),

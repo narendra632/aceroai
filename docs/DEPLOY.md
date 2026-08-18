@@ -296,15 +296,44 @@ Then send a real message and ask the assistant to add a task.
 - **Logs**: `docker compose -f docker-compose.prod.yml logs -f api`
 - **Restart**: `... up -d` (after editing `.env`) · **Stop**: `... down`
 - **Update (manual)**: `git pull && docker compose -f docker-compose.prod.yml up -d --build`
-- **DB backup** — ⚠ **there is no automated backup, and this is the project's biggest
-  standing risk** (see [`ROADMAP.md`](ROADMAP.md)). Memory, journal, tasks, and chat
-  history all live on one disk with no off-box copy. Run this manually until it is
-  automated, and note that a dump left *on the same VM* protects against a bad
-  migration but not against losing the disk:
+- **DB backup** — there is no automated backup; taking one is manual. A dump left *on the
+  same VM* protects against a bad migration but not against losing the disk:
   ```bash
   docker compose -f docker-compose.prod.yml exec -T db pg_dump -U agent agent > ~/backup-$(date +%F).sql
   ```
 - **Budget**: you should stay at $0; the $1 alert warns you otherwise.
+
+### Trace retention
+
+`turns` and `spans` are written on every model call — including the ones nobody sees, so
+roughly four provider calls per message. Left alone they grow forever on a 10 GB disk, so
+`services/retention.py` sweeps them once a local day, off the back of a real turn.
+
+Three tiers, and the sweep always rolls up **before** it prunes:
+
+| Table | Kept for | Setting |
+|---|---|---|
+| `spans` — the per-stage waterfall | 30 days | `SPAN_RETENTION_DAYS` |
+| `turns` — one row per model call | 400 days | `TURN_RETENTION_DAYS` |
+| `daily_usage` — one row per day per model | forever | — |
+
+**Measured cost**, at 256 provider calls/day with 3 spans each (roughly four times the
+observed rate, for headroom): `turns` are **319 bytes/row** and `spans` **183 bytes/row**,
+so a full year unpruned is about **28 MiB + 49 MiB**. Under the windows above the steady
+state settles near **35 MiB total**, and `daily_usage` adds well under a MiB a year.
+
+So this is precautionary, not urgent — at today's volume the disk would last decades
+either way. It exists so the footprint stays bounded if usage changes shape, and so the
+Insights page keeps its history: **pruning never changes a spend figure.** The rollup is
+what the page reads for any day it covers, and a turn is only ever deleted once its own
+day has been rolled up.
+
+What does NOT survive pruning, by nature: **latency percentiles and error kinds**. A
+median cannot be re-derived from daily medians. Those panels are therefore bounded by
+`TURN_RETENTION_DAYS`, and go blank rather than invent a number.
+
+To change a window, set the variable in the server `.env` and restart the api. Shortening
+one takes effect on the next sweep and is irreversible — the rows are gone.
 
 ## Troubleshooting
 

@@ -8,7 +8,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
 from app.core.security import hash_password
-from app.db.models import ChatSession, JournalEntry, Message, ProfileFact, Span, Task, Turn, User
+from app.db.models import (
+    ChatSession,
+    DailyUsage,
+    JournalEntry,
+    Message,
+    ProfileFact,
+    Span,
+    Task,
+    Turn,
+    User,
+)
 from app.db.session import SessionLocal
 from app.main import app
 
@@ -33,6 +43,9 @@ def _purge(db):
         if turn_ids:
             db.execute(delete(Span).where(Span.turn_id.in_(turn_ids)))
         db.execute(delete(Turn).where(Turn.user_id == u.id))
+        # The rollup outlives the turns behind it by design, so it needs its own delete —
+        # and it references the user, so leaving rows here would break the purge entirely.
+        db.execute(delete(DailyUsage).where(DailyUsage.user_id == u.id))
         db.execute(delete(ChatSession).where(ChatSession.user_id == u.id))
         db.execute(delete(ProfileFact).where(ProfileFact.user_id == u.id))
         db.execute(delete(Task).where(Task.user_id == u.id))

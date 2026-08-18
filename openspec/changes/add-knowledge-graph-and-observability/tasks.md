@@ -152,18 +152,18 @@ artifacts if a premise is wrong, then build.
       anything is hidden — because a note in a document gets read once and never re-read.
       `graph_warn_at()` is a function, not a constant: a threshold derived at import time
       silently goes stale when the limit changes (caught by a test)
-- [ ] 4.14 **Checkpoint — Narendra reviews the Knowledge page over HMR before §5 starts**
+- [x] 4.14 ✅ **Checkpoint — Narendra reviews the Knowledge page over HMR before §5 starts**
 
 ## 5. Trace capture — and the three accounting defects
 
-- [ ] 5.1 **Migration 006:** `turns` (id, user_id, session_id NULL, channel, kind, provider,
+- [x] 5.1 ✅ **Migration 006:** `turns` (id, user_id, session_id NULL, channel, kind, provider,
       model, effort, started_at, duration_ms, ttft_ms, rounds, tokens_in, tokens_out,
       **tokens_thinking**, tokens_cached, cost_usd, pricing_version, ok, error_type) and
       `spans` (id, turn_id, name, seq, duration_ms, meta JSONB). Index `turns(started_at)`,
       `turns(user_id, started_at)`, `spans(turn_id)`
-- [ ] 5.2 CHECK constraint on `turns.kind` (`'chat'`, `'memory_extract'`, `'embed'`,
+- [x] 5.2 ✅ CHECK constraint on `turns.kind` (`'chat'`, `'memory_extract'`, `'embed'`,
       `'job'`) — `Text` + CHECK, never a Postgres enum (golden rule 7)
-- [ ] 5.3 **Fix (A) — and normalise it across providers** *(rewritten by 0.5; it is **not**
+- [x] 5.3 ✅ **Fix (A) — and normalise it across providers** *(rewritten by 0.5; it is **not**
       Google-only)*. `tokens_out` must mean *visible output* on both:
       Google `tokens_out = candidates_token_count` (already excludes thinking),
       `tokens_thinking = thoughts_token_count`;
@@ -171,28 +171,28 @@ artifacts if a premise is wrong, then build.
       `tokens_out = completion_tokens − reasoning_tokens`.
       Also capture `tokens_cached` (`cached_content_token_count` /
       `prompt_tokens_details.cached_tokens`) — cached input bills at a lower rate
-- [ ] 5.4 **Fix (B):** usage accumulates across rounds. ⚠ **Per 0.4, the two levels differ:
+- [x] 5.4 ✅ **Fix (B):** usage accumulates across rounds. ⚠ **Per 0.4, the two levels differ:
       within one round take the last reported value (providers report cumulative totals per
       request); across rounds, sum.** Naively adding every chunk would wildly overcount.
       Then: delete the defect-pinning test and remove the `xfail` marker in
       `tests/test_usage_accounting.py`, so 0.3's expected total becomes a live assertion
-- [ ] 5.5 **Fix (C), part 1:** add `usage: dict | None` to `complete()` and `embed()` in
+- [x] 5.5 ✅ **Fix (C), part 1:** add `usage: dict | None` to `complete()` and `embed()` in
       `providers/base.py` and both implementations. *This is the contract gap that made the
       defect possible — there was nowhere to put the number*
-- [ ] 5.6 **Fix (C), part 2:** `core/memory.py` opens its own `turns` rows —
+- [x] 5.6 ✅ **Fix (C), part 2:** `core/memory.py` opens its own `turns` rows —
       `kind='memory_extract'` for the extractor call, `kind='embed'` for recall and
       fact-embedding — so background spend is attributed rather than merely counted
-- [ ] 5.7 `telemetry.Timeline` gains `persist(db, ...)` writing one `turns` row + one
+- [x] 5.7 ✅ `telemetry.Timeline` gains `persist(db, ...)` writing one `turns` row + one
       `spans` row per stage. **After the final SSE event, own session, failures swallowed
       and logged** *(Decision 4)*
-- [ ] 5.8 Wire into `handler.handle_message` — including the error path, so failed turns
+- [x] 5.8 ✅ Wire into `handler.handle_message` — including the error path, so failed turns
       are recorded with `ok=false` and `error_type`. A dashboard that only shows successes
       hides the thing you most need to see
-- [ ] 5.9 Count what is currently logged and lost: `llm.py` retry attempts, and
+- [x] 5.9 ✅ Count what is currently logged and lost: `llm.py` retry attempts, and
       `_too_similar` dedup rejections → `spans.meta`
-- [ ] 5.10 **Test: a trace-write failure does not affect the reply** *(Decision 4 is only
+- [x] 5.10 ✅ **Test: a trace-write failure does not affect the reply** *(Decision 4 is only
       true if this passes)*
-- [ ] 5.11 Test: no prompt or response **text** is written to `turns` or `spans` — shapes
+- [x] 5.11 ✅ Test: no prompt or response **text** is written to `turns` or `spans` — shapes
       and counts only *(a non-goal that needs enforcing, not just stating)*
 
 ## 6. Bound the extraction prompt
@@ -200,95 +200,101 @@ artifacts if a premise is wrong, then build.
 - [x] 6.1 ✅ handler passes the already-recalled facts into `extract_and_store`
 - [x] 6.2 ✅ `_load_active_facts` deleted; a test asserts it cannot come back
 - [x] 6.3 ✅ `test_dedup_holds_even_when_the_known_block_is_empty` — the extractor is shown nothing and still cannot duplicate
-- [ ] 6.4 Re-measure against 0.6's before-number and **record both in
-      `docs/REQUEST-ANATOMY.md`**. This is the change's first self-observation: the meter
-      measuring a fix to the thing it was built to find
-
-## 7. Cost model
-
-- [ ] 7.1 `core/pricing.py` — dated catalog: `{provider/model: [PriceRow(valid_from,
+- [x] 6.4 ✅ **Re-measured 2026-08-19, recorded in `docs/REQUEST-ANATOMY.md`.** The block
+      had already grown from 144 tok (11 facts, 16 Aug) to **275 tok (22 facts)** in three
+      days of ordinary use — the growth was real, not theoretical. Bounded: **~150 tok,
+      constant**. Still saves nothing today; its value is the shape of the line
+- [x] 7.1 ✅ `core/pricing.py` — dated catalog: `{provider/model: [PriceRow(valid_from,
       input_per_mtok, output_per_mtok, cached_input_per_mtok)]}`, plus `PRICING_VERSION`
-- [ ] 7.2 `estimate_cost(...)` — resolves the rate effective at the turn's timestamp;
+- [x] 7.2 ✅ `estimate_cost(...)` — resolves the rate effective at the turn's timestamp;
       **thinking tokens billed at the output rate**
-- [ ] 7.3 Unknown model → cost `NULL`, not `0`. **Zero is a lie that silently understates
+- [x] 7.3 ✅ Unknown model → cost `NULL`, not `0`. **Zero is a lie that silently understates
       the total; null is a visible gap that gets fixed**
-- [ ] 7.4 Test: a price added with a later `valid_from` does not change an existing turn's
+- [x] 7.4 ✅ Test: a price added with a later `valid_from` does not change an existing turn's
       stored cost *(Decision 2 — the whole reason cost is frozen)*
 
 ## 8. Insights page — ⛳ observability module ships here
 
-- [ ] 8.1 `api/insights.py` — `GET /api/insights/summary`, `/series`, `/by-model`,
+- [x] 8.1 ✅ **Shipped as ONE route, deliberately.** `GET /api/insights/overview` returns
+      everything the page needs; `/turns` and `/turns/{id}` serve the table and waterfall.
+      Six separate calls would each pay the same cold-connection cost to a VM in Oregon —
+      the queries are cheap, the round-trips are not. Original wording below:
+      ~~`GET /api/insights/summary`, `/series`, `/by-model`,~~
       `/turns`, `/turns/{id}`. **Read-only; nothing on this page mutates anything**
       *(Decision 10)*
-- [ ] 8.2 Aggregates computed in SQL, not Python — do not pull a month of rows into memory
+- [x] 8.2 ✅ Aggregates computed in SQL, not Python — do not pull a month of rows into memory
       on a 1 GB VM
-- [ ] 8.3 `ui/chart.tsx` — hand-written SVG: area, bar, sparkline. Theme tokens only, so
+- [x] 8.3 ✅ `ui/chart.tsx` — hand-written SVG: area, bar, sparkline. Theme tokens only, so
       dark mode is correct by construction *(Decision 9)*
-- [ ] 8.4 `ui/waterfall.tsx` — **the hero view**: one turn's spans as proportional
+- [x] 8.4 ✅ `ui/waterfall.tsx` — **the hero view**: one turn's spans as proportional
       horizontal bars. This is what made the 12 s embedding stall obvious in raw logs;
       here it is a click
-- [ ] 8.5 **Checkpoint — Narendra reviews the charts against real data before the page is
+- [x] 8.5 ✅ **Checkpoint — Narendra reviews the charts against real data before the page is
       assembled.** Hand-built charts are where a "finished product" bar quietly slips, and
       the time-series is the one with real exposure *(Decision 9)*. If the area chart
       disappoints, `ui/chart.tsx` has a fixed interface and that **single** chart can be
       swapped to a library without touching the page
-- [ ] 8.6 `InsightsView.tsx` — headline tiles (spend this month, turns, median latency,
+- [x] 8.6 ✅ `InsightsView.tsx` — headline tiles (spend this month, turns, median latency,
       error rate), spend-over-time, cost by model and by kind, latency **p50/p95** (never a
       mean — one 30 s turn makes an average meaningless), error taxonomy
-- [ ] 8.7 Recent-turns table → click → waterfall
-- [ ] 8.8 **Every cost figure labelled an estimate**, with the pricing version reachable.
+- [x] 8.7 ✅ Recent-turns table → click → waterfall
+- [x] 8.8 ✅ **Every cost figure labelled an estimate**, with the pricing version reachable.
       Google bills through Cloud Billing; we never see the invoice *(Decision 2)*
-- [ ] 8.9 **Provider comparison** — cost, latency and error rate per provider side by side,
+- [x] 8.9 ✅ **Provider comparison** — cost, latency and error rate per provider side by side,
       so switching provider in Settings becomes an evidence-based choice. The data is
       already there (`turns.provider`); this is the view that makes it worth having
-- [ ] 8.10 State the **data start date** on the page — traces begin at deploy, and a chart
+- [ ] 8.10 ⚠ **DROPPED on Narendra's instruction.** Built, then removed: "the finished
+      product does not have these kind of lines". A page that has always been watching is
+      the normal case; saying so in prose reads as a release note that is true this week
+      and noise next month. ~~State the **data start date** on the page~~ — traces begin at deploy, and a chart
       that implies it has always been watching is misleading *(no backfill: Narendra's
       decision)*
-- [ ] 8.11 Monthly budget in Settings (default off) + an in-app warning past a threshold.
+- [ ] 8.11 ⛔ **NOT BUILT — the only outstanding item in this change.** Observability
+      reports cost; it cannot cap it. Decide before archiving: build it, or move it to
+      future scope. ~~Monthly budget in Settings (default off) + an in-app warning past a threshold.
       **Proactive notification waits for the scheduler** — explicitly out of scope
-- [ ] 8.12 Loading, empty and error states; empty reads as "no data yet", not as failure
-- [ ] 8.13 Sidebar entry (`View = "insights"`, Activity icon); verified at 375 px — charts
+- [x] 8.12 ✅ Loading, empty and error states; empty reads as "no data yet", not as failure
+- [x] 8.13 ✅ Sidebar entry (`View = "insights"`, Activity icon); verified at 375 px — charts
       scroll inside their own container, the page never scrolls horizontally
 
 ## 9. Retention and hygiene
 
-- [ ] 9.1 `services/retention.py` — prune raw `spans` past the window; keep `turns` longer;
-      maintain a `daily_usage` rollup *(Decision 5)*
-- [ ] 9.2 Run it opportunistically and idempotently until the scheduler exists; leave a
-      TODO naming the job that will own it
-- [ ] 9.3 **Raise `httpx` logging to WARNING — it writes the Telegram bot token into the
-      logs** via full request URLs at INFO, locally and in production **(E)**
-- [ ] 9.4 Document the retention window and its disk footprint in `DEPLOY.md` — how much a
-      month of traces costs on disk, and how to change the window
-
-## 10. Verification
-
-- [ ] 10.1 From `backend/`: `uv run ruff format .` and `uv run ruff check .` clean
-- [ ] 10.2 From `backend/`: `uv run pytest` — all green, including 0.3's defect test now
-      asserting the corrected total
-- [ ] 10.3 Frontend: `npx tsc --noEmit` and `npm run lint` clean
-- [ ] 10.4 Manual: send a chat turn, confirm a `turns` row appears with **non-zero
-      background rows alongside it** (`kind='memory_extract'`, `kind='embed'`) — the
-      spend that was invisible before this change. **Also settle 0.4's open question here:**
-      check a real single-round turn's recorded tokens against the provider's own reported
-      total, to confirm streaming usage is cumulative rather than per-chunk deltas
-- [ ] 10.5 Manual: a tool-using turn records the **accumulated** total across rounds, not
-      the last round **(B)**
-- [ ] 10.6 Manual: edit a fact → the old one is superseded, reachable as history, and gone
-      from recall
-- [ ] 10.7 Manual: 375 px pass on both new pages — graph is pannable/zoomable, list is the
-      default, no horizontal page scroll
-- [ ] 10.8 Migrations 005 and 006 apply cleanly on a fresh DB **and** on a copy of current
-      production data
-- [ ] 10.9 **Confirm `.env` is NOT staged** before any commit
-
-## 11. Documentation
-
-- [ ] 11.1 **docs and diagrams reflect what was built** — `ARCHITECTURE.md` gains the two
-      tables in the erDiagram and a Mermaid flow for trace capture and the knowledge graph;
-      `AGENTS.md` Layout gains `services/memory.py`, `core/pricing.py`, `api/insights.py`;
-      `ROADMAP.md` moves knowledge visualization to Done and records what observability
-      does **not** do; `REQUEST-ANATOMY.md` gains 6.4's before/after
-- [ ] 11.2 `backend/README.md` — the new routes and the two new tables
-- [ ] 11.3 A short "how to read the Insights page" note: why p95 and not average, why cost
-      is an estimate, what the waterfall is showing
+- [x] 9.1 ✅ `services/retention.py` — three tiers (spans 30d, turns 400d, `daily_usage`
+      forever); `sweep()` always rolls up **before** it prunes; a turn is deleted only if
+      its own day is in the rollup
+- [x] 9.2 ✅ `maybe_sweep()` runs at most once per local day from `telemetry.record`,
+      which already runs off the reply path and swallows everything. Idempotent, so a
+      restart causing an extra sweep is harmless. TODO(scheduled-jobs) names its future home
+- [x] 9.3 ✅ Done earlier, in the secret-leak commit — `httpx` at WARNING plus a
+      redacting formatter, because the token appeared by **two** independent paths
+- [x] 9.4 ✅ `DEPLOY.md` gains a Trace retention section with **measured** per-row cost
+      (turns 319 B, spans 183 B → ~35 MiB steady state); both windows in `.env.example`
+- [x] 10.1 ✅ ruff format + check clean
+- [x] 10.2 ✅ `uv run pytest` — **242 passed**
+- [x] 10.3 ✅ `npm run build` clean (NOT `tsc --noEmit` — `tsconfig.json` has `files: []`,
+      so it checks zero files and passes a broken build); `npm run lint` clean bar one
+      pre-existing fast-refresh warning
+- [x] 10.4 ✅ 128 recorded calls: 50 chat, **47 embed, 31 memory_extract** — the
+      background spend, now attributable. 0.4 settled: usage is reported **once, at the
+      end**, so assignment (`set_usage`) is correct and summing chunks would overcount
+- [x] 10.5 ✅ A real two-round turn recorded `in=2634` across `llm_round1 → tool:create_task
+      → llm_round2`, not the last round alone
+- [x] 10.6 ✅ Covered by named tests: `test_editing_text_supersedes_and_re_embeds`,
+      `test_superseded_fact_leaves_recall_immediately`,
+      `test_superseded_facts_are_reachable_as_history`
+- [x] 10.7 ✅ No fixed widths on either page; the one wide table scrolls in its own
+      container; the graph falls back to the list below 640 px. Confirmed visually by
+      Narendra on a narrow window
+- [x] 10.8 ✅ All **eight** migrations apply cleanly to an empty database (scratch DB
+      created and dropped), and 008 applied cleanly to the dev database holding real rows.
+      Production applies them on deploy via the compose `migrate` service
+- [x] 10.9 ✅ `.env` confirmed unstaged before every commit
+- [x] 11.1 ✅ `ARCHITECTURE.md`: three tables in the erDiagram + Mermaid flows for the
+      knowledge map and trace capture; `AGENTS.md` Layout updated; `ROADMAP.md` moves both
+      modules to Done and states what observability does **not** do; `REQUEST-ANATOMY.md`
+      gains 6.4's before/after
+- [x] 11.2 ✅ `backend/README.md` — `api/memory.py`, `api/insights.py`, `core/pricing.py`,
+      the new services, and 10 tables
+- [x] 11.3 ✅ `docs/INSIGHTS.md` — why p95 and not an average (the 6-second average that
+      describes nothing), why cost is an estimate, what the waterfall shows, how far back it
+      goes, and what the page deliberately does not do

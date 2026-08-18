@@ -26,7 +26,6 @@ from app.api.schemas import (
     TurnDetail,
     TurnOut,
 )
-from app.config import settings
 from app.core import pricing
 from app.db.models import User
 from app.db.session import get_db
@@ -61,9 +60,7 @@ def overview(
     since = None if all_time else _since(days)
     return InsightsOverview(
         summary=InsightsSummary(**svc.summary(db, user.id, since=since)),
-        series=[
-            SeriesPoint(**p) for p in svc.series(db, user.id, since=since, tz=settings.app_timezone)
-        ],
+        series=[SeriesPoint(**p) for p in svc.series(db, user.id, since=since)],
         by_model=[ModelUsage(**m) for m in svc.by_model(db, user.id, since=since)],
         by_provider=[ProviderComparison(**p) for p in svc.by_provider(db, user.id, since=since)],
         errors=[ErrorCount(**e) for e in svc.errors(db, user.id, since=since)],

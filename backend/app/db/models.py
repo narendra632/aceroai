@@ -225,3 +225,42 @@ class Span(Base):
     duration_ms: Mapped[int | None]
     # Counts and identifiers only, never message text.
     meta: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class DailyUsage(Base):
+    """One day of spend, rolled up and kept forever (migration 008).
+
+    `turns` and `spans` are written on every model call and would grow without bound on a
+    host with 10 GB of disk. They are pruned; this table is what survives, so "what did I
+    spend in March" stays answerable long after the individual calls behind it are gone.
+
+    A day is bucketed in `settings.app_timezone`, not UTC, because that is the day the
+    Insights page draws. Rolling up in UTC and displaying in Asia/Kolkata would shift every
+    bucket by five and a half hours — the totals would be right and every daily figure
+    wrong.
+
+    `provider` and `model` are NOT NULL, with unknowns coalesced to a literal. Postgres
+    treats NULLs as distinct in a unique constraint, so a nullable key column would let the
+    same day be inserted repeatedly instead of updated.
+    """
+
+    __tablename__ = "daily_usage"
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "day", "kind", "provider", "model", name="daily_usage_key"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id"))
+    day: Mapped[dt.date] = mapped_column(sa.Date)
+    kind: Mapped[str] = mapped_column(sa.Text)
+    provider: Mapped[str] = mapped_column(sa.Text)
+    model: Mapped[str] = mapped_column(sa.Text)
+    calls: Mapped[int]
+    failed: Mapped[int]
+    # Calls whose model had no known price, so a total can say how complete it is rather
+    # than quietly understating itself — the same reason `turns.cost_usd` is nullable.
+    unpriced: Mapped[int]
+    cost_usd: Mapped[Decimal] = mapped_column(sa.Numeric(12, 6))
+    tokens_in: Mapped[int]
+    tokens_out: Mapped[int]
+    tokens_thinking: Mapped[int]

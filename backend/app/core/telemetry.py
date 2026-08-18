@@ -162,6 +162,21 @@ class Timeline:
             db.close()
 
 
+def _housekeeping() -> None:
+    """Keep the trace tables from outgrowing the app they observe.
+
+    Imported here rather than at module scope so that `core.telemetry` — which every turn
+    touches — does not pull the service layer in at import time.
+    """
+    from app.services import retention
+
+    db = SessionLocal()
+    try:
+        retention.maybe_sweep(db)
+    finally:
+        db.close()
+
+
 async def record(tl: "Timeline", *args, **kwargs) -> None:
     """Persist a trace off the reply path, swallowing absolutely everything.
 
@@ -171,9 +186,15 @@ async def record(tl: "Timeline", *args, **kwargs) -> None:
     reply. Enforced by a test that replaces `persist` with a function that always raises.
 
     Every caller uses this rather than `persist` directly.
+
+    Retention runs from here too, at most once a local day. This is the only place in the
+    app that reliably executes after a reply has already been delivered, which makes it the
+    cheapest correct home for housekeeping until the scheduler exists — and it inherits the
+    same guarantee, so a failing sweep cannot damage a turn either.
     """
     try:
         await run_in_threadpool(tl.persist, *args, **kwargs)
+        await run_in_threadpool(_housekeeping)
     except Exception:
         persist_log.warning("trace recording failed; the reply is unaffected", exc_info=True)
 
