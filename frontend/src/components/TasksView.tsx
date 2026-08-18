@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check, Circle, ListTodo, MoonStar, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Circle,
+  CircleDashed,
+  ListTodo,
+  MoonStar,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import DatePicker from "@/components/ui/date-picker";
@@ -30,9 +38,24 @@ const SORTS: { value: SortKey; label: string }[] = [
   { value: "created", label: "Recently added" },
 ];
 
-function dueLabel(iso: string | null): string | null {
-  if (!iso) return null;
-  const due = new Date(iso);
+/** What to say about a task's dates.
+ *
+ *  A FINISHED task is never "overdue". The word means "you still owe this and the deadline
+ *  has passed" — once it is done the deadline is history, and shouting a red warning at
+ *  something already handled trains you to ignore the warning where it matters. Done tasks
+ *  report when they were completed instead, which is the only date still worth knowing. */
+function dueLabel(task: Task): string | null {
+  const settled = task.status === "done" || task.status === "dropped";
+  if (settled) {
+    if (!task.completed_at) return null;
+    const on = new Date(task.completed_at).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+    return `Completed · ${on}`;
+  }
+  if (!task.due_at) return null;
+  const due = new Date(task.due_at);
   const days = Math.round((due.getTime() - Date.now()) / DAY_MS);
   const date = due.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   if (due.getTime() < Date.now()) return `Overdue · ${date}`;
@@ -44,6 +67,8 @@ function dueLabel(iso: string | null): string | null {
 /** Which section a task belongs to. Mirrors the backend's urgency ordering; derived at
  *  read time and never stored (golden rule 2). */
 function bucketOf(task: Task): string {
+  // A finished task cannot be overdue, so it never lands in that bucket.
+  if (task.status === "done" || task.status === "dropped") return "No date";
   if (!task.due_at) return "No date";
   const due = new Date(task.due_at).getTime();
   const now = Date.now();
@@ -278,7 +303,7 @@ export default function TasksView() {
                 )}
                 <ul className="space-y-2">
                   {tasks.map((t) => {
-                    const label = dueLabel(t.due_at);
+                    const label = dueLabel(t);
                     const overdue = label?.startsWith("Overdue");
                     return (
                       <li
@@ -293,6 +318,11 @@ export default function TasksView() {
                         >
                           {t.status === "done" ? (
                             <Check className="size-5 text-primary" />
+                          ) : t.status === "in_progress" ? (
+                            // A half-filled ring: started but not finished. The checkbox
+                            // was the only status signal in the list, and it has just two
+                            // states, so "in progress" was invisible unless you opened it.
+                            <CircleDashed className="size-5 text-primary" />
                           ) : (
                             <Circle className="size-5" />
                           )}
@@ -323,6 +353,11 @@ export default function TasksView() {
                                     for colour-blind users */}
                                 {overdue && <AlertTriangle className="size-3.5" />}
                                 {label}
+                              </span>
+                            )}
+                            {t.status === "in_progress" && (
+                              <span className="rounded-md bg-secondary px-1.5 py-0.5 font-medium text-secondary-foreground">
+                                In progress
                               </span>
                             )}
                             <span>{PRIORITY[t.priority] ?? "Medium"}</span>

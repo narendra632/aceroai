@@ -398,3 +398,42 @@ def test_embedding_is_pinned_and_independent_of_chat_provider(db, user, monkeypa
 def test_catalog_lists_configured_providers():
     assert set(MODEL_CATALOG) == {"google", "openai"}
     assert all(MODEL_CATALOG.values())
+
+
+# --- adapting to what a model actually accepts ---------------------------------------
+
+
+def test_both_phrasings_of_a_rejected_parameter_are_understood():
+    """OpenAI reports an unusable parameter two different ways depending on which way the
+    mismatch runs, and only one is machine-readable. Matching just that one meant every
+    NON-reasoning model (gpt-4.1, gpt-4o) failed outright the moment an effort was sent —
+    which is every turn. Observed live before this was fixed.
+    """
+    from app.core.providers.openai_provider import _unsupported_param
+
+    class Err(Exception):
+        body = None
+
+    newer_model_rejects_legacy = Err(
+        "Error code: 400 - {'error': {'message': \"Unsupported parameter: "
+        "'max_tokens' is not supported with this model.\"}}"
+    )
+    older_model_rejects_newer = Err(
+        "Error code: 400 - {'error': {'message': 'Unrecognized request argument "
+        "supplied: reasoning_effort', 'type': 'invalid_request_error'}}"
+    )
+    unrelated = Err("Error code: 400 - your prompt was too long")
+
+    assert _unsupported_param(newer_model_rejects_legacy) == "max_tokens"
+    assert _unsupported_param(older_model_rejects_newer) == "reasoning_effort"
+    # Anything else must propagate rather than being silently retried without a param.
+    assert _unsupported_param(unrelated) is None
+
+
+def test_structured_body_is_preferred_over_the_message():
+    from app.core.providers.openai_provider import _unsupported_param
+
+    class Err(Exception):
+        body = {"error": {"code": "unsupported_parameter", "param": "temperature"}}
+
+    assert _unsupported_param(Err("some message mentioning nothing")) == "temperature"

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Lock } from "lucide-react";
+import { Check, Lock, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -264,6 +264,25 @@ export default function SettingsView() {
               onChange={setDeep}
             />
           </div>
+
+          {/* A control that silently does nothing is worse than one that isn't offered.
+              Some models have no reasoning setting at all, so choosing one here makes the
+              think-harder toggle a no-op — which you would otherwise discover only by
+              failing to notice any difference. */}
+          {data.no_reasoning_control.includes(`${provider}/${deep}`) && (
+            <p
+              role="status"
+              className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground"
+            >
+              <Info className="mt-0.5 size-4 shrink-0" />
+              <span>
+                <strong className="font-medium text-foreground">{deep}</strong> has no
+                reasoning setting, so the 🧠 toggle and <code>/think</code> will behave
+                exactly like a normal reply. Pick a model that supports deeper thinking if
+                you want that toggle to do something.
+              </span>
+            </p>
+          )}
 
           <div className="mt-5 flex items-center gap-3">
             <Button onClick={save} disabled={saving || !dirty}>

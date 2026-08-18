@@ -72,19 +72,37 @@ def _classify(exc: Exception) -> ProviderError:
     return ProviderError(str(exc))
 
 
-def _unsupported_param(exc: Exception) -> str | None:
-    """The parameter name an `unsupported_parameter` 400 is complaining about.
+# OpenAI rejects an unusable parameter with two DIFFERENT messages depending on which
+# way the mismatch runs, and only the first is machine-readable:
+#
+#   newer model, legacy param : code=unsupported_parameter, param="max_tokens"
+#                               "Unsupported parameter: 'max_tokens' is not supported..."
+#   older model, newer param  : code=None, param=None
+#                               "Unrecognized request argument supplied: reasoning_effort"
+#
+# Matching only the first meant every non-reasoning model (gpt-4.1, gpt-4o) failed
+# outright the moment an effort was sent, which is every turn. Observed live.
+_REJECTED_PARAM = re.compile(
+    r"Unsupported parameter: '([^']+)'|Unrecognized request argument supplied: (\S+)"
+)
 
-    The structured `body` is preferred, but the SDK does not always populate it, so we
-    fall back to reading the message — which always names the parameter in quotes.
+
+def _unsupported_param(exc: Exception) -> str | None:
+    """The parameter name a 400 is complaining about, whichever way it is phrased.
+
+    The structured `body` is preferred, but the SDK populates it for only one of the two
+    shapes, so the message is parsed as a fallback.
     """
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         err = body.get("error") or {}
         if err.get("code") == "unsupported_parameter" and err.get("param"):
             return str(err["param"])
-    match = re.search(r"Unsupported parameter: '([^']+)'", str(exc))
-    return match.group(1) if match else None
+    match = _REJECTED_PARAM.search(str(exc))
+    if not match:
+        return None
+    # Whichever alternative matched; the other group is None.
+    return (match.group(1) or match.group(2)).strip("'\".,")
 
 
 def _accumulate(acc: dict[int, dict], fragment) -> None:

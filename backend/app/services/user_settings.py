@@ -9,7 +9,13 @@ touched settings behaves exactly as it did before this feature existed.
 
 from sqlalchemy.orm import Session
 
-from app.config import MODEL_CATALOG, available_providers, provider_available, settings
+from app.config import (
+    MODEL_CATALOG,
+    NO_REASONING_CONTROL,
+    available_providers,
+    provider_available,
+    settings,
+)
 from app.db.models import User
 from app.services.errors import Invalid
 
@@ -39,6 +45,9 @@ def get_settings(user: User) -> dict:
         "model_deep": model_deep,
         "available_providers": available_providers(),
         "model_catalog": MODEL_CATALOG,
+        # Models where choosing them for "deep" buys nothing, so the interface can say so
+        # instead of offering a toggle that silently changes nothing.
+        "no_reasoning_control": sorted(NO_REASONING_CONTROL),
         "defaults": {
             "provider": settings.llm_provider,
             "model_chat": settings.model_chat,

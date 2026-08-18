@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Info } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+
 import { Bars, Legend, Sparkline, StackedArea, type Series } from "@/components/ui/chart";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { Waterfall } from "@/components/ui/waterfall";
-import { formatMs, formatUSD } from "@/lib/format";
+import { formatINR, formatMs, formatUSD, localDayKey } from "@/lib/format";
 import * as api from "@/lib/api";
 import type { InsightsOverview, TurnRow, TurnSpan } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -25,6 +27,10 @@ const SERIES: Series[] = [
   { key: "embed", label: "Recall", color: "var(--series-2)" },
   { key: "memory_extract", label: "Learning", color: "var(--series-3)" },
 ];
+
+/** Recent calls shown at once. A heavy day can produce hundreds; the rest load on demand
+ *  rather than making the page scroll forever. */
+const TURN_PAGE = 20;
 
 const RANGES = [
   { label: "7d", days: 7 },
@@ -93,16 +99,22 @@ export default function InsightsView() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [openTurn, setOpenTurn] = useState<{ turn: TurnRow; spans: TurnSpan[] } | null>(null);
   const [loadingTurn, setLoadingTurn] = useState(false);
+  const [turnLimit, setTurnLimit] = useState(TURN_PAGE);
+  const [loadingMoreTurns, setLoadingMoreTurns] = useState(false);
+  const [moreTurns, setMoreTurns] = useState(false);
 
   const load = useCallback(() => {
     setStatus("loading");
     Promise.all([
       api.getInsights({ days: range.days, allTime: range.days === undefined }),
-      api.listTurns(40),
+      api.listTurns(TURN_PAGE),
     ])
       .then(([overview, recent]) => {
         setData(overview);
         setTurns(recent);
+        // A full page means there is probably another behind it.
+        setMoreTurns(recent.length === TURN_PAGE);
+        setTurnLimit(TURN_PAGE);
         setStatus("ready");
       })
       .catch(() => setStatus("error"));
@@ -126,7 +138,7 @@ export default function InsightsView() {
     const cursor = new Date(`${days[0]}T00:00:00`);
     const last = new Date(`${days[days.length - 1]}T00:00:00`);
     while (cursor <= last) {
-      const key = cursor.toISOString().slice(0, 10);
+      const key = localDayKey(cursor);
       out.push({ day: key, values: byDay.get(key) ?? {} });
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -137,6 +149,21 @@ export default function InsightsView() {
     () => chartData.map((d) => Object.values(d.values).reduce((a, b) => a + b, 0)),
     [chartData],
   );
+
+  async function loadMoreTurns() {
+    setLoadingMoreTurns(true);
+    try {
+      const next = turnLimit + TURN_PAGE;
+      const rows = await api.listTurns(next);
+      setTurns(rows);
+      setTurnLimit(next);
+      setMoreTurns(rows.length === next);
+    } catch {
+      setMoreTurns(false);
+    } finally {
+      setLoadingMoreTurns(false);
+    }
+  }
 
   async function openWaterfall(id: string) {
     setLoadingTurn(true);
@@ -225,9 +252,12 @@ export default function InsightsView() {
                     label="Estimated spend"
                     value={formatUSD(Number(s.cost_usd))}
                     hint={
-                      s.unpriced > 0
-                        ? `${s.unpriced} call${s.unpriced > 1 ? "s" : ""} with no known price`
-                        : `${s.calls} calls`
+                      // Rupees at a fixed rate — a convenience, not an authoritative
+                      // conversion, so it is marked approximate.
+                      `≈ ${formatINR(Number(s.cost_usd))} · ` +
+                      (s.unpriced > 0
+                        ? `${s.unpriced} call${s.unpriced > 1 ? "s" : ""} unpriced`
+                        : `${s.calls} calls`)
                     }
                     spark={dailyTotals}
                   />
@@ -386,6 +416,20 @@ export default function InsightsView() {
                       </li>
                     ))}
                   </ul>
+                  {moreTurns && (
+                    <div className="mt-3 text-center">
+                      <Button
+                        variant="outline"
+                        onClick={() => void loadMoreTurns()}
+                        disabled={loadingMoreTurns}
+                      >
+                        {loadingMoreTurns ? "Loading…" : "Load more"}
+                      </Button>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Showing the {turns.length} most recent
+                      </p>
+                    </div>
+                  )}
                 </section>
 
                 <footer className="space-y-1 text-xs text-muted-foreground">
@@ -435,7 +479,9 @@ export default function InsightsView() {
                   <dd style={{ fontVariantNumeric: "tabular-nums" }}>
                     {openTurn.turn.cost_usd == null
                       ? "no known price"
-                      : formatUSD(Number(openTurn.turn.cost_usd))}
+                      : `${formatUSD(Number(openTurn.turn.cost_usd))} · ≈ ${formatINR(
+                          Number(openTurn.turn.cost_usd),
+                        )}`}
                   </dd>
                 </div>
                 {!openTurn.turn.ok && (

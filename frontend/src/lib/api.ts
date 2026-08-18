@@ -240,6 +240,9 @@ export type Settings = {
   model_deep: string;
   available_providers: string[];
   model_catalog: Record<string, string[]>;
+  /** "provider/model" entries with no reasoning control — picking one for Deep means the
+   *  "think harder" toggle changes nothing. */
+  no_reasoning_control: string[];
   defaults: Record<string, string>;
   embedding: EmbeddingInfo;
 };

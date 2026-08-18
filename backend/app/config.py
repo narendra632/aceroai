@@ -98,6 +98,10 @@ settings = Settings()
 # Selectable models per provider, shown in Settings. Model names churn, so this is a
 # starting list, not a whitelist — the API also accepts a model outside it so a
 # brand-new release is usable before this list is updated.
+#
+# Curated deliberately: previous-generation models (gemini-2.5-*, gpt-4o) are left out.
+# They still work if typed in, but offering them invites picking something strictly worse
+# for the same money.
 MODEL_CATALOG: dict[str, list[str]] = {
     "google": [
         "gemini-3.7-flash",
@@ -105,17 +109,37 @@ MODEL_CATALOG: dict[str, list[str]] = {
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
     ],
     "openai": [
         "gpt-5.1",
         "gpt-5.1-mini",
         "gpt-5",
         "gpt-4.1",
-        "gpt-4o",
     ],
 }
+
+# Models that do NOT accept a reasoning/thinking control.
+#
+# This matters beyond a crash. The app's whole adaptive-reasoning feature — "think harder"
+# on web, `/think` on Telegram — is a request for MORE deliberation. On a model without
+# that capability the toggle changes nothing at all, and a control that silently does
+# nothing is worse than one that isn't offered. Settings says so rather than letting the
+# user discover it by not noticing a difference.
+#
+# Every Gemini model here takes a thinking_budget, so this is currently OpenAI-only.
+NO_REASONING_CONTROL: frozenset[str] = frozenset(
+    {
+        "openai/gpt-4.1",
+        "openai/gpt-4o",
+        "openai/gpt-4o-mini",
+    }
+)
+
+
+def supports_reasoning(provider: str, model: str) -> bool:
+    """Whether picking this model for 'deep' actually buys deeper thinking."""
+    return f"{provider}/{model}" not in NO_REASONING_CONTROL
+
 
 PROVIDERS = tuple(MODEL_CATALOG)
 

@@ -123,6 +123,10 @@ class SettingsOut(BaseModel):
     model_deep: str
     available_providers: list[str]
     model_catalog: dict[str, list[str]]
+    # "provider/model" entries where picking it for `deep` buys nothing, because the model
+    # has no reasoning control. A toggle that silently does nothing is worse than one that
+    # is not offered, so the interface says so.
+    no_reasoning_control: list[str]
     defaults: dict[str, str]
     embedding: EmbeddingInfo
 

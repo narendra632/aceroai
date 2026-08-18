@@ -45,3 +45,51 @@ def test_soul_path_override_is_used(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "soul_path", str(persona))
 
     assert composer._read_persona() == "PERSONA-FROM-SOUL-PATH"
+
+
+def test_httpx_request_logging_is_silenced():
+    """Telegram embeds the bot token in the URL path, and httpx logs full request URLs at
+    INFO — so the secret was written to the console and to production logs on every poll.
+    Confirmed live in this app's own logs before this was fixed."""
+    import logging
+
+    from app.main import configure_logging
+
+    configure_logging()
+
+    assert logging.getLogger("httpx").level >= logging.WARNING
+    assert logging.getLogger("httpcore").level >= logging.WARNING
+    # Our own logs must still be visible — the point is to hide URLs, not go quiet.
+    assert logging.getLogger("aceroai.timing").level <= logging.INFO
+
+
+def test_secrets_are_scrubbed_from_log_text_including_tracebacks():
+    """Silencing httpx was necessary and NOT sufficient. The token also travels inside the
+    exception message — `HTTPStatusError` embeds the failing URL — and that text is
+    rendered by the formatter, well after any filter on the record has run. Verified live:
+    the token was still in the logs after httpx was raised to WARNING.
+    """
+    import logging
+
+    from app.main import RedactingFormatter
+
+    fmt = RedactingFormatter("%(message)s")
+    token = "bot8661034745:AAEP7sRaeg-o6dr4XmukfcSEyqxKk8BeKN4"
+
+    def render(message: str, exc: Exception | None = None) -> str:
+        record = logging.LogRecord("t", logging.ERROR, __file__, 1, message, (), None)
+        if exc is not None:
+            record.exc_info = (type(exc), exc, None)
+        return fmt.format(record)
+
+    # 1. in a plain message
+    assert token not in render(f"calling https://api.telegram.org/{token}/getUpdates")
+    # 2. in an exception's text, which is where it survived the first fix
+    leaked = RuntimeError(f"409 for url 'https://api.telegram.org/{token}/getUpdates'")
+    rendered = render("poll failed", leaked)
+    assert token not in rendered
+    assert "AAEP7sRaeg" not in rendered
+    # 3. generic credential-bearing query parameters
+    assert "sk-abc123secret" not in render("GET /v1?api_key=sk-abc123secret&x=1")
+    # Redaction must not swallow the surrounding message.
+    assert "poll failed" in rendered

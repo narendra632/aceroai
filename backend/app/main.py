@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -12,12 +13,52 @@ from app.channels import telegram
 from app.config import DEV_JWT_SECRET, settings
 from app.services.errors import Duplicate, Invalid, NotFound
 
+# Secrets that turn up inside log TEXT rather than being logged deliberately. A Telegram
+# bot token lives in the URL path, so any library or exception that mentions the URL leaks
+# it: httpx's request log, an HTTPStatusError message, a traceback. Rather than chase each
+# source, the token is scrubbed from the final formatted string.
+_SECRET_PATTERNS = [
+    # api.telegram.org/bot<id>:<secret>/method
+    re.compile(r"(bot\d+:)[A-Za-z0-9_-]{20,}"),
+    # ?key=... / &api_key=... / token=... in any URL
+    re.compile(r"((?:api[_-]?key|token|access_token)=)[^&\s'\"]+", re.IGNORECASE),
+]
+
+
+class RedactingFormatter(logging.Formatter):
+    """Strips secrets from every log line, including tracebacks.
+
+    Applied to the formatter rather than as a filter on purpose: a filter sees
+    `record.msg` and `record.args`, but an exception's text is rendered later, and that is
+    exactly where the Telegram token was still appearing after httpx was silenced.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        text = super().format(record)
+        for pattern in _SECRET_PATTERNS:
+            text = pattern.sub(r"<redacted>", text)
+        return text
+
 
 def configure_logging() -> None:
     """Make our own logs visible without touching uvicorn's. The per-turn timing line
     (logger "aceroai.timing") is how latency is verified against a stopwatch."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     logging.getLogger("aceroai.timing").setLevel(logging.INFO)
+
+    # Scrub secrets from anything that reaches a handler, whoever wrote it.
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+
+    # httpx logs every request URL at INFO. Telegram puts the bot token IN the URL path
+    # (api.telegram.org/bot<TOKEN>/getUpdates), so the secret was being written to the
+    # console and to production logs on every poll — roughly every 25 seconds, forever.
+    # Confirmed live in this app's own log output before it was raised to WARNING.
+    #
+    # Failures still surface: httpx logs those at WARNING and above, and our own handlers
+    # log provider errors themselves.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def check_production_config() -> None:
