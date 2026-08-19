@@ -537,10 +537,10 @@ def test_embedding_is_pinned_and_independent_of_chat_provider(db, user, monkeypa
     """Switching chat provider must NOT change the embedding model — otherwise every
     stored profile_facts vector becomes meaningless."""
     monkeypatch.setattr(settings, "openai_api_key", "sk-test")
-    before = user_settings.get_settings(user)["embedding"]
+    before = user_settings.get_settings(db, user)["embedding"]
     user.llm_provider = "openai"
     db.commit()
-    after = user_settings.get_settings(user)["embedding"]
+    after = user_settings.get_settings(db, user)["embedding"]
     assert before == after
     assert after["pinned"] is True
     assert after["model"] == settings.embed_model

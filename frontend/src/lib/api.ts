@@ -234,6 +234,18 @@ export type EmbeddingInfo = {
   note: string;
 };
 
+export type BudgetStatus = {
+  /** null = no limit set. Everything else is still reported, so the UI can show what a
+   *  month costs before asking you to pick a ceiling. */
+  limit_usd: string | null;
+  spent_usd: string;
+  remaining_usd: string | null;
+  used_ratio: number;
+  state: "off" | "ok" | "warning" | "exceeded";
+  resets_on: string;
+  warn_ratio: number;
+};
+
 export type Settings = {
   provider: string;
   model_chat: string;
@@ -245,13 +257,24 @@ export type Settings = {
   no_reasoning_control: string[];
   defaults: Record<string, string>;
   embedding: EmbeddingInfo;
+  budget: BudgetStatus;
 };
 
 export type SettingsUpdate = {
   provider?: string;
   model_chat?: string;
   model_deep?: string;
+  monthly_budget_usd?: string;
+  /** Turning a limit off, which an omitted `monthly_budget_usd` cannot express. */
+  clear_budget?: boolean;
 };
+
+/** Just the spend state — re-read after every turn, so it skips the model catalogue. */
+export async function getBudget(): Promise<BudgetStatus> {
+  const r = await req("/api/settings/budget");
+  if (!r.ok) throw new Error("could not load budget");
+  return r.json();
+}
 
 export async function getSettings(): Promise<Settings> {
   const r = await req("/api/settings");

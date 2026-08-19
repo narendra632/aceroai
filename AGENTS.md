@@ -61,6 +61,7 @@ incremental change.
                         openai_provider.py (openai SDK on the Responses API)
 - backend/app/services/ tasks.py, journal.py, memory.py (fact rules + graph),
                         insights.py (trace aggregates), retention.py (rollup + prune),
+                        budget.py (monthly spend ceiling),
                         user_settings.py, errors.py —
                         the single source of truth for the API *and* the tools
 - backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal, settings,

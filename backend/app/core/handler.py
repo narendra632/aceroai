@@ -22,7 +22,7 @@ from app.config import settings
 from app.core import composer, llm, memory, telemetry, tools
 from app.core.providers.base import BillingError, RateLimitError, add_usage
 from app.db.models import ChatSession, Message, User
-from app.services import user_settings
+from app.services import budget, user_settings
 
 log = logging.getLogger(__name__)
 
@@ -177,6 +177,20 @@ async def handle_message(
     text = text or ""
     if len(text) > settings.max_input_chars:
         yield "error", f"That message is too long (max {settings.max_input_chars} characters)."
+        return
+
+    # The spend ceiling, checked HERE so every channel inherits it — web and Telegram —
+    # and no channel can forget it. Before anything is persisted, so a message that was
+    # never answered does not end up in the history.
+    #
+    # No `turns` row is written for a refusal. Nothing was sent to a provider, so there is
+    # no model call to record; inventing one would inflate the error rate on the Insights
+    # page with events that are not failures.
+    try:
+        await run_in_threadpool(budget.check, db, user)
+    except budget.BudgetExceeded as exc:
+        log.info("turn refused for user %s: monthly budget reached", user.id)
+        yield "error", str(exc)
         return
 
     # Measured, not guessed: every stage below is timed and logged as one line per

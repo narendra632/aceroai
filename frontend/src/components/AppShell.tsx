@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useSmoothReveal } from "@/hooks/useSmoothReveal";
 import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
-import type { Session } from "@/lib/api";
+import type { BudgetStatus, Session } from "@/lib/api";
 import Composer, { type ComposerHandle } from "./Composer";
 import JournalView from "./JournalView";
 import InsightsView from "./InsightsView";
@@ -36,6 +36,9 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState("");
   const [deep, setDeep] = useState(false);
+  // The spend ceiling. Re-read after every turn so the number in the warning band is the
+  // real one, not the one from whenever the app was opened.
+  const [budget, setBudget] = useState<BudgetStatus | null>(null);
 
   const reveal = useSmoothReveal();
   const toast = useToast();
@@ -46,9 +49,23 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     api.listSessions().then(setSessions).catch(() => toast.error("Couldn't refresh your chats"));
   }, [toast]);
 
+  // Best-effort: a failure here must never block chat, so it stays silent and the
+  // composer simply behaves as it did before the limit existed.
+  const refreshBudget = useCallback(() => {
+    api.getBudget().then(setBudget).catch(() => {});
+  }, []);
+
   useEffect(() => {
     refreshSessions();
   }, [refreshSessions]);
+
+  // Re-read on every arrival at the chat screen, not just on mount. Raising the limit
+  // happens in Settings, so without this the composer would stay locked after the user
+  // had already fixed it — and the one thing a blocked state must get right is letting
+  // you out of it.
+  useEffect(() => {
+    if (view === "chat") refreshBudget();
+  }, [view, refreshBudget]);
 
   function navigate(v: View) {
     setView(v);
@@ -176,6 +193,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           } else if (ev.event === "done") {
             reveal.finish(finalize);
             refreshSessions();
+            refreshBudget();
             return;
           } else if (ev.event === "error") {
             reveal.cancel();
@@ -187,6 +205,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
             setWorking(null);
             setBusy(false);
             abortRef.current = null;
+            refreshBudget();
             return;
           }
         }
@@ -197,7 +216,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
         refreshSessions();
       }
     },
-    [busy, currentId, reveal, refreshSessions],
+    [busy, currentId, reveal, refreshSessions, refreshBudget],
   );
 
   /** Re-run the last turn: drop the trailing reply server-side, then resend. */
@@ -299,6 +318,23 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
               onRegenerate={regenerate}
               onRetry={retry}
             />
+            {budget?.state === "warning" && (
+              <div className="border-t border-border bg-background px-4 pt-3">
+                <p className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 rounded-lg bg-secondary px-3 py-2 text-xs text-muted-foreground">
+                  <span>
+                    {Math.round(budget.used_ratio * 100)}% of this month&rsquo;s spend limit
+                    used.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate("settings")}
+                    className="shrink-0 font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    Adjust
+                  </button>
+                </p>
+              </div>
+            )}
             <Composer
               ref={composerRef}
               text={draft}
@@ -308,6 +344,16 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
               onSend={(t, d) => void send(t, d)}
               onStop={stop}
               busy={busy}
+              blocked={
+                budget?.state === "exceeded"
+                  ? {
+                      reason: `Monthly spend limit reached. Replies resume on ${new Date(
+                        `${budget.resets_on}T00:00:00`,
+                      ).toLocaleDateString(undefined, { day: "numeric", month: "long" })}.`,
+                      onResolve: () => navigate("settings"),
+                    }
+                  : undefined
+              }
             />
           </>
         ) : view === "tasks" ? (

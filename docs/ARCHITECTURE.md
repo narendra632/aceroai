@@ -50,7 +50,7 @@ flowchart TB
     GOOG["providers/google<br/><small>google-genai → Agent Platform</small>"]
     OAI["providers/openai_provider<br/><small>openai SDK → Responses API</small>"]
 
-    SVC["services/<br/><small>tasks · journal · user_settings</small>"]
+    SVC["services/<br/><small>tasks · journal · memory · insights · retention · budget · user_settings</small>"]
     DB[("Postgres 17 + pgvector")]
 
     SPA --> ROUTES --> BRAIN
@@ -103,10 +103,15 @@ by the assistant are validated identically.
 | `app/core/providers/openai_provider.py` | Native `openai` SDK on the **Responses** API; reasoning round-trip; adapts to per-model parameter differences |
 | `app/core/tools.py` | Assistant tool definitions + fault-tolerant dispatch |
 | `app/core/memory.py` | Extract facts → embed → store (pgvector) → semantic recall, time-bounded |
-| `app/core/telemetry.py` | `Timeline` — per-turn stage timings, token estimates, context description |
+| `app/core/telemetry.py` | `Timeline` — per-turn stage timings; `record()` persists a trace after the reply and guarantees a failure there cannot reach it |
+| `app/core/pricing.py` | Dated price list; cost frozen at write time with its `pricing_version` |
 | `app/core/security.py` | bcrypt hash/verify + JWT create/decode (HS256, 30-day) |
 | `app/services/tasks.py` | Task rules incl. urgency ordering and duplicate refusal |
 | `app/services/journal.py` | Journal entry rules |
+| `app/services/memory.py` | Fact rules (the live/active filter) + the kNN graph query |
+| `app/services/insights.py` | Trace aggregates, all computed in SQL |
+| `app/services/retention.py` | Roll up to `daily_usage`, then prune `spans` and `turns` |
+| `app/services/budget.py` | The monthly spend ceiling, checked before each turn |
 | `app/services/user_settings.py` | Resolve provider/model (user value → configured default); settings payload |
 | `app/services/errors.py` | Domain errors mapped to HTTP status in `main.py` |
 | `app/api/deps.py` | `get_current_user` — Bearer header (or cookie) → user |
@@ -114,10 +119,12 @@ by the assistant are validated identically.
 | `app/api/chat.py` | `POST /api/chat` (SSE) · session list · history · delete session |
 | `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` |
 | `app/api/journal.py` | `/api/journal` CRUD |
-| `app/api/settings.py` | `GET/PATCH /api/settings` |
+| `app/api/settings.py` | `GET/PATCH /api/settings` + `GET /api/settings/budget` |
+| `app/api/memory.py` | Facts list/search/detail/edit/confirm/forget/restore · graph · stats |
+| `app/api/insights.py` | `overview` · `turns` · `turns/{id}` — read-only |
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` |
-| `app/db/models.py` | The 7 ORM tables (typed `Mapped[]`) |
+| `app/db/models.py` | The 10 ORM tables (typed `Mapped[]`) |
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` |
 | `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
@@ -125,7 +132,9 @@ by the assistant are validated identically.
 | `alembic/versions/…001_core_tables.py` | `CREATE EXTENSION vector` + the 7 core tables |
 | `alembic/versions/…002_fact_embeddings.py` | `profile_facts.embedding vector(768)` + HNSW index |
 | `alembic/versions/…003_user_model_prefs.py` | `users.llm_provider` · `model_chat` · `model_deep` |
-| `tests/` | 13 modules: auth, chat, memory, telegram, providers, tools loop, services, API, context awareness, prod config, health |
+| `alembic/versions/…004…008` | soft delete · memory lifecycle · live-facts HNSW · `turns`+`spans` · `daily_usage` |
+| `alembic/versions/…009_monthly_budget.py` | `users.monthly_budget_usd` — NULL = no limit |
+| `tests/` | auth, chat, memory (+ contradiction), telegram, providers, tools loop, traces, usage accounting, pricing, retention, budget, services, API (tasks/journal/settings/memory/insights), context awareness, soft delete, prod config, health |
 
 ### Frontend (`frontend/`)
 
@@ -345,6 +354,7 @@ erDiagram
         text llm_provider "null = use default"
         text model_chat "null = use default"
         text model_deep "null = use default"
+        numeric monthly_budget_usd "null = no spend limit"
     }
     chat_sessions {
         uuid id PK

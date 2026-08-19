@@ -7,6 +7,8 @@ Resolution is always **user value -> configured default**, so an account that ha
 touched settings behaves exactly as it did before this feature existed.
 """
 
+from decimal import Decimal
+
 from sqlalchemy.orm import Session
 
 from app.config import (
@@ -17,6 +19,7 @@ from app.config import (
     settings,
 )
 from app.db.models import User
+from app.services import budget
 from app.services.errors import Invalid
 
 
@@ -34,12 +37,13 @@ def resolve(user: User, deep: bool = False) -> tuple[str, str]:
     return provider, model
 
 
-def get_settings(user: User) -> dict:
+def get_settings(db: Session, user: User) -> dict:
     """Current selection plus what the UI needs to render the pickers. Never includes
     credentials — API keys live in the environment and are not exposed here."""
     provider, model_chat = resolve(user)
     _, model_deep = resolve(user, deep=True)
     return {
+        "budget": budget.status(db, user),
         "provider": provider,
         "model_chat": model_chat,
         "model_deep": model_deep,
@@ -77,8 +81,14 @@ def update_settings(
     provider: str | None = None,
     model_chat: str | None = None,
     model_deep: str | None = None,
+    monthly_budget_usd: Decimal | None = None,
+    clear_budget: bool = False,
 ) -> dict:
-    """Partial update of the user's selection. Only fields passed are changed."""
+    """Partial update of the user's selection. Only fields passed are changed.
+
+    `clear_budget` exists because None already means "field not sent" here; without an
+    explicit flag there would be no way to turn a limit back OFF once set.
+    """
     if provider is not None:
         if provider not in MODEL_CATALOG:
             raise Invalid(f"unknown provider '{provider}'")
@@ -91,6 +101,12 @@ def update_settings(
         user.model_chat = model_chat.strip() or None
     if model_deep is not None:
         user.model_deep = model_deep.strip() or None
+    if clear_budget:
+        user.monthly_budget_usd = None
+    elif monthly_budget_usd is not None:
+        if monthly_budget_usd <= 0:
+            raise Invalid("a spend limit must be greater than zero — leave it off instead")
+        user.monthly_budget_usd = monthly_budget_usd
     db.commit()
     db.refresh(user)
-    return get_settings(user)
+    return get_settings(db, user)

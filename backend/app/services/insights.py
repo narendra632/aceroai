@@ -132,6 +132,18 @@ def _usage(db: Session, user_id: uuid.UUID, since: dt.datetime | None, until: dt
     return live.union_all(rolled).subquery()
 
 
+def spend_since(db: Session, user_id: uuid.UUID, since: dt.datetime) -> Decimal:
+    """Total estimated spend from `since` to now — every call, not just chat.
+
+    Built on `_usage` like every other figure, so the budget counts the same dollars the
+    page shows and keeps counting them after old turns are pruned. A second definition of
+    "what this cost" would eventually disagree with the first.
+    """
+    u = _usage(db, user_id, since, None)
+    total = db.execute(select(func.coalesce(func.sum(u.c.cost_usd), 0))).scalar_one()
+    return Decimal(total or 0)
+
+
 def data_start(db: Session, user_id: uuid.UUID) -> dt.datetime | None:
     """When recording began. The page states this, so a chart never implies it has been
     watching a period it has not."""

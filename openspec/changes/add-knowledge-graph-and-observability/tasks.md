@@ -249,10 +249,14 @@ artifacts if a premise is wrong, then build.
       and noise next month. ~~State the **data start date** on the page~~ — traces begin at deploy, and a chart
       that implies it has always been watching is misleading *(no backfill: Narendra's
       decision)*
-- [ ] 8.11 ⛔ **NOT BUILT — the only outstanding item in this change.** Observability
-      reports cost; it cannot cap it. Decide before archiving: build it, or move it to
-      future scope. ~~Monthly budget in Settings (default off) + an in-app warning past a threshold.
-      **Proactive notification waits for the scheduler** — explicitly out of scope
+- [x] 8.11 ✅ **Built (migration 009).** A monthly ceiling on `users.monthly_budget_usd`,
+      NULL = off so nothing changes for an account that never sets one. Checked in
+      `handle_message`, so web and Telegram are both covered by one check. Counts
+      EVERYTHING — replies, recall, extraction — because that is what the provider bills;
+      counting only visible replies would let a third of the calls escape. Warned at 80%,
+      composer locked with a Change limit button at 100%, raised from Settings with
+      immediate effect. A refusal writes no `turns` row: no model call was made, and
+      inventing one would inflate the error rate on the page next door
 - [x] 8.12 ✅ Loading, empty and error states; empty reads as "no data yet", not as failure
 - [x] 8.13 ✅ Sidebar entry (`View = "insights"`, Activity icon); verified at 375 px — charts
       scroll inside their own container, the page never scrolls horizontally

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Lock, Info } from "lucide-react";
+import { Check, Info, Lock, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,8 @@ import {
 import { ErrorState } from "@/components/ui/states";
 import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
-import type { Settings } from "@/lib/api";
+import type { BudgetStatus, Settings, SettingsUpdate } from "@/lib/api";
+import { formatINR, formatUSD } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_LABEL: Record<string, string> = { google: "Google (Gemini)", openai: "OpenAI" };
@@ -78,6 +79,144 @@ function ModelField({
         />
       )}
     </div>
+  );
+}
+
+/* The spend limit.
+ *
+ * Kept as its own component with its own state because it saves independently of the
+ * model pickers: raising a limit is something you do *while blocked*, and making that
+ * share a Save button with an unrelated provider switch would be a trap.
+ */
+function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Settings) => void }) {
+  const [value, setValue] = useState(budget.limit_usd ?? "");
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  const spent = Number(budget.spent_usd);
+  const limit = budget.limit_usd == null ? null : Number(budget.limit_usd);
+  const pct = Math.min(100, Math.round(budget.used_ratio * 100));
+  const resets = new Date(`${budget.resets_on}T00:00:00`).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+  });
+
+  // One hue per state, so the bar says which state you are in without reading the text.
+  const barColor =
+    budget.state === "exceeded"
+      ? "var(--destructive)"
+      : budget.state === "warning"
+        ? "#c98a2e"
+        : "var(--series-1)";
+
+  async function commit(patch: SettingsUpdate) {
+    setSaving(true);
+    try {
+      onSaved(await api.updateSettings(patch));
+      toast.success(patch.clear_budget ? "Spend limit turned off" : "Spend limit updated");
+    } catch {
+      toast.error("Could not save the spend limit");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const parsed = Number(value);
+  const valid = value.trim() !== "" && Number.isFinite(parsed) && parsed > 0;
+  const dirty = valid && String(parsed) !== String(limit ?? "");
+
+  return (
+    <section className="mt-4 rounded-xl border border-border p-4">
+      <h2 className="mb-1 flex items-center gap-2 font-medium">
+        <Wallet className="size-4 text-muted-foreground" /> Spend limit
+        {budget.state === "exceeded" && (
+          <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-normal text-destructive">
+            reached
+          </span>
+        )}
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        Pause replies once this month&rsquo;s estimated spend passes a ceiling you set.
+      </p>
+
+      <div className="mt-4">
+        <div className="flex items-baseline justify-between gap-3 text-sm">
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            <strong className="font-medium">{formatUSD(spent)}</strong>
+            {limit != null && <span className="text-muted-foreground"> of {formatUSD(limit)}</span>}
+            <span className="text-muted-foreground"> this month</span>
+          </span>
+          <span className="text-muted-foreground">
+            {limit != null && `${pct}% · `}resets {resets}
+          </span>
+        </div>
+        {limit != null && (
+          <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full transition-[width] duration-500"
+              style={{ width: `${Math.max(1.5, pct)}%`, background: barColor }}
+            />
+          </div>
+        )}
+      </div>
+
+      {budget.state === "exceeded" && (
+        <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          Replies are paused. Raise the limit below to carry on, or wait until {resets}.
+        </p>
+      )}
+      {budget.state === "warning" && (
+        <p className="mt-3 text-sm text-muted-foreground">
+          You&rsquo;ve used {pct}% of this month&rsquo;s allowance.
+        </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Monthly limit</span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">$</span>
+            <input
+              type="number"
+              min="0.01"
+              step="0.5"
+              inputMode="decimal"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="no limit"
+              className="w-28 rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              style={{ fontVariantNumeric: "tabular-nums" }}
+            />
+          </span>
+        </label>
+        <Button
+          onClick={() => commit({ monthly_budget_usd: String(parsed) })}
+          disabled={saving || !dirty}
+        >
+          {saving ? "Saving…" : limit == null ? "Set limit" : "Update"}
+        </Button>
+        {limit != null && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setValue("");
+              commit({ clear_budget: true });
+            }}
+            disabled={saving}
+          >
+            Turn off
+          </Button>
+        )}
+      </div>
+
+      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+        Checked before each message, and it counts everything — replies, recalling what
+        Acero knows, and learning from the turn afterwards. A reply already in progress
+        finishes, so the total can pass the limit by one message. Spend is an{" "}
+        <strong className="font-medium">estimate</strong>, not your provider&rsquo;s bill.
+        {limit != null && ` About ${formatINR(limit)} at the rate on the Insights page.`}
+      </p>
+    </section>
   );
 }
 
@@ -295,6 +434,8 @@ export default function SettingsView() {
             )}
           </div>
         </section>
+
+        <SpendLimit budget={data.budget} onSaved={apply} />
 
         {/* Pinned on purpose — changing this would invalidate stored memory. */}
         <section className="mt-4 rounded-xl border border-border bg-secondary/50 p-4">

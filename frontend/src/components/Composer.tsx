@@ -1,5 +1,5 @@
 import { type KeyboardEvent, forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
-import { ArrowUp, Brain, Square } from "lucide-react";
+import { ArrowUp, Brain, Lock, Square } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,8 +24,14 @@ const Composer = forwardRef<
     onSend: (text: string, deep: boolean) => void;
     onStop: () => void;
     busy: boolean;
+    /** Set when the monthly spend limit is reached: the box is locked rather than letting
+     *  a message be typed and sent into a refusal. */
+    blocked?: { reason: string; onResolve: () => void };
   }
->(function Composer({ text, onTextChange, deep, onDeepChange, onSend, onStop, busy }, ref) {
+>(function Composer(
+  { text, onTextChange, deep, onDeepChange, onSend, onStop, busy, blocked },
+  ref,
+) {
   const inner = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(ref, () => ({ focus: () => inner.current?.focus() }));
 
@@ -42,7 +48,7 @@ const Composer = forwardRef<
 
   function submit() {
     const value = text.trim();
-    if (!value || busy || tooLong) return;
+    if (!value || busy || tooLong || blocked) return;
     onSend(value, deep);
     onTextChange("");
   }
@@ -52,6 +58,22 @@ const Composer = forwardRef<
       e.preventDefault();
       submit();
     }
+  }
+
+  if (blocked) {
+    return (
+      <div className="border-t border-border bg-background px-4 py-3">
+        <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3">
+          <p className="flex min-w-0 items-start gap-2 text-sm text-destructive">
+            <Lock className="mt-0.5 size-4 shrink-0" aria-hidden />
+            <span>{blocked.reason}</span>
+          </p>
+          <Button size="sm" onClick={blocked.onResolve} className="shrink-0">
+            Change limit
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (

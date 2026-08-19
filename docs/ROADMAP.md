@@ -53,8 +53,13 @@
   the output rate. Traces are pruned on a schedule with a permanent daily rollup
   behind them, so the tables cannot outgrow the 10 GB disk.
 
+  A **monthly spend limit** closes the loop: observability could report cost but not
+  stop it, so a runaway loop was visible afterwards rather than prevented. Set a
+  ceiling in Settings and replies pause once the month's estimated spend passes it,
+  with a warning at 80% and a one-click way to raise it. Off by default.
+
   **What observability does *not* do:** no alerting, no external exporter, no
-  sampling, no per-user quotas or spend caps. Cost is an **estimate** frozen at
+  sampling. Cost is an **estimate** frozen at
   write time from a hand-maintained price list — both providers bill through
   accounts this app never sees, so it will not match an invoice to the cent.
   Latency percentiles and error kinds exist only within the trace-retention

@@ -26,6 +26,9 @@ class User(Base):
     llm_provider: Mapped[str | None] = mapped_column(sa.Text)
     model_chat: Mapped[str | None] = mapped_column(sa.Text)
     model_deep: Mapped[str | None] = mapped_column(sa.Text)
+    # Monthly spend ceiling in USD (migration 009). NULL = no limit, so an account that
+    # never sets one behaves exactly as it did before the cap existed.
+    monthly_budget_usd: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
 
 

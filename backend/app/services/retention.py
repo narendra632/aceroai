@@ -27,7 +27,7 @@ import logging
 import threading
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, delete, func, select
+from sqlalchemy import case, delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -189,8 +189,26 @@ def maybe_sweep(db: Session) -> bool:
             return False
         _last_run = today
     try:
+        # Housekeeping must never WAIT. The prunes take row locks on `turns` and `spans`,
+        # and this runs while real requests hold their own transactions on the same tables;
+        # without a timeout a contended DELETE would block a threadpool worker indefinitely.
+        # Giving up costs a day of pruning — the sweep is idempotent and catches up
+        # tomorrow — which is a far better failure than a stuck worker.
+        db.execute(text("SET lock_timeout = '3s'"))
+        db.execute(text("SET statement_timeout = '60s'"))
+        db.commit()
         sweep(db)
         return True
     except Exception:
         log.warning("retention sweep failed; nothing else is affected", exc_info=True)
+        db.rollback()
         return False
+    finally:
+        # The session is closed by the caller, but a pooled connection would otherwise
+        # carry these settings into whatever runs next.
+        try:
+            db.execute(text("RESET lock_timeout"))
+            db.execute(text("RESET statement_timeout"))
+            db.commit()
+        except Exception:  # noqa: BLE001 - a dead connection has nothing to reset
+            db.rollback()

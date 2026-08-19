@@ -117,11 +117,29 @@ Windows are set with `SPAN_RETENTION_DAYS` and `TURN_RETENTION_DAYS` — see
 
 ---
 
+## The spend limit
+
+Set a monthly ceiling in **Settings → Spend limit**, and Acero stops replying once this
+month's estimated spend passes it. Nothing is capped until you set one.
+
+Three things worth knowing about how it behaves:
+
+- **Everything counts** — replies, recall, and learning — because that is what the
+  provider bills you for. A limit that only counted visible replies would let a third of
+  the calls slip past it.
+- **It is checked before each message, not enforced mid-reply.** A reply already in
+  progress finishes, so the total can pass the limit by one message. Stopping a reply
+  halfway to save a fraction of a cent would be the worse product.
+- **You are warned at 80%**, not only when you are stopped. A slim line appears above the
+  message box, and the Settings bar changes colour.
+
+When you are stopped, the message box is replaced by an explanation and a **Change limit**
+button. Raising the limit takes effect immediately — no restart, no waiting. The allowance
+resets on the 1st of the month, in your timezone.
+
 ## What this page deliberately does not do
 
 - **No alerts.** Nothing here will notify you about a spike. You have to look.
-- **No spend cap.** It reports cost; it cannot stop it. A runaway loop would be visible
-  here after the fact, not prevented by it.
 - **No sampling.** Every call is recorded, which is affordable at one user and would not be
   at scale.
 - **No external exporter.** Traces are shaped after OpenTelemetry's naming so that sending

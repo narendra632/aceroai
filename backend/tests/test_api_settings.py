@@ -72,3 +72,68 @@ def test_settings_are_per_user(auth_client, db, other_user):
     auth_client.patch("/api/settings", json={"model_chat": "gemini-3.7-flash"})
     db.refresh(other_user)
     assert other_user.model_chat is None  # untouched
+
+
+# --- the monthly spend limit ---------------------------------------------------------
+
+
+def test_budget_is_off_until_it_is_set(auth_client):
+    body = auth_client.get("/api/settings").json()["budget"]
+    assert body["state"] == "off"
+    assert body["limit_usd"] is None
+    # Spend is reported anyway, so the interface can show what a month costs BEFORE
+    # asking the user to pick a ceiling out of thin air.
+    assert "spent_usd" in body
+
+
+def test_setting_and_raising_a_limit(auth_client):
+    body = auth_client.patch("/api/settings", json={"monthly_budget_usd": "5.00"}).json()
+    assert body["budget"]["limit_usd"] == "5.00"
+    assert body["budget"]["state"] == "ok"
+
+    raised = auth_client.patch("/api/settings", json={"monthly_budget_usd": "20"}).json()
+    assert raised["budget"]["limit_usd"] == "20.00"
+
+
+def test_turning_the_limit_off_again(auth_client):
+    """`monthly_budget_usd: null` already means "not sent", so switching a limit OFF
+    needs its own flag — without one it could be raised forever but never removed."""
+    auth_client.patch("/api/settings", json={"monthly_budget_usd": "5.00"})
+
+    body = auth_client.patch("/api/settings", json={"clear_budget": True}).json()
+
+    assert body["budget"]["limit_usd"] is None
+    assert body["budget"]["state"] == "off"
+
+
+def test_a_zero_or_negative_limit_is_rejected(auth_client):
+    """Silently storing 0 would read as "no limit" in one place and "block everything" in
+    another. Refusing it keeps one meaning."""
+    assert auth_client.patch("/api/settings", json={"monthly_budget_usd": "0"}).status_code == 400
+    assert auth_client.patch("/api/settings", json={"monthly_budget_usd": "-3"}).status_code == 400
+
+
+def test_budget_has_its_own_lightweight_route(auth_client):
+    """The chat screen re-reads this after every turn and has no use for the catalogue."""
+    r = auth_client.get("/api/settings/budget")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {
+        "limit_usd",
+        "spent_usd",
+        "remaining_usd",
+        "used_ratio",
+        "state",
+        "resets_on",
+        "warn_ratio",
+    }
+
+
+def test_budget_route_requires_auth(client):
+    assert client.get("/api/settings/budget").status_code == 401
+
+
+def test_a_budget_is_per_user(auth_client, db, other_user):
+    auth_client.patch("/api/settings", json={"monthly_budget_usd": "5.00"})
+    db.refresh(other_user)
+    assert other_user.monthly_budget_usd is None

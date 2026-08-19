@@ -171,14 +171,14 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/core/tools.py` | Assistant tools (create/list/update/complete task, add/list journal) + fault-tolerant dispatch |
 | `app/core/memory.py` | Cross-session memory: extract → embed → store facts (pgvector) → semantic recall |
 | `app/core/security.py` | bcrypt hashing + JWT create/decode (HS256, 30-day) |
-| `app/services/` | Single source of truth for `tasks`, `journal`, `memory` (fact rules + the kNN graph), `insights` (trace aggregates), `retention` (rollup + prune), and `user_settings` — used by the API *and* the tools/handler |
+| `app/services/` | Single source of truth for `tasks`, `journal`, `memory` (fact rules + the kNN graph), `insights` (trace aggregates), `retention` (rollup + prune), `budget` (the monthly spend ceiling), and `user_settings` — used by the API *and* the tools/handler |
 | `app/core/pricing.py` | Dated price list per provider/model. Cost is computed once, at write time, and frozen with its `pricing_version`, so a price change today cannot rewrite last month's spend. An unknown model costs `None`, never `0` |
 | `app/api/deps.py` | `get_current_user` — auth guard (Bearer header or cookie) |
 | `app/api/auth.py` | `POST /api/auth/login` · `/logout` · `GET /api/auth/me` |
 | `app/api/chat.py` | `POST /api/chat` (SSE) · session list · history (owner-checked) |
 | `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` (owner-scoped) |
 | `app/api/journal.py` | `/api/journal` CRUD (owner-scoped) |
-| `app/api/settings.py` | `GET/PATCH /api/settings` — provider + model selection |
+| `app/api/settings.py` | `GET/PATCH /api/settings` — provider + model selection + the monthly spend limit; `GET /api/settings/budget` for the lightweight state the chat screen polls |
 | `app/api/memory.py` | `/api/memory/facts` list/search/detail/edit/confirm/forget/restore · `/api/memory/graph` · `/api/memory/stats` (owner-scoped) |
 | `app/api/insights.py` | `/api/insights/overview` · `/turns` · `/turns/{id}` — **read-only**; no route here mutates anything |
 | `app/api/schemas.py` | Pydantic request/response models |

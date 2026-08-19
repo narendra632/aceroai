@@ -107,6 +107,24 @@ class SettingsUpdate(BaseModel):
     provider: str | None = None
     model_chat: str | None = None
     model_deep: str | None = None
+    monthly_budget_usd: Decimal | None = None
+    # None already means "not sent" above, so turning a limit OFF needs its own flag.
+    clear_budget: bool = False
+
+
+class BudgetStatus(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    #: None = no limit set. Everything else is still reported, so the interface can show
+    #: what a month costs before asking the user to pick a ceiling.
+    limit_usd: Decimal | None
+    spent_usd: Decimal
+    remaining_usd: Decimal | None
+    used_ratio: float
+    #: "off" | "ok" | "warning" | "exceeded"
+    state: str
+    resets_on: dt.date
+    warn_ratio: float
 
 
 class EmbeddingInfo(BaseModel):
@@ -129,6 +147,7 @@ class SettingsOut(BaseModel):
     no_reasoning_control: list[str]
     defaults: dict[str, str]
     embedding: EmbeddingInfo
+    budget: BudgetStatus
 
 
 # --- memory / knowledge graph ---
