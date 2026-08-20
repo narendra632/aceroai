@@ -118,6 +118,63 @@ Keyword matching is precise exactly where vectors are vague, and blind exactly w
 vectors see (`where do I work` → `works at TCS` needs meaning, not words). They fail in
 opposite directions, which is what makes fusing them worth more than either.
 
+### It is not BM25, and the difference is measured
+
+An earlier draft called this "BM25-style". That was loose, and checking it changed the
+design. Postgres `ts_rank` is **not** BM25: it has no inverse-document-frequency term, no
+term-frequency saturation, and no BM25 length normalisation.
+
+What that means in practice, measured on the real facts:
+
+```
+query "certification"  -> 2 matches, 1 DISTINCT score   (both exactly 0.060793)
+query "work"           -> 4 matches, 1 DISTINCT score   (all four exactly 0.060793)
+query "exam certification voucher" -> 1 match, 0.268330
+```
+
+For a single-term query **every match scores identically**. `ts_rank` is behaving as a
+*filter*, not a ranker — it only separates documents when they match a different number of
+query terms.
+
+This is fine, because the filter is where the value is. The lexical side answers "does this
+fact contain what you asked about?", and RRF turns that binary answer into a rank position.
+Real BM25 would rank *within* the matches, which matters at thousands of facts and is
+nearly meaningless at twenty. Recorded so nobody later assumes a sophistication that is not
+there.
+
+**Rejected — a real BM25 extension (`pg_search` / ParadeDB).** A new dependency and a
+different Postgres image, to improve ordering inside a set of two matches.
+
+### Dropping terms that appear in almost every fact
+
+Measured scaling, on synthetic memories with realistic vocabulary:
+
+| facts | matches | lexical query | if the term is in EVERY fact |
+|---|---|---|---|
+| 500 | 48 | 2.3 ms | 9 ms |
+| 5,000 | 426 | 8.0 ms | 65 ms |
+| 20,000 | 1,670 | 16.4 ms | **219 ms** |
+
+The realistic column is sub-linear — GIN does its job. The last column is the trap:
+`ts_rank` must score **every** match before sorting, so a term present in all of them makes
+cost linear in the size of memory.
+
+And that case is not hypothetical. Every fact begins with `Narendra` or `The user` — by
+design, since the extractor is instructed to phrase the subject consistently. A message
+containing the user's own name would match the entire table.
+
+Two mitigations, both cheap:
+
+- **Drop terms with a document frequency above `LEXICAL_MAX_DF` (30%).** A word in most
+  facts carries no information about which fact you want — this is the one thing IDF would
+  have told us, applied by hand.
+- **Cap the candidate set before ranking**, so ranking cost is bounded by a constant rather
+  than by the size of memory.
+
+A first measurement seeded every synthetic fact with the query term and produced 524 ms at
+20k facts. That number described a corpus nobody has; it is recorded here because it was
+nearly reported as a scaling problem.
+
 ### Reciprocal Rank Fusion, not a weighted score
 
 ```
@@ -239,3 +296,39 @@ sections into the single `## Requirements` section and delete the headers. **No 
 text is edited** — this restores visibility, it does not restate intent.
 
 `openspec validate --specs` passing for all 13 capabilities is the acceptance check.
+
+---
+
+## Decision 10 — Recall is shown to the user, not just used
+
+**Narendra's request.** Every reply gets a third control beside copy and regenerate that
+reveals the facts recall actually injected for that message.
+
+The facts are already fetched and already sent to the model, so this costs nothing to
+compute. What it buys is that memory stops being a black box: this whole change exists
+because a fact was silently missing and there was no way to see it. With this, the AI-901
+bug is visible in one glance — the fact simply is not in the list.
+
+It is the same principle as Decision 6. An announcement you can check beats a claim you
+cannot.
+
+Shape:
+
+- A new `recall` SSE event carries the facts used, emitted after the recall stage. The
+  browser attaches them to that message.
+- **Click, not hover.** Hover does not exist on a phone, and this must work at 375 px. The
+  existing Popover primitive already handles focus and dismissal.
+- The control is **absent, not empty**, when nothing was recalled — and after this change
+  that is a real state (a coding question recalls nothing), so an always-present button
+  showing "none" would be noise on exactly the turns that need no explanation.
+- The **recalled fact ids are also written into the `memory_recall` span's `meta`**, which
+  already records the count. Ids are identifiers, not content, so this stays inside the
+  existing rule that traces record shape and never message text. It makes the same
+  information available on the Insights waterfall for any past turn, not only for the
+  session still open in the browser.
+
+**Rejected — storing the recalled facts on the `messages` row.** Duplicates fact text into a
+second table, where it would go stale as facts are edited or forgotten.
+
+**Rejected — showing it only in Insights.** The moment the question "why did it say that?"
+occurs is in the conversation, not on a dashboard visited weekly.

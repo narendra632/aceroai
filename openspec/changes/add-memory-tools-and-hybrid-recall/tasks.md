@@ -81,8 +81,27 @@ wrong. A task that cannot be done as written is annotated, never quietly ticked.
       rather than failing the turn
 - [ ] 4.9 Test: superseded, rejected and forgotten facts are excluded from **both** rankers.
       A new retrieval path is a new place to leak a deleted record
-- [ ] 4.10 Keep the measurement script in the repo so the numbers can be re-derived rather
+- [ ] 4.10 Drop query terms whose document frequency exceeds `LEXICAL_MAX_DF` (30%) and cap
+      the candidate set before ranking. **Measured:** a term present in every fact costs
+      219 ms at 20k facts because `ts_rank` scores every match before sorting — and every
+      fact starts with the user's name, so this is a real query, not a hypothetical
+- [ ] 4.11 Keep the measurement scripts in the repo so the numbers can be re-derived rather
       than trusted
+
+## 4b. Show what was recalled *(Decision 10)*
+
+- [ ] 4b.1 New `recall` SSE event carrying the facts used for this turn
+- [ ] 4b.2 Third control beside copy and regenerate, opening a Popover with the list.
+      **Click, not hover** — hover does not exist on a phone
+- [ ] 4b.3 The control is **absent** when nothing was recalled, not present-and-empty
+- [ ] 4b.4 Write the recalled fact ids into the `memory_recall` span's `meta` alongside the
+      count it already stores. Ids are identifiers, not content, so this stays inside the
+      rule that traces never hold message text
+- [ ] 4b.5 Surface the same list on the Insights waterfall, so any past turn can be
+      explained and not just the session still open
+- [ ] 4b.6 375 px pass on the popover
+- [ ] 4b.7 Test: the facts shown are exactly the facts sent to the model — a display that
+      can drift from what was used is worse than no display
 
 ## 5. Tools become a package
 

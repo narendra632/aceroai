@@ -170,3 +170,21 @@ present does not.
 
 - **WHEN** extraction produces a fact that replaces an existing one
 - **THEN** the existing fact is superseded and remains inspectable, and no fact is deleted
+
+### Requirement: The user can see which facts were used
+
+The facts recalled for a reply SHALL be inspectable by the user for that reply. Memory that
+cannot be inspected cannot be trusted or corrected: this change exists because a fact was
+silently absent and there was no way to notice.
+
+What is shown MUST be exactly what was sent to the model.
+
+#### Scenario: The user asks why the assistant answered as it did
+
+- **WHEN** the user opens the recall detail for a reply
+- **THEN** the facts that were injected for that message are listed
+
+#### Scenario: Nothing was recalled
+
+- **WHEN** no facts were relevant to a message
+- **THEN** the interface offers nothing to open, rather than showing an empty list
