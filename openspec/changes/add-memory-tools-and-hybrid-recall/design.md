@@ -239,6 +239,16 @@ The query is built as an OR of individually sanitised terms
 terms. Each term goes through `plainto_tsquery` so nothing user-typed is ever interpolated
 into a tsquery — `to_tsquery` on raw input is a syntax-error and injection surface.
 
+**A long message is trimmed rarest-first, not first-8.** Three paragraphs carry fifty
+content words; taking the opening eight is arbitrary, and OR-ing fifty would match nearly
+every fact — the 219 ms case. The rarest terms are the ones that identify a fact, and the
+document-frequency lookup is already needed to drop over-common terms, so the ordering is
+free.
+
+Both rankers degrade on a very long message — the embedding averages three paragraphs into
+one blurred vector, and the keyword set gets diffuse. Fusion does not repair that; it just
+does not make it worse.
+
 A GIN index on `to_tsvector('english', fact)` supports it. The expression is immutable
 because the config is named explicitly, so an expression index is sufficient and no
 generated column is needed.

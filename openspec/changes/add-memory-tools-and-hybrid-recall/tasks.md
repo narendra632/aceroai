@@ -69,6 +69,10 @@ wrong. A task that cannot be done as written is annotated, never quietly ticked.
 - [ ] 4.1 Migration 010 (same migration as 2.1): GIN index on `to_tsvector('english', fact)`
 - [ ] 4.2 `_tsquery()` — OR of individually sanitised terms, stop-words dropped, capped at 8.
       **Never interpolate user text into a tsquery** *(Decision 5)*
+- [ ] 4.2a Choose those 8 terms **rarest-first by document frequency**, not first-8-in-order.
+      A three-paragraph message has fifty content words and the opening ones are rarely the
+      informative ones; the rarest term is the one that identifies a fact. Falls out of the
+      DF lookup 4.10 already needs, so it costs nothing extra
 - [ ] 4.3 Lexical ranker: `ts_rank`, live + active only, same filters as the vector path
 - [ ] 4.4 RRF fusion, `K=60`, pool 20 per ranker *(Decision 4)*
 - [ ] 4.5 Selection: all consensus facts + at most `VECTOR_ONLY_MAX`(4) vector-only, capped
