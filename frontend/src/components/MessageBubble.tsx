@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { Brain, Check, Copy, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { RecalledFact } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import Markdown from "./Markdown";
 
@@ -12,6 +14,16 @@ export type UIMessage = {
   content: string;
   created_at?: string;
   error?: boolean;
+  /** The facts recall injected for this reply. Absent when nothing was recalled — which
+   *  after hybrid recall is a real, common state (a coding question recalls nothing). */
+  recalled?: RecalledFact[];
+};
+
+/** What each search contributed, in words rather than jargon. */
+const VIA_LABEL: Record<RecalledFact["via"], string> = {
+  both: "meaning + wording",
+  vector: "meaning",
+  lexical: "wording",
 };
 
 function timeLabel(iso?: string): string | null {
@@ -58,6 +70,39 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
       </TooltipTrigger>
       <TooltipContent>{copied ? "Copied" : label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function RecalledFacts({ facts }: { facts: RecalledFact[] }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Show the ${facts.length} memories used`}
+          className="text-muted-foreground opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-60"
+        >
+          <Brain />
+        </Button>
+      </PopoverTrigger>
+      {/* Click, not hover: hover does not exist on a phone, and this has to work at 375px. */}
+      <PopoverContent>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">
+          {facts.length === 1 ? "1 memory used" : `${facts.length} memories used`}
+        </p>
+        <ul className="max-h-72 space-y-2 overflow-y-auto">
+          {facts.map((f) => (
+            <li key={f.id} className="text-sm leading-snug">
+              {f.fact}
+              <span className="mt-0.5 block text-[11px] text-faint">
+                {f.category} · found by {VIA_LABEL[f.via]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -109,6 +154,11 @@ export default function MessageBubble({
         {!message.error && (
           <div className="mt-1 -ml-2 flex items-center gap-1">
             <CopyButton text={message.content} label="Copy reply" />
+            {/* Absent, not present-and-empty. A button that opens onto "nothing" is noise
+                on exactly the turns that need no explanation. */}
+            {message.recalled && message.recalled.length > 0 && (
+              <RecalledFacts facts={message.recalled} />
+            )}
             {onRegenerate && (
               <Tooltip>
                 <TooltipTrigger asChild>

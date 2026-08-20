@@ -101,14 +101,15 @@ by the assistant are validated identically.
 | `app/core/providers/base.py` | The provider contract + the error taxonomy |
 | `app/core/providers/google.py` | Native `google-genai` → Agent Platform (Vertex) via ADC; `thought_signature` round-trip |
 | `app/core/providers/openai_provider.py` | Native `openai` SDK on the **Responses** API; reasoning round-trip; adapts to per-model parameter differences |
-| `app/core/tools.py` | Assistant tool definitions + fault-tolerant dispatch |
-| `app/core/memory.py` | Extract facts → embed → store (pgvector) → semantic recall, time-bounded |
+| `app/core/tools/` | One module per domain (`tasks` · `journal` · `memory`), each exporting its schemas **and** handlers; `__init__` assembles `TOOLS` + dispatch |
+| `app/core/memory.py` | Extract facts → embed → store through the one writer; orchestrates recall |
+| `app/core/recall.py` | Hybrid retrieval: vector ranker + lexical ranker, fused by RRF |
 | `app/core/telemetry.py` | `Timeline` — per-turn stage timings; `record()` persists a trace after the reply and guarantees a failure there cannot reach it |
 | `app/core/pricing.py` | Dated price list; cost frozen at write time with its `pricing_version` |
 | `app/core/security.py` | bcrypt hash/verify + JWT create/decode (HS256, 30-day) |
 | `app/services/tasks.py` | Task rules incl. urgency ordering and duplicate refusal |
 | `app/services/journal.py` | Journal entry rules |
-| `app/services/memory.py` | Fact rules (the live/active filter) + the kNN graph query |
+| `app/services/memory.py` | **The one writer** (`remember` / `correct` / `forget`) + the live/active filter + the kNN graph query |
 | `app/services/insights.py` | Trace aggregates, all computed in SQL |
 | `app/services/retention.py` | Roll up to `daily_usage`, then prune `spans` and `turns` |
 | `app/services/budget.py` | The monthly spend ceiling, checked before each turn |
@@ -132,7 +133,7 @@ by the assistant are validated identically.
 | `alembic/versions/…001_core_tables.py` | `CREATE EXTENSION vector` + the 7 core tables |
 | `alembic/versions/…002_fact_embeddings.py` | `profile_facts.embedding vector(768)` + HNSW index |
 | `alembic/versions/…003_user_model_prefs.py` | `users.llm_provider` · `model_chat` · `model_deep` |
-| `alembic/versions/…004…008` | soft delete · memory lifecycle · live-facts HNSW · `turns`+`spans` · `daily_usage` |
+| `alembic/versions/…004…010` | soft delete · memory lifecycle · live-facts HNSW · `turns`+`spans` · `daily_usage` · monthly budget · `possible_duplicate_of` + full-text index |
 | `alembic/versions/…009_monthly_budget.py` | `users.monthly_budget_usd` — NULL = no limit |
 | `tests/` | auth, chat, memory (+ contradiction), telegram, providers, tools loop, traces, usage accounting, pricing, retention, budget, services, API (tasks/journal/settings/memory/insights), context awareness, soft delete, prod config, health |
 
@@ -178,7 +179,7 @@ sequenceDiagram
     H->>D: persist user message (+session if new)
     H-->>U: SSE "session"
     Note over H,M: ~340 ms prod · ~1.8 s local
-    H->>M: recall(text) — embed + pgvector search
+    H->>M: recall(text) — embed, then two rankers fused by rank
     M->>D: embedding <=> query, top-K active facts
     H->>C: build_context(...)
     C->>D: open tasks + last 20 messages
@@ -237,21 +238,39 @@ the **extra model round**: roughly +1.1–1.3 s.
 
 ### (c) Memory
 
+Memory has **exactly one writer**. The assistant's tools and the background extractor both
+call `services/memory.remember()`, so validation, the duplicate judgement, supersession and
+provenance are implemented once rather than twice with thresholds that drift apart.
+
 ```mermaid
 flowchart LR
-    subgraph write ["After the reply — off the critical path"]
-        A[assistant reply sent] --> B[extract durable facts<br/><small>cheap model</small>]
-        B --> C{already known?<br/><small>cosine &lt; MEMORY_DEDUP_DISTANCE</small>}
-        C -->|yes| D[skip]
-        C -->|no| E[embed] --> F[(profile_facts<br/>vector 768 + HNSW)]
-    end
-    subgraph read ["On every message — on the critical path"]
-        G[user message] --> H[embed]
-        H --> I[pgvector search<br/><small>top MEMORY_RECALL_K active</small>]
-        I --> F
-        I --> J[inject into context]
+    subgraph write ["Writing — one function, two callers"]
+        T["user says 'remember that…'<br/><small>tool, during the turn</small>"] --> R
+        X["extractor reads the turn<br/><small>cheap model, after the reply</small>"] --> R
+        R{{"services/memory.remember()"}} --> D{replaces a known fact?}
+        D -->|yes| S["supersede<br/><small>old row kept and linked</small>"]
+        D -->|no| N{"anything within<br/>MEMORY_DEDUP_DISTANCE?"}
+        N -->|no| ST[store]
+        N -->|yes| FL["store ANYWAY,<br/>flagged possible_duplicate_of"]
+        S --> F[(profile_facts<br/>vector 768 + HNSW + GIN)]
+        ST --> F
+        FL --> F
     end
 ```
+
+**Nothing is discarded.** That last branch used to be a delete, and it is what ate a
+certification the user had asked for by name: measured, `AI-901` and `AI-103` sit **0.098**
+apart, inside the 0.12 threshold, while two phrasings of the *same* family fact sit
+**0.216** apart, outside it. The threshold is wrong in both directions at once, so it
+cannot be repaired by moving it. Dropping is the destructive move, so dropping is the one
+that needs evidence; a stored near-duplicate is visible on the Knowledge page and
+answerable in one click.
+
+The extractor may add and supersede but **never delete**. Superseding preserves what it
+replaced; deletion in an unattended loop with nobody watching is neither observed nor
+prompted.
+
+Reading is two rankers fused by rank — see **(e) Recall** below.
 
 Recall is **best-effort and time-bounded** (`MEMORY_RECALL_TIMEOUT_S`, 4 s). If embedding
 stalls, the turn proceeds without recalled facts rather than making the user wait — this
@@ -276,6 +295,96 @@ a deliberate re-embed migration of every row.
 > overlooked: facts are deduplicated and supersedable, so a stale one is corrected by the
 > next contradicting statement rather than persisting as truth. Worth revisiting if
 > regeneration ever becomes a common action.
+
+### (e) Recall: two rankers
+
+Recall used to be one query — the `MEMORY_RECALL_K` nearest facts by cosine distance — and
+it returned exactly that many facts on *every* message, including `write a python function
+to reverse a list`. That is not a tuning problem. Measured against the real memory:
+
+| query | closest fact |
+|---|---|
+| `where do I work` | **0.406** (`Narendra works at TCS`) |
+| `hello` | 0.419 |
+| `explain TCP handshakes` | 0.518 |
+
+Every fact about one person occupies a narrow **0.30-0.58** band, and `hello` scores
+*closer* than a genuine match for another query. Distance answers "is this about the same
+person?"; it cannot answer "does this answer the question?". No threshold separates
+`works at TCS` from `has sisters`, because on that axis they are not separated.
+
+Postgres full-text search fails in the opposite direction — precise where vectors are vague,
+blind where vectors see. So both run, and their **positions** are fused:
+
+```mermaid
+flowchart LR
+    Q[user message] --> EM[embed] --> V["vector ranker<br/><small>nearest 20 by cosine</small>"]
+    Q --> TR["choose terms<br/><small>stop-words out, rarest 8,<br/>drop anything in over 30% of facts</small>"]
+    TR --> L["lexical ranker<br/><small>GIN index + ts_rank, top 20</small>"]
+    V --> RRF["Reciprocal Rank Fusion<br/><small>1 / (60 + rank)</small>"]
+    L --> RRF
+    RRF --> SEL{which lane?}
+    SEL -->|"both rankers, within 0.60"| A[consensus, always kept]
+    SEL -->|"vector only, within 0.52"| B[at most 4]
+    SEL -->|"lexical only, rare word"| C[at most 3]
+    A --> CAP["cap at MEMORY_RECALL_K, 16"]
+    B --> CAP
+    C --> CAP
+    CAP --> UI["injected into the prompt<br/>and streamed to the browser as a recall event"]
+```
+
+Scores are **not** averaged: cosine distance runs 0.30-0.58 and `ts_rank` runs 0.00-0.10,
+so any weighting silently lets one dominate and needs re-tuning whenever either
+distribution moves. RRF discards magnitudes and fuses positions, needing no normalisation.
+A fact both rankers found scores ~0.032 against ~0.015 for one — and that cliff,
+**agreement**, is the relevance signal distance could not provide.
+
+The vector ranker does not "find" facts, it *ranks* them: `ORDER BY distance LIMIT 20`
+returns twenty rows whether or not any relate to the message. So its agreement only counts
+while the query sits inside the band where one person's facts actually live, which is why
+consensus carries an outer bound of its own. Past it, a fact falls back to the lexical
+gate rather than being waved through as agreement that never happened.
+
+Measured effect on the real memory:
+
+| query | before | after |
+|---|---|---|
+| `remind me about my exam` | 12 | **7** — all three exam facts at ranks 1-2-3 |
+| `which certifications do I have` | 12 | **6** |
+| `where do I work` | 12 | **8** — `works at TCS` first |
+| `when do I go to the gym` | 12 | **5** |
+| `hello` | 12 | **4** |
+| `write a python function…` | 12 | **0** |
+
+`MEMORY_RECALL_K` stops being a quota and becomes a ceiling.
+
+Three honest limits, recorded so nobody assumes more than is there:
+
+- **`ts_rank` is not BM25.** No inverse document frequency, no term-frequency saturation,
+  no length normalisation. Measured, a single-term query gives every match the identical
+  score `0.060793` — it is a *filter*, not a ranker. That is fine, because RRF only needs a
+  position. Real BM25 starts to matter in the thousands of facts; revisit `pg_search` there.
+- **A stray keyword can still land a fact.** English stemming maps `write` in "write a
+  python function" onto "Narendra *writes* his own summaries". Bounded at 3 per turn, and
+  never presented as agreement.
+- **Both rankers degrade on a very long message** — the embedding averages three paragraphs
+  into one blurred vector and the keyword set gets diffuse. Fusion does not repair that; it
+  just does not make it worse.
+
+Cost, measured against the real table (synthetic rows inserted and rolled back — see
+`app/scripts/measure_recall_scale.py`, two runs, reported as a range rather than false
+precision):
+
+| facts | **added** by a short message | **added** by a three-paragraph message |
+|---|---|---|
+| 200 | ~3 ms | ~20 ms |
+| 1,000 | ~4 ms | ~33-40 ms |
+| 5,000 | ~5 ms | ~46-50 ms |
+
+("Added" excludes the vector search, which was already being paid.) The keyword search
+reads 0.0 ms on a short query: the GIN index turns it into a dictionary lookup rather than
+a comparison against every fact. Against a 300-500 ms embedding round trip inside a 4 s
+recall budget, the second ranker is rounding error even at its worst.
 
 ### (d) The knowledge map
 
@@ -343,6 +452,7 @@ erDiagram
     users ||--o{ daily_usage : "is summarised by"
     chat_sessions ||--o{ messages : contains
     profile_facts ||--o| profile_facts : "superseded_by"
+    profile_facts ||--o| profile_facts : "possible_duplicate_of"
     turns ||--o{ spans : "breaks down into"
 
     users {
@@ -402,7 +512,8 @@ erDiagram
         text source "stated | inferred"
         text status "active|superseded|rejected"
         uuid superseded_by FK
-        vector embedding "768 + HNSW"
+        uuid possible_duplicate_of FK "kept, not deleted"
+        vector embedding "768 + HNSW + GIN(fts)"
     }
     generated_reviews {
         uuid id PK

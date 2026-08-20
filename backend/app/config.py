@@ -69,12 +69,70 @@ class Settings(BaseSettings):
     # us-central1 (~1.8s); developing from India, asia-south1 is ~486ms. Override
     # EMBED_LOCATION per environment. See docs/REQUEST-ANATOMY.md.
     embed_location: str = "us-central1"
-    memory_recall_k: int = 12  # max relevant facts injected per message
+    # A CEILING, not a quota. Recall used to return exactly this many facts on every
+    # message — including "write a python function", which has nothing to do with the
+    # user. The hybrid selection below returns fewer (measured: 0-8 on real queries), so
+    # this number now only matters when a message really does touch many stored facts.
+    # Raised 12 -> 16 when lexical-only admission was added, so a third admission lane
+    # cannot push consensus facts (the best ones) off the end.
+    memory_recall_k: int = 16
     # Hard ceiling on recall. Recall is best-effort by design, so if the embedding call
     # stalls we answer without facts rather than making the user wait — this bounds the
     # tail latency instead of letting one slow call dominate the whole turn.
     memory_recall_timeout_s: float = 4.0
     memory_dedup_distance: float = 0.12  # cosine distance below which a fact is a dup
+
+    # --- hybrid recall (migration 010) ---
+    # Two rankers search independently and their POSITIONS are fused; a fact both of them
+    # found is trusted, a fact only one found is a guess that must clear a quality bar.
+    # See openspec design Decision 4 — every number here was measured, not chosen.
+    #
+    # How many candidates each ranker contributes before fusion. Small on purpose: RRF
+    # weights the head of each list heavily, so a deeper pool changes nothing but cost.
+    recall_pool: int = 20
+    # Reciprocal Rank Fusion damping. The standard constant; it makes the gap between
+    # rank 1 and 2 matter more than the gap between rank 11 and 12.
+    rrf_k: int = 60
+    # Most terms taken from one message. A three-paragraph message carries ~50 content
+    # words; OR-ing all of them matches nearly every fact (measured: 219 ms at 20k facts).
+    # The 8 kept are the RAREST, not the first 8 — the rare ones identify a fact.
+    lexical_terms_max: int = 8
+    # Drop a query term appearing in more than this share of the user's facts. Every fact
+    # begins with the user's name by design, so this is a real query shape, not a
+    # hypothetical. This is the one thing IDF would have told us, applied by hand.
+    lexical_max_df: float = 0.30
+    # A term at or below this share is *identifying*. Only a fact matched by such a term
+    # may be admitted on the lexical ranker alone — the lexical equivalent of the
+    # vector-only distance floor.
+    lexical_rare_df: float = 0.10
+    # Ratios are meaningless on a tiny memory (at 5 facts, a word in 2 of them is 40%).
+    # Below these counts the ratio is ignored, so a new user's recall is not crippled.
+    lexical_df_min_docs: int = 3
+    # A word in one or two facts is identifying no matter how large memory gets.
+    lexical_rare_min_docs: int = 2
+    # How many distinct words get an exact document-frequency measurement. Beyond this the
+    # longest are measured first — length is a stated proxy for rarity, used only to pick
+    # what to measure, never to rank. Real messages sit well inside this.
+    lexical_df_terms_max: int = 32
+    # Ceiling on the candidate set handed to ts_rank. Ranking cost is linear in matches, so
+    # this bounds it by a constant. With the DF filter applied it does not bind at
+    # realistic sizes; it exists so a pathological corpus degrades in quality, not latency.
+    lexical_candidate_max: int = 500
+    # Top-ups when the two rankers do not agree. Agreement is the signal; these stop a
+    # vague-but-personal question ("what should I do today") from recalling nothing.
+    vector_only_max: int = 4
+    lexical_only_max: int = 3
+    # A vector-only fact must be at least this close. MEASURED: one person's facts occupy
+    # a 0.30-0.58 cosine band, and 0.52 is the one place the data separates cleanly —
+    # above it lie the queries that are not about the user at all.
+    vector_only_max_distance: float = 0.52
+    # A LOOSER outer bound, applied to facts both rankers found. The vector ranker does not
+    # "find" anything — it returns its 20 nearest rows whether or not any relate to the
+    # message — so its agreement only means something while the query is inside the band
+    # where one person's facts actually live (0.30-0.58 measured; 0.60 leaves headroom).
+    # Past it the vector ranker had no opinion, and calling that agreement would report a
+    # consensus to the user that never happened. Such facts fall back to the lexical gate.
+    consensus_max_distance: float = 0.60
     model_memory: str = ""  # extractor model; empty = use model_chat
     memory_extraction_enabled: bool = True
 

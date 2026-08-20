@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useSmoothReveal } from "@/hooks/useSmoothReveal";
 import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
-import type { BudgetStatus, Session } from "@/lib/api";
+import type { BudgetStatus, RecalledFact, Session } from "@/lib/api";
 import Composer, { type ComposerHandle } from "./Composer";
 import JournalView from "./JournalView";
 import InsightsView from "./InsightsView";
@@ -161,6 +161,11 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Arrives before the first token, so it is held here and attached to the assistant
+      // bubble when the reply is finalized. What is shown is exactly what was sent to the
+      // model — a display that can drift from what was used is worse than no display.
+      let recalled: RecalledFact[] = [];
+
       const finalize = (content: string) => {
         if (content) {
           setMessages((prev) => [
@@ -170,6 +175,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
               role: "assistant",
               content,
               created_at: new Date().toISOString(),
+              recalled: recalled.length ? recalled : undefined,
             },
           ]);
         }
@@ -183,6 +189,12 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
         for await (const ev of api.streamChat(text, currentId, controller.signal, useDeep)) {
           if (ev.event === "session") {
             setCurrentId(ev.data);
+          } else if (ev.event === "recall") {
+            try {
+              recalled = JSON.parse(ev.data) as RecalledFact[];
+            } catch {
+              recalled = []; // a malformed frame must never break the reply
+            }
           } else if (ev.event === "tool") {
             setThinking(true);
             setWorking("Working…");

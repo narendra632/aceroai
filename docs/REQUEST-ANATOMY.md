@@ -16,10 +16,10 @@ Your message is never sent alone. `core/composer.build_context()` assembles a st
 | 1 | **Persona** | `docs/SOUL.md`, read from disk | yes (file read, ~0 ms) | ~1,000 chars · ~250 tok |
 | 2 | **Current date/time** | computed, your timezone | yes | ~70 chars · ~18 tok |
 | 3 | **Open tasks** | `tasks` table, urgency-ordered, capped at `CONTEXT_TASKS_LIMIT` (30) | yes (DB read) | ~100 chars/task |
-| 4 | **Recalled memory** | `profile_facts` via pgvector similarity to *this* message | yes (embedding + search) | ~90 chars/fact |
+| 4 | **Recalled memory** | `profile_facts` via **two** searches — pgvector similarity *and* Postgres full-text — fused by rank | yes (embedding + 3 queries) | ~90 chars/fact + ~12 tok/id |
 | 5 | **History** | last 20 messages of this session (`HISTORY_LIMIT`, a **code constant** in `composer.py` — not an env var) | yes (DB read) | grows with the chat |
 | 6 | **Your message** | — | — | — |
-| 7 | **Tool definitions** | `core/tools.TOOLS` (7 tools, names + JSON schemas) | every turn | ~1,300 chars · ~330 tok |
+| 7 | **Tool definitions** | `core/tools.TOOLS` (10 tools, names + JSON schemas) | every turn | ~1,900 chars · ~470 tok |
 
 **Measured example** (a short message, 9 facts recalled, 3 open tasks, new session):
 
@@ -45,7 +45,8 @@ flowchart TD
     A["POST /api/chat"] --> B["1 · auth<br/><small>decode bearer token → user · ~1 ms</small>"]
     B --> C["2 · persist_user<br/><small>INSERT message (+session) · ~20-40 ms</small>"]
     C -.->|SSE 'session'| U1([UI has a session id])
-    C --> D["3 · memory_recall<br/><small>embed + pgvector search</small>"]
+    C --> D["3 · memory_recall<br/><small>embed + vector search + keyword search, fused</small>"]
+    D -.->|SSE 'recall'| U2([UI can show which facts were used])
     D --> E["4 · build_context<br/><small>tasks + last 20 messages · ~10-40 ms</small>"]
     E --> F["5 · llm_round1<br/><small>context + tools → stream · ~1-2 s</small>"]
     F --> G{text or tool calls?}
@@ -184,8 +185,10 @@ turn total=2913ms persist_user=30ms memory_recall=1789ms build_context=8ms
 - **Stopwatch from pressing Enter to the first word appearing** ≈ `first_token`.
 - **Stopwatch to the reply finishing** ≈ `total` **plus** network/render time between
   your browser and the server (a few ms locally, ~100–300 ms against the live VM).
-- `recall embed=… pgvector=…` is logged separately, splitting the network call from the
-  database search.
+- `recall embed=… search=… facts=N (both=… vector=… lexical=…)` is logged per turn,
+  splitting the network call from the database work **and** naming which ranker found
+  each fact. `facts=8 (both=4 vector=4 lexical=0)` and `facts=8 (both=0 vector=8)` are
+  very different turns, and the second is the one worth looking at.
 - Per-block sizes: set the app logger to `DEBUG` to also print each block's chars/tokens.
 
 Expect variance of a few hundred ms between identical requests — that is the provider,
@@ -201,7 +204,7 @@ embedding region while the laptop is a continent away:
 | | Laptop (India) | **Production VM (Oregon)** |
 |---|---|---|
 | embedding (`us-central1`) | ~1,775 ms | **~338–364 ms** |
-| pgvector search | ~15–20 ms | **~5–6 ms** |
+| fact search (both rankers) | ~15–30 ms | **~6–12 ms** |
 | plain turn, total | ~2,910 ms | **~1,909 ms** |
 | plain turn, first token | ~2,870 ms | **~1,350 ms** |
 | tool turn (1 tool, 2 rounds) | — | ~2,668 ms |
@@ -236,6 +239,51 @@ distance that counts is **server → region**, not user → region:
 
 Setting Mumbai on the Oregon VM would make production *slower*. Hence it is per-environment
 config, defaulting to `us-central1` (which suits the deployed server).
+
+## 5b. What the second ranker cost (measured 2026-08-20)
+
+Recall became two searches instead of one. The question that matters is whether the added
+database work is visible next to the embedding round trip. It is not.
+
+Measured on the real `profile_facts` table, with synthetic rows inserted and rolled back.
+Re-derive it any time with `uv run python -m app.scripts.measure_recall_scale`. Two runs,
+reported as a range rather than false precision:
+
+| facts | doc-frequency probe | keyword search | vector search | **added** |
+|---|---|---|---|---|
+| 200, short message | ~3 ms | 0.0 ms | ~10 ms | **~3 ms** |
+| 1,000, short message | ~4 ms | 0.0 ms | ~14 ms | **~4 ms** |
+| 5,000, short message | ~5 ms | 0.0 ms | ~10 ms | **~5 ms** |
+| 1,000, three paragraphs | 19-24 ms | 15 ms | ~15 ms | **~33-40 ms** |
+| 5,000, three paragraphs | 26-27 ms | 21-24 ms | ~9 ms | **~46-50 ms** |
+
+(The vector column was already being paid before this change; "added" is the other two.)
+
+Worst case measured is ~50 ms against a 300-500 ms embedding call and a 4,000 ms recall
+budget — **just over 1 %**. The keyword search reads 0.0 ms on a short query because the
+GIN index turns it into a dictionary lookup rather than a comparison against every fact.
+
+The one real cost risk was measured and designed out: a term present in *every* fact makes
+`ts_rank` score every match before sorting, which cost **219 ms at 20k facts**. Not
+hypothetical — every fact begins with the user's name by design. Terms appearing in more
+than 30 % of facts are dropped before the query is built.
+
+**Prompt size went down, not up.** Recall is now a ceiling rather than a quota: measured on
+the real memory, an ordinary question returns 4-8 facts instead of a fixed 12, and a
+question about nothing stored returns none at all.
+
+| query | facts before | facts after |
+|---|---|---|
+| `remind me about my exam` | 12 | 7 |
+| `where do I work` | 12 | 8 |
+| `hello` | 12 | 4 |
+| `write a python function to reverse a list` | 12 | **0** |
+
+At ~25 tokens per recalled fact that is roughly **100-200 tokens saved on a typical turn**,
+which more than pays for the ~12 tokens per fact now spent carrying its id — the id being
+what lets the assistant correct or forget a fact in one step instead of two.
+
+---
 
 ## 6. Where the remaining time goes (honest assessment)
 

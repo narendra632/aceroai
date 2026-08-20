@@ -7,6 +7,7 @@ channels never change. This is where "what the model sees" is decided.
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core.recall import RecalledFact
 from app.db.models import Message, User
 from app.services import tasks as tasks_svc
 
@@ -79,18 +81,26 @@ def _tasks_block(db: Session, user: User) -> str | None:
     )
 
 
-def _facts_block(facts: list[str]) -> str:
-    lines = "\n".join(f"- {f}" for f in facts)
+def _facts_block(facts: Sequence[RecalledFact]) -> str:
+    """The recalled facts, each with its id.
+
+    Ids are here for the same reason they are on tasks: so correcting or forgetting a fact
+    is one step instead of a search followed by a write. The persona tells the model not to
+    read them aloud. They cost ~12 tokens per fact, which is the price of `correct_fact`
+    and `forget_fact` working at all.
+    """
+    lines = "\n".join(f"- [id {f.id}] {f.fact}" for f in facts)
     return (
-        "What you know about the user, recalled from earlier conversations "
-        f"(most relevant first):\n{lines}"
+        "What you know about the user, recalled from earlier conversations (most relevant "
+        "first). Use these ids with correct_fact / forget_fact when the user tells you one "
+        f"of them is wrong or should be forgotten:\n{lines}"
     )
 
 
 def build_context(
     db: Session,
     session_id: uuid.UUID,
-    facts: list[str] | None = None,
+    facts: Sequence[RecalledFact] | None = None,
     user: User | None = None,
 ) -> list[dict]:
     """Assemble model input: SOUL.md persona, the current date/time, the user's open

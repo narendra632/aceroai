@@ -14,6 +14,7 @@ import json
 import logging
 import time
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 
 from fastapi.concurrency import run_in_threadpool
@@ -22,9 +23,11 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core import llm, telemetry
+from app.core import recall as hybrid
 from app.db.models import ProfileFact, User
 from app.db.session import SessionLocal
 from app.services import memory as svc
+from app.services.errors import Invalid, NotFound
 from app.services.memory import live
 
 log = logging.getLogger(__name__)
@@ -67,11 +70,15 @@ _EXTRACT_SYSTEM = (
 )
 
 
-# --- recall (sync DB helper; call via run_in_threadpool with a precomputed vector) ---
+# --- recall (sync DB helpers; call via run_in_threadpool with a precomputed vector) ---
 
 
 def recall_facts(db: Session, user: User, query_vec: list[float], k: int) -> list[str]:
-    """Return up to `k` active facts most similar to `query_vec`, closest first.
+    """Up to `k` active facts nearest `query_vec`, closest first — the vector ranker alone.
+
+    Kept as the direct semantic-search helper (the graph and the tests want exactly this).
+    Chat recall does **not** call it: on its own this returns `k` facts for every message,
+    including messages about nothing stored. See `core.recall.search`.
 
     `live()` comes from `services.memory` rather than being repeated here: a fact the user
     has forgotten must be unreachable from *every* path, and the surest way to guarantee
@@ -92,9 +99,16 @@ def recall_facts(db: Session, user: User, query_vec: list[float], k: int) -> lis
     return list(db.execute(stmt).scalars().all())
 
 
-async def recall(db: Session, user: User, query_text: str, k: int | None = None) -> list[str]:
-    """Best-effort semantic recall for the current message. Returns [] on any
-    failure so a quota/network error never breaks the chat."""
+async def recall(
+    db: Session, user: User, query_text: str, k: int | None = None
+) -> list[hybrid.RecalledFact]:
+    """Best-effort hybrid recall for the current message. Returns [] on any failure so a
+    quota/network error never breaks the chat.
+
+    Two rankers — meaning and words — searched independently and fused by rank. The
+    selection rule lives in `core.recall.search`; what happens here is the async half: one
+    embedding round trip, then the whole search in a single threadpool call.
+    """
     k = settings.memory_recall_k if k is None else k
     if k <= 0 or not query_text.strip():
         return []
@@ -106,21 +120,34 @@ async def recall(db: Session, user: User, query_text: str, k: int | None = None)
             llm.embed([query_text], usage=usage), timeout=settings.memory_recall_timeout_s
         )
         t1 = time.perf_counter()
-        facts = await run_in_threadpool(recall_facts, db, user, vecs[0], k)
+        facts = await run_in_threadpool(hybrid.search, db, user, query_text, vecs[0], k)
         t2 = time.perf_counter()
         # Split the two halves: the embedding is a network round-trip, the search is
-        # local pgvector. Knowing which dominates is the difference between "tune the
+        # local Postgres. Knowing which dominates is the difference between "tune the
         # index" and "the provider is slow".
+        lanes = Counter(f.via for f in facts)
         timing.info(
-            "recall embed=%.0fms pgvector=%.0fms facts=%d",
+            "recall embed=%.0fms search=%.0fms facts=%d (both=%d vector=%d lexical=%d)",
             (t1 - t0) * 1000,
             (t2 - t1) * 1000,
             len(facts),
+            lanes[hybrid.BOTH],
+            lanes[hybrid.VECTOR],
+            lanes[hybrid.LEXICAL],
         )
         # An embedding on EVERY message, previously billed and never counted.
         tl.stages.append(("embed", (t1 - t0) * 1000))
-        tl.stages.append(("pgvector", (t2 - t1) * 1000))
-        tl.annotate("pgvector", facts=len(facts))
+        tl.stages.append(("search_facts", (t2 - t1) * 1000))
+        # Which LANE each fact came in on, not just how many. "8 facts" cannot tell you
+        # whether the two rankers agreed or whether one of them carried the whole turn —
+        # and that is the first question when recall looks wrong.
+        tl.annotate(
+            "search_facts",
+            facts=len(facts),
+            both=lanes[hybrid.BOTH],
+            vector_only=lanes[hybrid.VECTOR],
+            lexical_only=lanes[hybrid.LEXICAL],
+        )
         await telemetry.record(
             tl,
             user.id,
@@ -144,28 +171,6 @@ async def recall(db: Session, user: User, query_text: str, k: int | None = None)
 # --- extraction + storage (background; each helper owns its own DB session) ---
 
 
-def _nearest_active(
-    db: Session, user_id: uuid.UUID, vec: list[float]
-) -> tuple[ProfileFact, float] | None:
-    """The closest active fact to `vec`, with its distance. None if there are none."""
-    row = db.execute(
-        live(select(ProfileFact, ProfileFact.embedding.cosine_distance(vec).label("d")))
-        .where(
-            ProfileFact.user_id == user_id,
-            ProfileFact.status == "active",
-            ProfileFact.embedding.isnot(None),
-        )
-        .order_by(ProfileFact.embedding.cosine_distance(vec))
-        .limit(1)
-    ).first()
-    return (row[0], float(row[1])) if row is not None else None
-
-
-def _too_similar(db: Session, user_id: uuid.UUID, vec: list[float]) -> bool:
-    nearest = _nearest_active(db, user_id, vec)
-    return nearest is not None and nearest[1] < settings.memory_dedup_distance
-
-
 def _normalise(text: str) -> str:
     """Collapse whitespace and case so the model's `replaces` echo can be matched against
     the stored text without demanding byte-identical output from a language model."""
@@ -178,7 +183,14 @@ def _store(
     vectors: list[list[float]],
     source_ref: uuid.UUID | None = None,
 ) -> dict[str, int]:
-    """Persist extracted facts, returning counts of what happened to each.
+    """Persist extracted facts through the one writer, returning counts of what happened.
+
+    This function no longer decides anything. It resolves the model's `replaces` hint from
+    text to an id — the only thing it knows that the service does not — and hands every
+    fact to `services.memory.remember`, which owns validation, the duplicate judgement,
+    supersession and provenance. The assistant's tools call exactly the same function, so a
+    fact learned in the background and a fact the user asked for by name are stored by one
+    set of rules rather than two that drift.
 
     Three outcomes, and telling them apart is the point:
 
@@ -186,12 +198,20 @@ def _store(
       is retired and linked to the new one. Without this a *changed* fact is indist-
       inguishable from a repeat by cosine distance alone (a new job is worded almost
       identically to the old one) and the newer truth would be silently discarded.
-    - **skipped** — a genuine restatement, caught by the vector gate. This is the hard
-      guarantee, and it is deliberately independent of anything the model said.
-    - **stored** — actually new.
+    - **flagged** — close to something already held. Stored anyway, linked to its suspected
+      twin. **This used to be a delete**, and it is what ate a certification the user had
+      asked for by name: `AI-901` and `AI-103` measure 0.098 apart, well inside the 0.12
+      threshold, because distance measures subject matter and not identity.
+    - **stored** — new, with nothing nearby.
+    - **unchanged** — the exact same sentence is already active, so nothing was written.
+      The one place a repeat is provable rather than a judgement call.
+
+    Note that extraction can add and supersede but **never delete**. Superseding preserves
+    what it replaced and is reversible by reading it; deletion in an unattended loop with
+    nobody watching is neither observed nor prompted.
     """
     db = SessionLocal()
-    counts = {"stored": 0, "superseded": 0, "skipped": 0}
+    counts = {"stored": 0, "superseded": 0, "flagged": 0, "unchanged": 0}
     try:
         if db.get(User, user_id) is None:
             return counts
@@ -202,6 +222,7 @@ def _store(
 
         for fact, vec in zip(facts, vectors, strict=True):
             replaces = fact.get("replaces")
+            target_id = None
             if replaces:
                 if by_text is None:
                     by_text = {
@@ -210,57 +231,40 @@ def _store(
                     }
                 target = by_text.get(_normalise(replaces))
                 if target is not None:
-                    svc.supersede_fact(
-                        db,
-                        user_id,
-                        target.id,
-                        fact=fact["fact"],
-                        embedding=vec,
-                        category=fact["category"],
-                        confidence=fact["confidence"],
-                        # The MODEL concluded this replacement, so it is inferred even
-                        # when the fact it replaces had been confirmed by the user.
-                        # Inheriting the old row's source would silently launder a guess
-                        # into something the user appears to have stated.
-                        source="inferred",
-                    )
-                    counts["superseded"] += 1
-                    continue
-                # The model named a fact we can't find. Ignore the hint rather than
-                # guessing which one it meant, and fall through to the normal path.
-                log.info("memory: `replaces` target not found, treating as new: %r", replaces)
-
-            near = _nearest_active(db, user_id, vec)
-            if near is not None and near[1] < settings.memory_dedup_distance:
-                # Record WHAT was discarded, not just that something was. This branch
-                # assumes the fact is a restatement, and distance alone provably cannot
-                # tell a restatement from a change: measured, real restatements span
-                # 0.020-0.028 and real changes span 0.029-0.118, which overlap. The
-                # `replaces` hint above is what actually separates them, so if it ever
-                # misses, a true correction dies here. Silently, until now — the counter
-                # this used to increment left no way to ever discover it happened.
-                log.info(
-                    "memory: discarded as duplicate (distance %.3f) %r — nearest was %r",
-                    near[1],
+                    target_id = target.id
+                else:
+                    # The model named a fact we can't find. Ignore the hint rather than
+                    # guessing which one it meant, and fall through to the normal path.
+                    log.info("memory: `replaces` target not found, treating as new: %r", replaces)
+            try:
+                result = svc.remember(
+                    db,
+                    user_id,
                     fact["fact"],
-                    near[0].fact,
-                )
-                counts["skipped"] += 1
-                continue
-            db.add(
-                ProfileFact(
-                    user_id=user_id,
-                    fact=fact["fact"],
                     category=fact["category"],
-                    confidence=fact["confidence"],
+                    embedding=vec,
+                    # The MODEL concluded this, so it is inferred even when it replaces a
+                    # fact the user had confirmed. Inheriting the old row's source would
+                    # silently launder a guess into something the user appears to have
+                    # stated.
                     source="inferred",
                     source_ref=source_ref,
-                    status="active",
-                    embedding=vec,
+                    replaces=target_id,
+                    confidence=fact["confidence"],
                 )
-            )
-            counts["stored"] += 1
-        db.commit()
+            except (Invalid, NotFound):
+                log.info("memory: rejected extracted fact %r", fact["fact"], exc_info=True)
+                continue
+            counts[result.action] += 1
+            if result.action == svc.FLAGGED and result.related is not None:
+                # Record WHAT it resembles, at the moment it happens. The counter this
+                # replaced left no way to discover a wrongly-dropped fact after the fact,
+                # which is exactly how the AI-901 bug survived unnoticed.
+                log.info(
+                    "memory: stored and flagged as a possible duplicate %r — nearest was %r",
+                    fact["fact"],
+                    result.related.fact,
+                )
         return counts
     finally:
         db.close()
@@ -345,8 +349,9 @@ async def extract_and_store(
     is constant.
 
     Narrowing this list is safe because it was never the real duplicate guarantee. That is
-    `_too_similar`, which compares vectors against **every** stored fact regardless of what
-    the prompt contained. `known` only makes the model's proposals tidier.
+    the distance check inside `services.memory.remember`, which compares vectors against
+    **every** stored fact regardless of what the prompt contained. `known` only makes the
+    model's proposals tidier.
 
     `source_ref` is the message this turn came from, recorded so the user can ask "where did
     you get that?" and be shown the conversation.
@@ -366,10 +371,11 @@ async def extract_and_store(
         tl.annotate("extract", **counts)
         if any(counts.values()):
             log.info(
-                "memory: stored=%d superseded=%d skipped_duplicate=%d",
+                "memory: stored=%d superseded=%d flagged_duplicate=%d unchanged=%d",
                 counts["stored"],
                 counts["superseded"],
-                counts["skipped"],
+                counts["flagged"],
+                counts["unchanged"],
             )
     except asyncio.CancelledError:
         # Cancellation is not failure-by-exception and does NOT match `except Exception`,

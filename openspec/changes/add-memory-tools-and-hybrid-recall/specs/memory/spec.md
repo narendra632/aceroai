@@ -77,6 +77,19 @@ any retrieval path.
 - **THEN** the facts that address that message rank above facts that merely concern the
   user, up to the configured limit
 
+#### Scenario: A distinctive word identifies a fact the meaning search missed
+
+- **WHEN** a long message covers several subjects, and one of them is named by a word that
+  is distinctive within the user's memory
+- **THEN** the fact that word identifies is recalled, even though a search by meaning alone
+  ranked it outside the candidates
+
+#### Scenario: A common word does not qualify a fact on its own
+
+- **WHEN** a message shares only ordinary words with a fact — words that appear across much
+  of the user's memory
+- **THEN** that fact is not recalled on the strength of those words
+
 #### Scenario: A message unrelated to anything stored
 
 - **WHEN** the user's message is not about themselves at all

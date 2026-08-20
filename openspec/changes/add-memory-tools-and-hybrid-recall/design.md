@@ -200,11 +200,60 @@ one ranker     ≈ 0.014 – 0.016
 That cliff is the relevance signal that a raw distance could not provide. So:
 
 > **Keep every fact both rankers found. Then top up with at most `VECTOR_ONLY_MAX` (4) of
-> the best vector-only facts. Cap the total at `MEMORY_RECALL_K` (12).**
+> the best vector-only facts and at most `LEXICAL_ONLY_MAX` (3) of the best lexical-only
+> facts. Cap the total at `MEMORY_RECALL_K` (16).**
 
-Agreement is the signal; the top-up stops a vague-but-personal question (`what should I do
+Agreement is the signal; the top-ups stop a vague-but-personal question (`what should I do
 today`) from recalling nothing. A vector-only floor of **0.52** removes queries that are not
 about the user at all — the one place the data does separate cleanly.
+
+### Why lexical-only facts are admitted too
+
+An earlier draft of this rule admitted **consensus + vector-only** and nothing else, which
+made the keyword ranker a pure confirmation signal: it could promote a fact the vector
+ranker had already found, but never introduce one. Walking through a three-paragraph
+message showed that is backwards.
+
+A long or multi-topic message is exactly where the vector ranker is weakest — it averages
+five subjects into a single point and its top 20 leans toward whichever subject has the
+most words. So `dentist appointment on 4 September` can fall out of the vector pool while
+the word `dentist` sits in the message. Under the consensus-only rule that fact is
+unreachable, and the single most identifying signal in the message counts for nothing.
+
+That inverts the evidence. We **measured** that cosine distance barely discriminates inside
+one person's memory (0.30–0.58 for everything, `hello` closer than real matches). A hit on
+a genuinely rare word is stronger evidence of relevance than a mid-band distance, not
+weaker.
+
+The admission is gated, not free — a lexical-only fact must have matched a term whose
+document frequency is at or below `LEXICAL_RARE_DF` (10% of memory). This is the same
+quality bar the vector-only floor applies, expressed in the currency the lexical ranker
+actually has:
+
+| | admitted when | ceiling |
+|---|---|---|
+| consensus (both rankers) | always | — |
+| vector-only | distance ≤ `VECTOR_ONLY_MAX_DISTANCE` (0.52) | `VECTOR_ONLY_MAX` (4) |
+| lexical-only | matched a term with DF ≤ `LEXICAL_RARE_DF` (10%) | `LEXICAL_ONLY_MAX` (3) |
+
+The rare-term test costs one extra `tsvector @@ tsquery` per **candidate** row — the set is
+already filtered and capped, so this is not a table scan. It is computed in the same query
+as the rank, not a second round trip.
+
+**`MEMORY_RECALL_K` rises from 12 to 16.** Not because more facts are wanted — the measured
+result is 4–8 on real queries and the cap almost never binds — but because it is now a
+genuine ceiling rather than a quota, and a third admission lane needs headroom before the
+cap starts silently truncating consensus facts, which are the *best* ones we have. A ceiling
+that never binds costs nothing; a ceiling that binds on the good results is the failure mode
+worth spending 4 slots to avoid.
+
+**Rejected — admitting lexical-only facts with no DF gate.** Every fact starts with the
+user's name and common verbs recur constantly; without the gate a lexical-only slot would
+be filled by whichever fact happened to share a boring word.
+
+**Rejected — raising the cap to 20+.** The cap is not the constraint; the admission rules
+are. A larger number would only change behaviour by letting weak facts through, which is
+what this whole change exists to stop.
 
 Measured result, real memory:
 
@@ -219,6 +268,12 @@ Measured result, real memory:
 | `write a python function…` | 12 | **0** | nothing here is about the user |
 
 `MEMORY_RECALL_K` stops being a quota and becomes a ceiling.
+
+⚠ That table was measured under the **consensus + vector-only** rule, before lexical-only
+admission was added below. On these seven queries the lexical ranker's hits are all inside
+the vector pool already, so the numbers should be unchanged — but "should be" is not
+"measured", and task 8.9 re-runs them. If a number moves, the table is corrected rather
+than the result explained away.
 
 **Rejected — a cross-encoder / LLM re-ranker.** The most accurate option and the wrong
 trade: a provider call on the critical path of every message, against a recall step already

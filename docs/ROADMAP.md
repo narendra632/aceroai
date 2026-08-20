@@ -65,6 +65,38 @@
   Latency percentiles and error kinds exist only within the trace-retention
   window; past it, spend and volume survive and speed does not.
 
+- **Memory the assistant can write, and recall that actually discriminates** — Acero could
+  read its memory but never deliberately write to it, so *"remember that I have the AI-901
+  certification"* did nothing while the assistant said it had worked. Three tools
+  (`remember_fact`, `correct_fact`, `forget_fact`) now go through **one writer** shared with
+  the background extractor, so a fact you ask for and a fact learned in the background obey
+  the same rules — and a failed write is reported as a failure instead of being narrated as
+  a success.
+
+  The same bug had a second cause: the extractor **deleted** any proposed fact sitting
+  within 0.12 of an existing one. Measured, `AI-901` and `AI-103` are **0.098** apart while
+  two phrasings of the same family fact are **0.216** apart — the threshold is wrong in both
+  directions at once. Near-duplicates are now stored and flagged on the Knowledge page as a
+  question, never resolved by deletion.
+
+  **Recall became two searches instead of one.** Distance alone could not work: every fact
+  about one person sits in a 0.30-0.58 band, so `hello` scored closer than genuine matches
+  for other queries, and recall returned a fixed 12 facts on every message including
+  *"write a python function to reverse a list"*. A keyword search now runs alongside the
+  vector search and their **positions** are fused, with agreement as the signal. Measured on
+  the real memory: 12 → 7 for the exam question, 12 → 8 for *"where do I work"* (with the
+  job first), 12 → **0** for the coding question. Added cost is ~4 ms at 1,000 facts against
+  a 300-500 ms embedding call.
+
+  Every reply now carries a third control showing **exactly which facts were used**, and the
+  same list appears on the Insights waterfall for any past turn — because this whole change
+  exists as a result of a fact being silently absent with no way to notice.
+
+  **What it does *not* do:** it does not sweep conflicts or duplicates already stored. The
+  new rules apply from here forward; the backlog is the "Review conflicts" item below. It
+  also does not re-rank *within* keyword matches — `ts_rank` is not BM25 and has no IDF,
+  which is worth revisiting in the thousands of facts, not now.
+
 ## Now
 
 *(Nothing in flight — the next change on the list below starts when Narendra says so.)*
@@ -103,6 +135,14 @@
 These are not "someday" items. Each has a **numeric trigger**, and the knowledge graph
 tells you in the interface when one fires.
 
+- **Real BM25 for the keyword ranker.** Postgres `ts_rank` has no inverse document
+  frequency, so within a set of matches it does not discriminate at all — measured, every
+  match of a single-term query scores an identical `0.060793`. That is fine at tens of
+  facts, where the filter is the whole value, and stops being fine when a common word
+  matches a hundred of them. **Trigger: ~1,000 stored facts**, where IDF becomes real
+  signal rather than noise. The option is `pg_search`/ParadeDB, which costs a new
+  dependency and a different Postgres image — priced deliberately, not deferred vaguely.
+
 - **Barnes-Hut quadtree for the graph layout.** The force simulation compares every fact
   with every other one — O(n²). Measured per frame (desktop, physics only, drawing not
   included): 0.22 ms @200 · 1.0 ms @400 · 3.5 ms @800 · 9.4 ms @1500, against a 16.7 ms
@@ -120,7 +160,10 @@ tells you in the interface when one fires.
 
   **Partly mitigated already:** the extractor is now required to phrase every fact with the
   same subject, because that alone was hiding the conflict — the identical claim measured
-  0.328 apart with drifting wording and **0.131** with consistent wording.
+  0.328 apart with drifting wording and **0.131** with consistent wording. Since the memory
+  change above, near-duplicates are also *flagged* rather than deleted, so new conflicts
+  arrive visible instead of arriving as a silent gap. Neither touches the pairs already
+  sitting in the table, which is what this item is for.
 
   The remaining piece is a **"Review conflicts" action** on the Knowledge page, shaped as:
   distance narrows the candidates (each fact's single nearest neighbour, in a band close

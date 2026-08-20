@@ -145,6 +145,18 @@ class ProfileFact(Base):
     # this — the filter lives in services/memory.py, never in a route, a tool, or recall.
     deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
 
+    # Migration 010. Set when a fact was stored despite sitting close to an existing one.
+    #
+    # This exists because the alternative was *deletion*. Cosine distance measures subject
+    # matter, not identity: measured, "AI-901 certification" and "AI-103 certification" are
+    # 0.098 apart — closer than the 0.12 dedup threshold — so the second one used to be
+    # dropped. Storing it with a pointer at its suspected twin keeps the ambiguity visible
+    # and correctable. `superseded_by` says "this was replaced"; this says "these two might
+    # be the same and nobody has decided".
+    possible_duplicate_of: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("profile_facts.id")
+    )
+
     @property
     def effective_confidence(self) -> float:
         """What this fact is actually worth believing.

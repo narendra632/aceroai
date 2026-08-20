@@ -1,5 +1,11 @@
-## ADDED Requirements
+# documentation Specification
 
+## Purpose
+How the system explains itself: the documents that describe what was
+built, why it was built that way, and how to run it — kept true to the code
+rather than to the plan.
+
+## Requirements
 ### Requirement: Documentation describes the system as built
 
 Every document in the repository SHALL describe behavior that is actually implemented, so

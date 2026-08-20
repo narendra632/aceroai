@@ -31,6 +31,9 @@ const LABELS: Record<string, string> = {
   build_context: "Assemble the prompt",
   persist_assistant: "Save the reply",
   embed: "Embed the text",
+  // Renamed from `pgvector` when recall became two searches — meaning AND wording — so the
+  // old key is kept: spans written before that change are still on disk for 30 days.
+  search_facts: "Search the memory",
   pgvector: "Search the memory",
   extract: "Learn from the turn",
   embed_facts: "Embed new facts",

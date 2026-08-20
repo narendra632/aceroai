@@ -30,6 +30,7 @@ from app.core.providers.base import ProviderError
 from app.db.models import User
 from app.db.session import get_db
 from app.services import memory as svc
+from app.services.errors import NotFound
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -74,10 +75,21 @@ def get_fact(
     """
     fact = svc.get_fact(db, user.id, fact_id)
     previous = svc.previous_version(db, user.id, fact)
+    resembles = None
+    if fact.possible_duplicate_of is not None:
+        # Best-effort: the twin may since have been forgotten, and a dangling flag must not
+        # turn the detail panel into a 404.
+        try:
+            resembles = FactOut.model_validate(
+                svc.get_fact(db, user.id, fact.possible_duplicate_of)
+            )
+        except NotFound:
+            resembles = None
     return FactDetailOut(
         **FactOut.model_validate(fact).model_dump(),
         source_session_id=svc.provenance(db, user.id, fact),
         previous=FactOut.model_validate(previous) if previous is not None else None,
+        resembles=resembles,
     )
 
 
@@ -171,6 +183,22 @@ def unconfirm_fact(
     otherwise a misclick is permanent. The model's original confidence comes back,
     because confirming never overwrote it."""
     return FactOut.model_validate(svc.set_confirmed(db, user.id, fact_id, False))
+
+
+@router.post("/facts/{fact_id}/not-duplicate")
+def clear_duplicate_flag(
+    fact_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FactOut:
+    """Answer the duplicate question with "these are genuinely different".
+
+    The flag exists because deleting a suspected duplicate was destroying real facts. But a
+    warning with no way to dismiss it becomes permanent furniture, so it needs an answer
+    that is not "delete one of them". Merging is the other answer, and that is just
+    forgetting the one you don't want — which already exists.
+    """
+    return FactOut.model_validate(svc.clear_duplicate_flag(db, user.id, fact_id))
 
 
 @router.delete("/facts/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)

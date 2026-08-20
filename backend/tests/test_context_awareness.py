@@ -6,6 +6,7 @@ work it already created, needs an extra round-trip to act on a task, and can nev
 proactively surface something that's due (a prime directive in SOUL.md).
 """
 
+import asyncio
 import datetime as dt
 
 import pytest
@@ -131,7 +132,7 @@ def test_tool_reports_existing_task_instead_of_creating(db, user):
     from app.core import tools
 
     svc.create_task(db, user.id, title="Pay rent")
-    result = tools.execute(db, user.id, "create_task", {"title": "Pay rent"})
+    result = asyncio.run(tools.execute(db, user.id, "create_task", {"title": "Pay rent"}))
     assert result["ok"] is False
     assert result["existing"]["title"] == "Pay rent"  # so it can point at the real one
     assert len(svc.list_tasks(db, user.id)) == 1

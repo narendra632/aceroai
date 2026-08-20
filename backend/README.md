@@ -58,7 +58,7 @@ so a task created by tapping "＋" and one created by the assistant are identica
 and validated the same way.
 
 **How the assistant acts.** Each chat turn hands the model a set of tools
-(`app/core/tools.py`). If it answers with text, that streams as before. If it
+(`app/core/tools/`, one module per domain — tasks, journal, memory). If it answers with text, that streams as before. If it
 returns a **tool call**, `handle_message` runs it via the services, feeds the
 result back, and loops — until the model gives a final answer:
 
@@ -168,8 +168,9 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/core/providers/` | One contract (`base.py`), two **native** implementations: `google.py` (google-genai / Agent Platform) and `openai_provider.py` (openai SDK on the **Responses** API — Chat Completions rejects tools + reasoning together on gpt-5.4+) |
 | `app/core/composer.py` | Builds model context: `SOUL.md` persona + current date/time + recalled facts + recent messages |
 | `app/core/handler.py` | `handle_message` — the one brain; the bounded tool-use loop; yields SSE events |
-| `app/core/tools.py` | Assistant tools (create/list/update/complete task, add/list journal) + fault-tolerant dispatch |
-| `app/core/memory.py` | Cross-session memory: extract → embed → store facts (pgvector) → semantic recall |
+| `app/core/tools/` | Assistant tools, one module per domain: `tasks.py` (create/list/update/complete/delete), `journal.py` (add/list), `memory.py` (remember/correct/forget). `__init__.py` assembles `TOOLS` + fault-tolerant dispatch and refuses to start if a schema and handler disagree |
+| `app/core/memory.py` | Cross-session memory: extract → embed → store through the one writer; orchestrates recall |
+| `app/core/recall.py` | Hybrid retrieval — vector ranker + keyword ranker, fused by RRF, with the selection rule |
 | `app/core/security.py` | bcrypt hashing + JWT create/decode (HS256, 30-day) |
 | `app/services/` | Single source of truth for `tasks`, `journal`, `memory` (fact rules + the kNN graph), `insights` (trace aggregates), `retention` (rollup + prune), `budget` (the monthly spend ceiling), and `user_settings` — used by the API *and* the tools/handler |
 | `app/core/pricing.py` | Dated price list per provider/model. Cost is computed once, at write time, and frozen with its `pricing_version`, so a price change today cannot rewrite last month's spend. An unknown model costs `None`, never `0` |
@@ -179,7 +180,7 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` (owner-scoped) |
 | `app/api/journal.py` | `/api/journal` CRUD (owner-scoped) |
 | `app/api/settings.py` | `GET/PATCH /api/settings` — provider + model selection + the monthly spend limit; `GET /api/settings/budget` for the lightweight state the chat screen polls |
-| `app/api/memory.py` | `/api/memory/facts` list/search/detail/edit/confirm/forget/restore · `/api/memory/graph` · `/api/memory/stats` (owner-scoped) |
+| `app/api/memory.py` | `/api/memory/facts` list/search/detail/edit/confirm/forget/restore/not-duplicate · `/api/memory/graph` · `/api/memory/stats` (owner-scoped) |
 | `app/api/insights.py` | `/api/insights/overview` · `/turns` · `/turns/{id}` — **read-only**; no route here mutates anything |
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/db/session.py` | Engine, `SessionLocal`, `Base`, `get_db` dependency |
@@ -238,25 +239,58 @@ httpOnly cookie could not. Fine for a single-user app. If this ever goes
 multi-user, serve the UI and API from **one origin** and the first-party httpOnly
 cookie becomes available again.
 
+## Re-deriving the numbers
+
+Two scripts keep the measured claims in the docs checkable rather than trusted:
+
+| Command | What it answers |
+|---|---|
+| `uv run python -m app.scripts.measure_recall` | What recall returns for real queries against the real memory, and which ranker found each fact. Costs one embedding per query; writes nothing |
+| `uv run python -m app.scripts.measure_recall_scale` | What hybrid recall costs at 200 / 1,000 / 5,000 facts. Inserts synthetic rows inside a transaction and **rolls back**, so the real memory is untouched |
+
+Every recall number in `docs/ARCHITECTURE.md` and `docs/REQUEST-ANATOMY.md` comes from
+these. If behaviour drifts, they are what catches it.
+
 ## Memory & reasoning
 
 Acero remembers you **across sessions**. It's the first cognition layer, and it's
 where pgvector does real work.
 
-- **Extract** — after each reply is delivered, `handle_message` schedules a
-  *background* task (`memory.extract_and_store`) that asks a cheap model for
-  durable facts about you (preferences, goals, work, health…) and skips anything
-  already known. It runs **off the reply path** in its own DB session and swallows
-  every error, so it never slows or breaks a reply.
+**One writer.** Every path that creates, changes or removes a fact — the three
+assistant tools and the background extractor alike — goes through
+`services/memory.remember()`. Validation, the duplicate judgement, supersession and
+provenance are implemented once, so a fact you asked for by name and a fact learned
+in the background obey the same rules.
+
+- **Write, on purpose** — `remember_fact`, `correct_fact` and `forget_fact` let the
+  assistant act when you *tell* it to. Facts written this way are recorded as
+  `stated` (you said it) rather than `inferred`. A failed write comes back as a
+  failure: the model cannot report a change it did not make.
+- **Extract, in the background** — after each reply is delivered, `handle_message`
+  schedules a task (`memory.extract_and_store`) that asks a cheap model for durable
+  facts about you. It runs **off the reply path** in its own DB session and swallows
+  every error. It may add and supersede but **never delete**.
 - **Embed & store** — each new fact is embedded (`EMBED_MODEL`, `EMBED_DIM`) and
   written to `profile_facts.embedding` (a `vector(768)` column with an HNSW index,
-  migration 002). Semantic duplicates are skipped.
-- **Recall** — for every incoming message, `memory.recall` embeds the message and
-  runs a vector-similarity search (`embedding <=> query`) for the top
-  `MEMORY_RECALL_K` **active** facts, which `composer.build_context` injects right
-  after the SOUL.md persona. Recall is best-effort *and* **time-bounded**
-  (`MEMORY_RECALL_TIMEOUT_S`, 4 s): a quota failure, a network error, or a stall
-  just means no facts this turn — never a broken or slow chat.
+  migration 002).
+- **Nothing is discarded.** A proposed fact that sits close to an existing one is
+  stored *and* linked via `possible_duplicate_of` (migration 010), not deleted.
+  Measured, `AI-901` and `AI-103` are **0.098** apart — inside the 0.12 dedup
+  threshold — while two phrasings of the same family fact are **0.216** apart,
+  outside it. Closeness measures subject matter, not identity, so a near-duplicate
+  is surfaced on the Knowledge page as a question rather than resolved by deletion.
+- **Recall — two searches, fused.** `memory.recall` embeds the message, then runs
+  a vector search *and* a Postgres full-text search (GIN index, migration 010) and
+  fuses their **positions** with Reciprocal Rank Fusion. A fact both searches found
+  is kept; a fact only one found must clear that search's own bar (distance ≤ 0.52
+  for the vector side, a rare word for the keyword side). `MEMORY_RECALL_K` (16) is
+  a **ceiling, not a quota** — a message about nothing stored recalls nothing.
+  Recall is best-effort *and* **time-bounded** (`MEMORY_RECALL_TIMEOUT_S`, 4 s): a
+  quota failure, a network error, or a stall just means no facts this turn.
+- **Visible.** The facts used for a reply are streamed to the browser as a `recall`
+  SSE event and shown behind the third control under each reply. Their ids also go
+  into the `memory_recall` span, so the Insights waterfall can explain any past turn.
+  Ids are identifiers, not content, so traces still record no message text.
 
 **⚠ Embeddings are pinned on purpose.** They do not follow the user's chat-provider
 choice. Every stored vector came from one model, and vectors from different models

@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import select
 
 from app.config import settings
@@ -136,3 +138,64 @@ def test_cannot_access_other_users_session(auth_client, db):
         ).status_code
         == 404
     )
+
+
+# --- what the user is shown about memory ------------------------------------------
+
+
+def _recall_fixture(db, user):
+    """A fact whose wording matches the message below, so BOTH rankers find it."""
+    from app.db.models import ProfileFact
+    from tests.conftest import fake_embed_vec
+
+    db.add(
+        ProfileFact(
+            user_id=user.id,
+            fact="Narendra keeps a spare charger in his bag.",
+            category="other",
+            confidence=0.9,
+            source="inferred",
+            status="active",
+            embedding=fake_embed_vec("Narendra keeps a spare charger in his bag."),
+        )
+    )
+    db.commit()
+
+
+def test_recall_event_lists_exactly_what_the_model_was_sent(auth_client, db, user, monkeypatch):
+    """A display that can drift from what was used is worse than no display.
+
+    The prompt the model actually received is captured and compared against the `recall`
+    frame the browser is sent. Anything less would let the two diverge silently, which is
+    the exact class of bug this whole change exists to make visible.
+    """
+    _recall_fixture(db, user)
+    seen: dict = {}
+
+    async def capture(messages, tools=None, model=None, usage=None, effort=None, provider=None):
+        seen["blocks"] = [m["content"] for m in messages if m["role"] == "system"]
+        yield "delta", "ok"
+
+    monkeypatch.setattr("app.core.llm.stream_with_tools", capture)
+
+    r = auth_client.post("/api/chat", json={"message": "where is my spare charger"})
+    events = _parse_sse(r.text)
+
+    recall = [d for e, d in events if e == "recall"]
+    assert recall, "the browser must be told which facts were used"
+    facts = json.loads(recall[0])
+    assert facts, "this message matches a stored fact by both meaning and wording"
+
+    prompt = "\n".join(seen["blocks"])
+    for f in facts:
+        assert f["fact"] in prompt  # shown == sent
+        assert f["id"] in prompt  # and the id travels, so it can be corrected in one step
+        assert f["via"] in ("both", "vector", "lexical")
+
+
+def test_no_recall_event_when_nothing_was_relevant(auth_client, db, user):
+    """The control is absent, not present-and-empty. After hybrid recall, recalling nothing
+    is a normal outcome — an always-present button reading "none" would be noise on exactly
+    the turns needing no explanation."""
+    r = auth_client.post("/api/chat", json={"message": "explain quaternion interpolation"})
+    assert "recall" not in [e for e, _ in _parse_sse(r.text)]

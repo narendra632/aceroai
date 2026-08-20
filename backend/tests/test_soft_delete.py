@@ -35,7 +35,7 @@ def test_deleted_task_is_invisible_to_every_reader(db, user):
     with pytest.raises(NotFound):
         tasks_svc.get_task(db, user.id, task.id)
     # the assistant's tools
-    listed = tools.execute(db, user.id, "list_tasks", {})
+    listed = asyncio.run(tools.execute(db, user.id, "list_tasks", {}))
     assert all(t["id"] != str(task.id) for t in listed.get("tasks", []))
 
 
@@ -112,7 +112,7 @@ def test_deleted_journal_entry_is_invisible_and_restorable(db, user):
     assert journal_svc.list_entries(db, user.id) == []
     with pytest.raises(NotFound):
         journal_svc.get_entry(db, user.id, entry.id)
-    read = tools.execute(db, user.id, "list_journal", {})
+    read = asyncio.run(tools.execute(db, user.id, "list_journal", {}))
     assert all(e["id"] != str(entry.id) for e in read.get("entries", []))
 
     restored = journal_svc.restore_entry(db, user.id, entry.id)
@@ -228,7 +228,7 @@ def test_assistant_cannot_act_on_a_deleted_task(db, user):
     task = tasks_svc.create_task(db, user.id, title="Something removed")
     tasks_svc.delete_task(db, user.id, task.id)
 
-    result = tools.execute(db, user.id, "complete_task", {"task_id": str(task.id)})
+    result = asyncio.run(tools.execute(db, user.id, "complete_task", {"task_id": str(task.id)}))
     assert result["ok"] is False
     assert "not found" in result["error"].lower()
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BadgeCheck, BadgeX, History, MessageSquareText, Trash2 } from "lucide-react";
+import { BadgeCheck, BadgeX, Copy, History, MessageSquareText, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -205,6 +205,48 @@ export default function FactSheet({
               <p className="text-xs text-muted-foreground">
                 No conversation is recorded for this one — it predates provenance tracking.
               </p>
+            )}
+
+            {detail.resembles && (
+              <div className="rounded-lg border border-border bg-muted/40 p-3">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Copy className="size-3.5" /> This may repeat
+                </p>
+                <p className="mt-1 text-sm">{detail.resembles.fact}</p>
+                {/* Kept rather than deleted: two facts can sound alike and both be true —
+                    measured, two different certifications sit closer together than two
+                    phrasings of the same fact about family. So this asks instead of
+                    deciding, and there has to be a way to answer it. */}
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          const updated = await api.notDuplicate(detail.id);
+                          setDetail({ ...detail, ...updated, resembles: null });
+                          onSaved(updated, null);
+                        } catch {
+                          setError("Could not clear that flag");
+                        }
+                      })();
+                    }}
+                  >
+                    Not a duplicate
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      onForget(detail);
+                      onClose();
+                    }}
+                  >
+                    Forget this one
+                  </Button>
+                </div>
+              </div>
             )}
 
             {detail.previous && (

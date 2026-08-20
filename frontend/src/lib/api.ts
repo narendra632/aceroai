@@ -33,6 +33,20 @@ export type ChatMessage = {
 
 export type ChatEvent = { event: string; data: string };
 
+/** One fact recall injected into the prompt for a reply.
+ *
+ * `via` says WHICH search found it: "both" means the meaning search and the keyword search
+ * agreed, which is the strongest signal the system has; "vector" and "lexical" mean only
+ * one of them did. Shown because a memory you cannot inspect is a memory you cannot trust
+ * — this whole feature exists because a fact was silently missing and there was no way to
+ * notice. */
+export type RecalledFact = {
+  id: string;
+  fact: string;
+  category: FactCategory;
+  via: "both" | "vector" | "lexical";
+};
+
 function req(path: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${API}${path}`, {
     credentials: "include",
@@ -357,6 +371,8 @@ export type Fact = {
   source: "inferred" | "stated";
   status: "active" | "superseded" | "rejected";
   superseded_by: string | null;
+  /** Set when this fact was kept despite closely resembling another one. */
+  possible_duplicate_of: string | null;
   valid_from: string;
   created_at: string;
   updated_at: string;
@@ -367,6 +383,10 @@ export type FactDetail = Fact & {
   source_session_id: string | null;
   /** The belief this one replaced, so history is reachable and not merely stored. */
   previous: Fact | null;
+  /** The fact this one may be repeating. A QUESTION, not a verdict — the alternative was
+   *  deleting it, and closeness in meaning cannot tell a restatement from two genuinely
+   *  different facts that happen to sound alike. */
+  resembles: Fact | null;
 };
 
 export type GraphNode = {
@@ -481,6 +501,16 @@ export async function forgetFact(id: string): Promise<void> {
   if (!r.ok) throw new Error("Could not forget that fact");
 }
 
+/** Answer the duplicate question with "these are genuinely different".
+ *
+ * A warning with no way to dismiss it becomes permanent furniture. Merging is the other
+ * answer, and that is just forgetting the one you don't want. */
+export async function notDuplicate(id: string): Promise<Fact> {
+  const r = await req(`/api/memory/facts/${id}/not-duplicate`, { method: "POST" });
+  if (!r.ok) throw new Error("Could not clear that flag");
+  return r.json();
+}
+
 export async function restoreFact(id: string): Promise<Fact> {
   const r = await req(`/api/memory/facts/${id}/restore`, { method: "POST" });
   if (!r.ok) throw new Error("Could not restore that fact");
@@ -589,7 +619,18 @@ export async function listTurns(limit = 50, kind?: string): Promise<TurnRow[]> {
   return r.json();
 }
 
-export async function getTurn(id: string): Promise<{ turn: TurnRow; spans: TurnSpan[] }> {
+/** What memory contributed to one past turn.
+ *
+ * The chat popover can only explain the conversation still open in the browser; this
+ * answers the same question for any turn ever recorded. Resolved server-side from the ids
+ * on the span, so traces still hold no message text. */
+export type TurnDetail = {
+  turn: TurnRow;
+  spans: TurnSpan[];
+  recalled: { id: string; fact: string; category: FactCategory }[];
+};
+
+export async function getTurn(id: string): Promise<TurnDetail> {
   const r = await req(`/api/insights/turns/${id}`);
   if (!r.ok) throw new Error("Could not load that call");
   return r.json();

@@ -261,8 +261,6 @@ with an error, and MUST NOT persist the message or call the model for it.
 
 <!-- folded in from polish-ui-to-product-standard (2026-08-17) -->
 
-## ADDED Requirements
-
 ### Requirement: A conversation can be renamed
 
 Conversation titles SHALL be editable by their owner, so that the primary navigation
@@ -293,8 +291,6 @@ losing an entire conversation is not the consequence of one mis-tap.
 
 - **WHEN** a restore is requested for a recently deleted conversation
 - **THEN** the conversation returns with the same identity and its messages intact
-
-## MODIFIED Requirements
 
 ### Requirement: Conversations are listed for their owner
 

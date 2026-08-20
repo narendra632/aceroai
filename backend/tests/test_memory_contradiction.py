@@ -100,11 +100,19 @@ def test_changed_fact_supersedes_instead_of_being_dropped(monkeypatch, db, user)
     assert "works at Company A" not in memory.recall_facts(db, user, _onehot(3), k=10)
 
 
-def test_genuine_repeat_is_still_deduplicated(monkeypatch, db, user):
+def test_a_restatement_is_flagged_not_superseded(monkeypatch, db, user):
     """A restatement must NOT create a supersession chain — that would fill the history
-    with events that never happened."""
-    db.add(_fact(user, "likes tea", _onehot(5), category="preference"))
+    with events that never happened.
+
+    It must not be DELETED either, which is what used to happen. Distance cannot tell a
+    restatement from a genuinely different fact, so the near-duplicate is stored and
+    linked to its twin; the ambiguity becomes visible rather than being resolved by
+    destroying one side of it.
+    """
+    original = _fact(user, "likes tea", _onehot(5), category="preference")
+    db.add(original)
     db.commit()
+    db.refresh(original)
 
     monkeypatch.setattr(
         "app.core.llm.complete",
@@ -115,9 +123,11 @@ def test_genuine_repeat_is_still_deduplicated(monkeypatch, db, user):
     asyncio.run(memory.extract_and_store(user.id, "tea again", "noted", known=["likes tea"]))
 
     rows = db.execute(select(ProfileFact).where(ProfileFact.user_id == user.id)).scalars().all()
-    assert len(rows) == 1
-    assert rows[0].status == "active"
-    assert rows[0].superseded_by is None
+    assert len(rows) == 2
+    assert all(r.status == "active" for r in rows)
+    assert all(r.superseded_by is None for r in rows)  # no fabricated history
+    new = next(r for r in rows if r.fact == "enjoys tea")
+    assert new.possible_duplicate_of == original.id
 
 
 def test_unknown_replaces_target_is_ignored_not_guessed(monkeypatch, db, user):
@@ -227,15 +237,18 @@ def test_chat_turn_threads_the_message_id_into_provenance(auth_client, db, user,
 # --- the bounded prompt -----------------------------------------------------------
 
 
-def test_dedup_holds_even_when_the_known_block_is_empty(monkeypatch, db, user):
-    """Decision 8's safety argument, asserted.
+def test_the_duplicate_check_runs_even_when_the_known_block_is_empty(monkeypatch, db, user):
+    """The safety argument for bounding the known-facts list, asserted.
 
-    The extractor is shown NOTHING, and still cannot create a duplicate — because the
-    guarantee lives in the vector gate, not in the prompt. This is what makes bounding the
-    known-facts list safe.
+    The extractor is shown NOTHING, and the near-duplicate is still detected — because the
+    check compares vectors against every stored fact, not against whatever happened to be
+    in the prompt. That is what makes sending recall's short list, instead of the whole
+    memory, safe.
     """
-    db.add(_fact(user, "likes tea", _onehot(5), category="preference"))
+    original = _fact(user, "likes tea", _onehot(5), category="preference")
+    db.add(original)
     db.commit()
+    db.refresh(original)
 
     monkeypatch.setattr(
         "app.core.llm.complete",
@@ -245,8 +258,10 @@ def test_dedup_holds_even_when_the_known_block_is_empty(monkeypatch, db, user):
 
     asyncio.run(memory.extract_and_store(user.id, "tea", "noted", known=[]))
 
-    rows = db.execute(select(ProfileFact).where(ProfileFact.user_id == user.id)).scalars().all()
-    assert len(rows) == 1  # no duplicate, despite the extractor knowing nothing
+    new = db.execute(
+        select(ProfileFact).where(ProfileFact.user_id == user.id, ProfileFact.fact == "enjoys tea")
+    ).scalar_one()
+    assert new.possible_duplicate_of == original.id  # caught by the vector, not the prompt
 
 
 def test_extraction_prompt_contains_only_the_facts_it_was_given(monkeypatch, db, user):

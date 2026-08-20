@@ -19,10 +19,12 @@ already uses.
 import datetime as dt
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from sqlalchemy import Select, case, func, select, true
 from sqlalchemy.orm import Session, aliased
 
+from app.config import settings
 from app.db.models import ChatSession, Message, ProfileFact
 from app.services.errors import Invalid, NotFound
 
@@ -80,6 +82,202 @@ def live(stmt: Select) -> Select:
     predicate, so recall and the API can never disagree about what is visible.
     """
     return stmt.where(ProfileFact.deleted_at.is_(None))
+
+
+# --- the one writer ---------------------------------------------------------------
+#
+# Every path that creates a fact goes through `remember`: the assistant's tools, the
+# background extractor, and anything added later. Memory is the one subsystem in this
+# project that never got a front door, and that is exactly why it grew a write path with
+# a dedup rule nobody could point at — a rule that silently deleted a fact the user had
+# asked for by name.
+
+#: What `remember` did. Returned instead of a bare bool because the outcomes are genuinely
+#: different events and the caller (and the model) must be able to tell them apart —
+#: "stored" and "flagged" both mean the fact exists, "superseded" means an older belief was
+#: retired, "unchanged" means nothing was written, and none may be reported as any other.
+STORED = "stored"
+SUPERSEDED = "superseded"
+FLAGGED = "flagged"
+UNCHANGED = "unchanged"
+
+
+@dataclass(frozen=True)
+class WriteResult:
+    action: str
+    fact: ProfileFact
+    #: The fact this one superseded or is suspected of duplicating, when there is one.
+    related: ProfileFact | None = None
+
+
+def _same_text_active(db: Session, user_id: uuid.UUID, text: str) -> ProfileFact | None:
+    """An active fact whose text is the same sentence, ignoring case and spacing.
+
+    Compared in the database rather than in Python so it costs one indexed-ish lookup
+    instead of loading every fact, and so the comparison is the same for every caller.
+    """
+    normalised = " ".join(text.split())
+    return db.execute(
+        live(select(ProfileFact))
+        .where(
+            ProfileFact.user_id == user_id,
+            ProfileFact.status == "active",
+            func.lower(func.regexp_replace(ProfileFact.fact, r"\s+", " ", "g"))
+            == normalised.lower(),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def nearest_active(
+    db: Session, user_id: uuid.UUID, vec: Sequence[float]
+) -> tuple[ProfileFact, float] | None:
+    """The closest active fact to `vec`, with its cosine distance. None if there are none."""
+    row = db.execute(
+        live(select(ProfileFact, ProfileFact.embedding.cosine_distance(list(vec)).label("d")))
+        .where(
+            ProfileFact.user_id == user_id,
+            ProfileFact.status == "active",
+            ProfileFact.embedding.isnot(None),
+        )
+        .order_by(ProfileFact.embedding.cosine_distance(list(vec)))
+        .limit(1)
+    ).first()
+    return (row[0], float(row[1])) if row is not None else None
+
+
+def remember(
+    db: Session,
+    user_id: uuid.UUID,
+    fact: str,
+    *,
+    category: str = "other",
+    embedding: Sequence[float] | None = None,
+    source: str = "inferred",
+    source_ref: uuid.UUID | None = None,
+    replaces: uuid.UUID | None = None,
+    confidence: float = 0.8,
+) -> WriteResult:
+    """Store a fact, or supersede one it replaces. **Never discards.**
+
+    Three outcomes:
+
+    - `replaces` names a fact  ->  **SUPERSEDED**. The old belief is retired and linked to
+      the new one, so a change survives as history rather than as an overwrite.
+    - no hint, and nothing similar  ->  **STORED**.
+    - no hint, but an existing active fact sits within `memory_dedup_distance`  ->
+      **FLAGGED**: stored anyway, with `possible_duplicate_of` pointing at its suspected
+      twin.
+
+    That last branch is the whole reason this function exists. It used to be a delete.
+    Cosine distance measures subject matter, not identity, and the measurement is not
+    close: `"Narendra has completed the AI-901 certification"` and the same sentence with
+    `AI-103` are **0.098** apart — inside the 0.12 threshold — while two phrasings of the
+    same family fact are 0.216 apart, outside it. The threshold is wrong in both
+    directions at once, so it cannot be repaired by moving it.
+
+    Dropping is the destructive move, so dropping is the one that needs evidence. A stored
+    near-duplicate is visible on the Knowledge page and mergeable in one click; a deleted
+    fact leaves nothing to notice.
+    """
+    text = (fact or "").strip()
+    if not text:
+        raise Invalid("a fact needs text")
+    _validate(category, confidence)
+
+    if replaces is not None:
+        target = get_fact(db, user_id, replaces)
+        replacement = supersede_fact(
+            db,
+            user_id,
+            target.id,
+            fact=text,
+            embedding=embedding,
+            category=category,
+            confidence=confidence,
+            source=source,
+        )
+        return WriteResult(SUPERSEDED, replacement, target)
+
+    # The one case where "this is a repeat" is a FACT rather than a judgement.
+    #
+    # The whole argument for storing near-duplicates is that cosine distance cannot tell a
+    # restatement from a change: AI-901 and AI-103 measure 0.098 apart and are different
+    # facts. Identical text carries no such ambiguity — there is nothing to lose by not
+    # writing it, because every character of it is already stored.
+    #
+    # This is not theoretical. MEASURED live: asking the assistant to remember something
+    # makes it call `remember_fact`, and then the background extractor reads the same turn,
+    # proposes the same sentence, and stores it again — so every explicit "remember X"
+    # produced two identical rows and recall returned both. The store-don't-drop rule was
+    # right and this is its one principled exception.
+    existing = _same_text_active(db, user_id, text)
+    if existing is not None:
+        return WriteResult(UNCHANGED, existing)
+
+    twin: ProfileFact | None = None
+    if embedding is not None:
+        near = nearest_active(db, user_id, embedding)
+        if near is not None and near[1] < settings.memory_dedup_distance:
+            twin = near[0]
+
+    row = ProfileFact(
+        user_id=user_id,
+        fact=text,
+        category=category,
+        confidence=confidence,
+        source=source,
+        source_ref=source_ref,
+        status="active",
+        embedding=list(embedding) if embedding is not None else None,
+        possible_duplicate_of=twin.id if twin is not None else None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return WriteResult(FLAGGED if twin is not None else STORED, row, twin)
+
+
+def correct(
+    db: Session,
+    db_user_id: uuid.UUID,
+    fact_id: uuid.UUID,
+    new_text: str,
+    *,
+    embedding: Sequence[float] | None = None,
+    category: str | None = None,
+    confidence: float | None = None,
+) -> WriteResult:
+    """Replace a fact with a corrected version the user has just told us in their own
+    words. Recorded as `stated`, because saying it *is* confirming it."""
+    replacement = supersede_fact(
+        db,
+        db_user_id,
+        fact_id,
+        fact=new_text,
+        embedding=embedding,
+        category=category,
+        confidence=confidence,
+        source="stated",
+    )
+    previous = db.execute(
+        select(ProfileFact).where(ProfileFact.superseded_by == replacement.id)
+    ).scalar_one_or_none()
+    return WriteResult(SUPERSEDED, replacement, previous)
+
+
+def clear_duplicate_flag(db: Session, user_id: uuid.UUID, fact_id: uuid.UUID) -> ProfileFact:
+    """Dismiss a suspected duplicate: these two facts are genuinely different.
+
+    The flag is a question, not a verdict, so it needs an answer that is not "delete one of
+    them". Answering it here is what keeps the Knowledge page from accumulating a permanent
+    list of warnings nobody can clear.
+    """
+    row = get_fact(db, user_id, fact_id)
+    row.possible_duplicate_of = None
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def _validate(category: str | None, confidence: float | None) -> None:

@@ -21,6 +21,7 @@ from app.api.schemas import (
     InsightsSummary,
     ModelUsage,
     ProviderComparison,
+    RecalledFactOut,
     SeriesPoint,
     SpanOut,
     TurnDetail,
@@ -30,6 +31,8 @@ from app.core import pricing
 from app.db.models import User
 from app.db.session import get_db
 from app.services import insights as svc
+from app.services import memory as memory_svc
+from app.services.errors import NotFound
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
@@ -79,6 +82,32 @@ def recent_turns(
     return [TurnOut.model_validate(t) for t in svc.recent(db, user.id, limit=limit, kind=kind)]
 
 
+def _recalled_facts(db: Session, user_id: uuid.UUID, spans) -> list[RecalledFactOut]:
+    """Resolve the fact ids on the `memory_recall` span into readable text.
+
+    The span stores IDS, not text — traces record shape and never message content, and this
+    keeps that rule intact while still answering "which facts did that turn use?" for a turn
+    that is no longer open in the browser. The chat popover can only explain the session
+    still on screen; this explains any turn ever recorded.
+
+    Resolved live rather than snapshotted, so a fact that has since been corrected shows its
+    current text. A fact forgotten in the meantime simply drops out — `get_fact` hides it,
+    and a forgotten fact must be unreachable from every path, including this one.
+    """
+    span = next((s for s in spans if s.name == "memory_recall"), None)
+    ids = (span.meta or {}).get("fact_ids") if span is not None else None
+    if not ids:
+        return []
+    out: list[RecalledFactOut] = []
+    for raw in ids:
+        try:
+            fact = memory_svc.get_fact(db, user_id, uuid.UUID(str(raw)))
+        except (NotFound, ValueError):
+            continue
+        out.append(RecalledFactOut(id=fact.id, fact=fact.fact, category=fact.category))
+    return out
+
+
 @router.get("/turns/{turn_id}")
 def turn_detail(
     turn_id: uuid.UUID,
@@ -97,4 +126,5 @@ def turn_detail(
     return TurnDetail(
         turn=TurnOut.model_validate(turn),
         spans=[SpanOut.model_validate(s) for s in spans],
+        recalled=_recalled_facts(db, user.id, spans),
     )

@@ -52,14 +52,22 @@ incremental change.
 
 ## Layout
 - backend/app/core/     handler.py (the one brain), composer.py (context builder),
-                        llm.py (provider facade), tools.py (assistant tools),
-                        memory.py (extract/embed/recall), telemetry.py (traces),
+                        llm.py (provider facade),
+                        memory.py (extract/embed; orchestrates recall),
+                        recall.py (hybrid retrieval: vector + keyword, fused by RRF),
+                        telemetry.py (traces),
                         pricing.py (dated price list; cost frozen at write time),
                         security.py
+- backend/app/core/tools/  one module per domain (tasks.py, journal.py, memory.py),
+                        each exporting its schemas AND handlers together;
+                        __init__.py assembles TOOLS + dispatch. Adding a domain is
+                        adding a file, never editing a shared list
 - backend/app/core/providers/  base.py (contract + error taxonomy),
                         google.py (native google-genai),
                         openai_provider.py (openai SDK on the Responses API)
-- backend/app/services/ tasks.py, journal.py, memory.py (fact rules + graph),
+- backend/app/services/ tasks.py, journal.py,
+                        memory.py (THE ONE WRITER: remember/correct/forget,
+                        plus the live-fact filter and the graph query),
                         insights.py (trace aggregates), retention.py (rollup + prune),
                         budget.py (monthly spend ceiling),
                         user_settings.py, errors.py —
@@ -77,8 +85,10 @@ incremental change.
 ## Current status
 
 **Built and live:** web chat (SSE) · Telegram channel · cross-session memory
-(pgvector/HNSW) · adaptive reasoning · tasks + journal with assistant tool-use ·
-multi-provider LLM + Settings · hosting with auto-deploy on push to `main`.
+(hybrid recall: pgvector/HNSW + Postgres full-text, fused by RRF; memory tools;
+one writer) · adaptive reasoning · tasks + journal with assistant tool-use ·
+multi-provider LLM + Settings · observability + monthly spend cap ·
+hosting with auto-deploy on push to `main`.
 
 **Not built yet:** anything in `app/jobs/` (no scheduled job), PWA/push, journal
 semantic search, database backups.
@@ -90,6 +100,7 @@ that owns it. Do not restate progress here; this file owns *conventions*.
 - **`docs/ARCHITECTURE.md`** — how the system works (diagrams, data model, config)
 - **`docs/ROADMAP.md`** — what is done, what is next, standing risks
 - **`docs/REQUEST-ANATOMY.md`** — measured latency and token cost per turn
+- **`docs/MEMORY.md`** — how memory decides what to keep and recall, in plain language
 - **`docs/DEPLOY.md`** — production runbook
 - **`docs/UI-AUDIT.md`** — known UI/UX gaps and the standard being applied
 - **`openspec/specs/`** — capability specs (source of truth for behavior)

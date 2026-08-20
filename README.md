@@ -12,6 +12,7 @@ FastAPI + Postgres/pgvector backend, React SPA, Telegram channel. Private projec
 | Deploy | [`docs/DEPLOY.md`](docs/DEPLOY.md) · plain-English tour: [`docs/DEPLOYMENT-EXPLAINED.md`](docs/DEPLOYMENT-EXPLAINED.md) |
 | Know what a message costs | [`docs/REQUEST-ANATOMY.md`](docs/REQUEST-ANATOMY.md) |
 | Read the Insights page | [`docs/INSIGHTS.md`](docs/INSIGHTS.md) |
+| Understand what it remembers about you | [`docs/MEMORY.md`](docs/MEMORY.md) |
 | Follow the conventions | [`AGENTS.md`](AGENTS.md) |
 
 ## Quick start

@@ -166,6 +166,10 @@ class FactOut(BaseModel):
     source: str  # "inferred" (the assistant concluded it) | "stated" (the user confirmed it)
     status: str  # "active" | "superseded" | "rejected"
     superseded_by: uuid.UUID | None
+    # Set when this fact was stored despite closely resembling another. It is a QUESTION,
+    # not a verdict: the alternative was deleting it, and distance cannot tell a
+    # restatement from a genuinely different fact (AI-901 vs AI-103 measure 0.098 apart).
+    possible_duplicate_of: uuid.UUID | None = None
     valid_from: dt.datetime
     created_at: dt.datetime
     updated_at: dt.datetime
@@ -180,6 +184,9 @@ class FactDetailOut(FactOut):
 
     source_session_id: uuid.UUID | None = None
     previous: FactOut | None = None
+    #: The fact this one is suspected of duplicating, resolved so the panel can show both
+    #: side by side — a flag pointing at an id the user cannot read is not reviewable.
+    resembles: FactOut | None = None
 
 
 class FactPatch(BaseModel):
@@ -319,9 +326,20 @@ class SpanOut(BaseModel):
     meta: dict | None
 
 
+class RecalledFactOut(BaseModel):
+    """A fact that was injected into one turn's prompt, resolved from the id on its span."""
+
+    id: uuid.UUID
+    fact: str
+    category: str
+
+
 class TurnDetail(BaseModel):
     turn: TurnOut
     spans: list[SpanOut]
+    #: What memory contributed to this turn. Empty when nothing was recalled — which after
+    #: hybrid recall is a real state, not a gap in the data.
+    recalled: list[RecalledFactOut] = []
 
 
 class InsightsOverview(BaseModel):

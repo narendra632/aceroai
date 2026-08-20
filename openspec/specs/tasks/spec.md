@@ -104,8 +104,6 @@ Callers that genuinely want a second copy MAY override this explicitly.
 
 <!-- folded in from polish-ui-to-product-standard (2026-08-17) -->
 
-## ADDED Requirements
-
 ### Requirement: A task is editable after it is created
 
 Every field a task stores SHALL be editable by its owner, so that correcting a task never
@@ -143,8 +141,6 @@ deletion can be undone.
 
 - **WHEN** a restore is requested for a task belonging to another user
 - **THEN** it is refused, exactly as reading that task would be
-
-## MODIFIED Requirements
 
 ### Requirement: Tasks are listed for their owner
 

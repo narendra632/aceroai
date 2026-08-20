@@ -204,12 +204,18 @@ async def handle_message(
         )
     yield "session", str(session_id)
 
-    # Semantic recall (best-effort): the most relevant facts about the user for
-    # this message, injected into context. A failure here never blocks the reply.
-    # This is a *network* call (embedding) plus a pgvector search — usually the second
-    # biggest cost after the model itself.
+    # Hybrid recall (best-effort): the facts that answer THIS message, injected into
+    # context. Two rankers — meaning and words — fused by rank; see core/recall.py. A
+    # failure here never blocks the reply. This is a *network* call (embedding) plus two
+    # local Postgres queries — usually the second biggest cost after the model itself.
     with tl.stage("memory_recall"):
         facts = await memory.recall(db, user, text)
+    fact_texts = [f.fact for f in facts]
+    # Tell the browser what was recalled, before a single token of the reply arrives.
+    # This change exists because a fact was silently missing and there was no way to
+    # notice; an answer you can check beats a claim you cannot.
+    if facts:
+        yield "recall", json.dumps([f.as_dict() for f in facts])
     with tl.stage("build_context"):
         context = await run_in_threadpool(composer.build_context, db, session_id, facts, user)
     shape = telemetry.describe_context(context)
@@ -272,9 +278,14 @@ async def handle_message(
                     result: dict = {"ok": False, "error": "arguments were not valid JSON"}
                 else:
                     with tl.stage(f"tool:{call['name']}"):
-                        result = await run_in_threadpool(
-                            tools.execute, db, user.id, call["name"], args
-                        )
+                        result = await tools.execute(db, user.id, call["name"], args)
+                    # A fact the assistant just wrote is handed to the extractor as already
+                    # known, so it does not read the same turn and propose the same sentence
+                    # back. Belt and braces: the service refuses a verbatim repeat anyway,
+                    # but keeping it out of the prompt is cheaper than catching it after.
+                    written = (result.get("result") or {}) if result.get("ok") else {}
+                    if isinstance(written, dict) and written.get("fact"):
+                        fact_texts.append(written["fact"])
                 messages.append(
                     {
                         "role": "tool",
@@ -340,7 +351,10 @@ async def handle_message(
         tokens_thinking=usage.get("tokens_thinking", "-"),
     )
     tl.emit()
-    tl.annotate("memory_recall", facts=len(facts))
+    # Ids, not text. Traces record shape and never message content, and an id is an
+    # identifier — so this makes "which facts did that turn use?" answerable on the
+    # Insights waterfall for any past turn, not only for the session still open.
+    tl.annotate("memory_recall", facts=len(facts), fact_ids=[str(f.id) for f in facts])
     tl.annotate("build_context", approx_tokens=shape["approx_tokens"], messages=shape["messages"])
 
     # AFTER the final SSE event, in its own session, failures swallowed. The reply is
@@ -366,4 +380,4 @@ async def handle_message(
     # duplicate. Reusing them costs nothing and keeps the extraction prompt a fixed size
     # instead of one that grows with everything ever learned.
     if settings.memory_extraction_enabled and reply:
-        _schedule_extraction(user.id, text, reply, facts, user_message_id)
+        _schedule_extraction(user.id, text, reply, fact_texts, user_message_id)

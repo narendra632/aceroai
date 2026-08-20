@@ -93,6 +93,15 @@ One row is drawn apart from the others: **first word appears**. Every other stag
 *duration*; that one is a *moment*, measured from the start. Drawing it as a bar beside the
 rest would double-count time and make the total look wrong.
 
+Underneath, when memory contributed anything, you also get **which facts it used** for that
+call. Not a count — the facts themselves. It is the same list the third control under a
+reply shows, except that one can only explain the conversation still open in front of you,
+and this one explains any call ever recorded.
+
+If a call shows no facts, that is an answer rather than a gap. Asking Acero to write some
+code has nothing to do with anything it knows about you, and it now recalls nothing at all
+on those turns instead of padding the prompt.
+
 ---
 
 ## How far back it goes

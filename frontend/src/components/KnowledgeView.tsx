@@ -487,6 +487,17 @@ export default function KnowledgeView({
                       <span>{Math.round(fact.confidence * 100)}% confident</span>
                       <span>·</span>
                       <span>learned {formatDay(fact.valid_from)}</span>
+                      {/* Kept rather than deleted, and said so. The previous behaviour was
+                          to drop a close-sounding fact silently, which is how a
+                          certification the user asked for by name disappeared. */}
+                      {fact.possible_duplicate_of && (
+                        <>
+                          <span>·</span>
+                          <span className="rounded-md bg-secondary px-1.5 py-0.5 text-secondary-foreground">
+                            may repeat another
+                          </span>
+                        </>
+                      )}
                     </span>
                   </span>
                   {fact.source === "stated" && (

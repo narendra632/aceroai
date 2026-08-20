@@ -56,8 +56,6 @@ entry the assistant creates SHALL record its origin as the assistant.
 
 <!-- folded in from polish-ui-to-product-standard (2026-08-17) -->
 
-## ADDED Requirements
-
 ### Requirement: A journal entry is editable after it is written
 
 Journal entries SHALL be editable by their author, so that a mistake can be corrected
@@ -97,8 +95,6 @@ entries accumulate — the journal being the one surface that grows without boun
 
 - **WHEN** entries are listed without a limit being reached
 - **THEN** results are returned in bounded pages rather than the entire history at once
-
-## MODIFIED Requirements
 
 ### Requirement: Journal entries are listed for their owner
 

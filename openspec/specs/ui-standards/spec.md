@@ -1,5 +1,10 @@
-## ADDED Requirements
+# ui-standards Specification
 
+## Purpose
+The rules every screen obeys: how controls behave, how state is shown, and
+what the interface owes a person using it on a phone at arm's length.
+
+## Requirements
 ### Requirement: Interactive controls are part of the application's design
 
 The interface SHALL present controls that follow the application's own visual language,

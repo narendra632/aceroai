@@ -9,7 +9,7 @@ import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { Waterfall } from "@/components/ui/waterfall";
 import { USD_TO_INR, formatINR, formatMs, formatUSD, localDayKey } from "@/lib/format";
 import * as api from "@/lib/api";
-import type { InsightsOverview, TurnRow, TurnSpan } from "@/lib/api";
+import type { InsightsOverview, TurnRow } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /* What the assistant costs, and where its time goes.
@@ -97,7 +97,7 @@ export default function InsightsView() {
   const [data, setData] = useState<InsightsOverview | null>(null);
   const [turns, setTurns] = useState<TurnRow[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [openTurn, setOpenTurn] = useState<{ turn: TurnRow; spans: TurnSpan[] } | null>(null);
+  const [openTurn, setOpenTurn] = useState<api.TurnDetail | null>(null);
   const [loadingTurn, setLoadingTurn] = useState(false);
   const [turnLimit, setTurnLimit] = useState(TURN_PAGE);
   const [loadingMoreTurns, setLoadingMoreTurns] = useState(false);
@@ -491,6 +491,27 @@ export default function InsightsView() {
               <div className="border-t border-border pt-4">
                 <Waterfall spans={openTurn.spans} totalMs={openTurn.turn.duration_ms} />
               </div>
+
+              {/* Shown only when memory contributed. After hybrid recall, recalling
+                  nothing is a normal outcome rather than a hole in the data — an empty
+                  list here would read as "we lost it". */}
+              {openTurn.recalled.length > 0 && (
+                <div className="border-t border-border pt-4">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    {openTurn.recalled.length === 1
+                      ? "1 memory used"
+                      : `${openTurn.recalled.length} memories used`}
+                  </p>
+                  <ul className="space-y-2">
+                    {openTurn.recalled.map((f) => (
+                      <li key={f.id} className="text-sm leading-snug">
+                        {f.fact}
+                        <span className="mt-0.5 block text-[11px] text-faint">{f.category}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </SheetContent>

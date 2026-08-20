@@ -108,8 +108,6 @@ look them up first.
 
 <!-- folded in from polish-ui-to-product-standard (2026-08-17) -->
 
-## MODIFIED Requirements
-
 ### Requirement: The assistant only ever sees the user's live data
 
 Every record the assistant can read or act on SHALL exclude anything the user has deleted,
