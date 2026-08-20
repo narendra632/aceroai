@@ -150,3 +150,43 @@ Diagnostic output SHALL NOT contain credentials.
 
 - **WHEN** the system makes a request whose URL embeds a secret
 - **THEN** that URL is not written to the logs
+
+### Requirement: Spend can be capped, not only observed
+
+The user SHALL be able to set a monthly ceiling on estimated spend, after which the system
+stops making model calls until the ceiling is raised or the month resets. Reporting a cost
+that cannot be stopped leaves a runaway loop visible only in hindsight.
+
+The ceiling is optional. With none set, behaviour is unchanged.
+
+#### Scenario: No ceiling is set
+
+- **WHEN** the user has never set a spend limit
+- **THEN** no request is ever refused on cost grounds
+
+#### Scenario: The month's spend reaches the ceiling
+
+- **WHEN** a message arrives and the month's estimated spend has reached the limit
+- **THEN** the message is refused before any model call is made
+- **AND** the user is told the limit, what has been spent, when it resets, and how to raise it
+
+#### Scenario: Everything billable counts toward the ceiling
+
+- **WHEN** spend is measured against the limit
+- **THEN** background work is included alongside visible replies, because the provider
+  bills for all of it
+
+#### Scenario: The user approaches the ceiling
+
+- **WHEN** spend passes a warning threshold below the limit
+- **THEN** the user is told before being stopped, not only afterwards
+
+#### Scenario: The user raises the limit
+
+- **WHEN** the user increases the limit while blocked
+- **THEN** messages are answered again immediately, with no restart
+
+#### Scenario: A refusal is not a failed model call
+
+- **WHEN** a message is refused for exceeding the limit
+- **THEN** no trace of a model call is recorded, because none was made
