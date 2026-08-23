@@ -4,7 +4,7 @@
  * read this file, and the checker runs in bare Node — so nothing here may import a React
  * component or the check would have to load the whole icon library to validate a name.
  *
- * `icons.tsx` maps these to actual components, and its `Record<IconName, ...>` type makes
+ * `icons.ts` maps these to actual components, and its `Record<IconName, ...>` type makes
  * a missing mapping a compile error rather than a blank square on the page.
  */
 
