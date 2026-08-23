@@ -93,3 +93,47 @@ def test_secrets_are_scrubbed_from_log_text_including_tracebacks():
     assert "sk-abc123secret" not in render("GET /v1?api_key=sk-abc123secret&x=1")
     # Redaction must not swallow the surrounding message.
     assert "poll failed" in rendered
+
+
+# --- .env.example must not silently override a code default ------------------------
+
+
+def test_env_example_does_not_pin_a_stale_default():
+    """`.env.example` is copied to make a real `.env`, so a numeric value pinned there
+    becomes the effective setting on every machine that copied it — permanently, and
+    invisibly, even after the code default moves.
+
+    Found live: the template pinned `MEMORY_RECALL_K=12` from before the default became
+    16, so the running app was still recalling 12 while every document said 16. The
+    Learn page's constants endpoint is what surfaced it, by showing the value actually
+    in force rather than the one in the source.
+
+    Strings are exempt — a URL, a region or a model name is genuinely environment-specific
+    and is *meant* to be set here.
+    """
+    import re
+    from pathlib import Path
+
+    from app.config import Settings
+
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    pinned = dict(
+        re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", example.read_text(encoding="utf-8"), re.M)
+    )
+
+    stale = []
+    for name, field in Settings.model_fields.items():
+        default = field.default
+        if default is None or isinstance(default, str):
+            continue
+        value = pinned.get(name.upper())
+        if value is None:
+            continue
+        if value.strip() != str(default):
+            stale.append(f"{name.upper()}={value.strip()} but the code default is {default}")
+
+    assert not stale, (
+        "`.env.example` pins a value that no longer matches the code default:\n  "
+        + "\n  ".join(stale)
+        + "\nComment it out so the default applies, or update it deliberately."
+    )

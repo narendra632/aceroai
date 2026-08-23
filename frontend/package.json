@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "lint": "oxlint && npm run check:learn",
+    "check:learn": "node --experimental-strip-types scripts/check-learn-content.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

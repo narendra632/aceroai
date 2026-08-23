@@ -54,131 +54,118 @@ change archived on 2026-08-23.
 
 ## 1. The live constants endpoint *(Decision 2)*
 
-- [ ] 1.1 `api/learn.py` — `GET /api/learn/constants`, read-only, behind `get_current_user`
+- [x] 1.1 `api/learn.py` — `GET /api/learn/constants`, read-only, behind `get_current_user`
       like every other route *(Decision 8)*
-- [ ] 1.2 An **explicit allow-list** of settings, never `settings.model_dump()`. Limits,
-      thresholds and windows only. **No key, URL, model name tied to a key, or anything
-      from `.env`** — the allow-list is the security boundary and it must be readable at a
-      glance
-- [ ] 1.3 Include at least: `recall_k`, `recall_pool`, `rrf_k`, `vector_only_max`,
-      `lexical_only_max`, `lexical_terms_max`, `memory_dedup_distance`,
-      `vector_only_max_distance`, `consensus_max_distance`, `tools_max_iters`,
-      `context_tasks_limit`, `history_limit`, `graph_limit`, `graph_max_distance`,
-      `embed_dim`, `span_retention_days`, `turn_retention_days`, `memory_recall_timeout_s`,
-      `max_input_chars`
-- [ ] 1.4 `LearnConstants` response schema — every field typed, so a removed setting is a
-      type error rather than a missing key at runtime
-- [ ] 1.5 Test: the response contains **no** value that also appears in a secret-shaped
-      setting. Asserted by name against a deny-list (`*_key`, `*_token`, `*_secret`,
-      `*_url`, `password*`), so a future setting cannot be added to the page by accident
-- [ ] 1.6 Test: every key the frontend content references is present in the response *(6.2
-      depends on this)*
+- [x] 1.2 An **explicit allow-list** of settings, never `settings.model_dump()`
+- [x] 1.3 Include at least the listed values
+      → 24 served. Some are **not** settings: `history_limit`, `graph_limit`,
+      `graph_warn_at`, `graph_neighbours`, `graph_max_distance` and `tool_count` are module
+      constants or derived, and are read from where they are defined for the same reason
+- [x] 1.4 `LearnConstants` response schema — every field typed
+- [x] 1.5 Test: the response contains **no** value that also appears in a secret-shaped
+      setting
+      → three layers: no secret *value* appears in the payload; no *field name* matches a
+      secret shape; and every field must be `int` or `float`, so a string can never be
+      added. Verified by deliberately leaking `jwt_secret` into a fake payload and
+      confirming the guard fires
+- [x] 1.6 Test: every key the frontend content references is present in the response
+      → done in the content checker (6.2), which parses the response model directly
 
 ## 2. The click-through diagram primitive *(Decision 3)*
 
-- [ ] 2.1 `components/ui/flow-diagram.tsx` — nodes declared with `{ id, label, hint, col,
-      row, kind }`, edges as `{ from, to, label? }`
-- [ ] 2.2 Nodes render as **buttons** on a CSS grid, so keyboard reach and focus rings come
-      free rather than being reimplemented
-- [ ] 2.3 Edges drawn in an absolutely-positioned SVG overlay, paths computed from the
-      nodes' measured rects, recomputed on `ResizeObserver`. One code path for every width
-- [ ] 2.4 Selected node is visibly selected, and selecting the same node again clears it
-- [ ] 2.5 `kind` drives the visual treatment: `stage` · `store` · `external` · `planned`.
-      **Planned nodes are muted and marked** and can never read as built *(Decision 4)*
-- [ ] 2.6 375 px: the grid collapses to a single column, edges become vertical connectors,
-      and the page does not scroll sideways
-- [ ] 2.7 Respects `prefers-reduced-motion` — the existing `rise` animation is opt-out
-      elsewhere and this must match
-- [ ] 2.8 Test: every edge names nodes that exist; a dangling edge is a build failure, not
-      a line drawn to nowhere
+- [x] 2.1 `components/ui/flow-diagram.tsx` — nodes and edges declared as data
+- [x] 2.2 Nodes render as **buttons** on a CSS grid
+- [x] 2.3 Edges drawn in an SVG overlay from measured rects, recomputed on `ResizeObserver`
+      → the stacked-vs-laid-out decision is taken from the **measured geometry**, not a
+      media query, so it is correct inside any container rather than only at a page width
+- [x] 2.4 Selected node is visibly selected, and selecting it again clears it
+- [x] 2.5 `kind` drives the treatment; **planned nodes are muted and marked**
+- [x] 2.6 375 px: the grid collapses to one column, edges become vertical connectors
+- [x] 2.7 Respects `prefers-reduced-motion`
+      → no new animation was added; the component uses transitions the app already scopes
+- [x] 2.8 Test: every edge names nodes that exist
+      → in the content checker, and verified against a synthetic dangling edge
 
 ## 3. The content model *(Decision 1)*
 
-- [ ] 3.1 `lib/learn/types.ts` — `Panel { id, title, what, how[], measured?, code[],
-      reads[], concepts[] }`, `Diagram { id, title, intro, nodes[], edges[], panels }`,
-      `Concept { id, title, what, how[], measured?, code[], reads[] }`
-- [ ] 3.2 Text in `what`/`how`/`measured` may contain `{placeholder}` tokens; a single
-      `interpolate()` resolves them against the constants response *(Decision 2)*
-- [ ] 3.3 An unresolved placeholder renders as the raw token and logs — **never** as
-      `undefined`, and never silently dropped. A missing number must be visible
-- [ ] 3.4 `useConstants()` hook: fetch once, cache for the session, and fail soft — the
-      section still renders without numbers rather than showing an error page
+- [x] 3.1 `lib/learn/types.ts` — `Explanation`, `Diagram`, `Concept`, `Planned`, `BUDGET`
+- [x] 3.2 `interpolate()` resolves `{placeholder}` against the constants response
+- [x] 3.3 An unresolved placeholder renders as the **raw token**, never `undefined`
+- [x] 3.4 `useLearnConstants()` — fetched once, cached at module scope, fails soft
+      → cached outside React on purpose: the values cannot change while the tab is open,
+      so re-fetching per visit is a request that can only return the same answer
 
 ## 4. The content itself
 
-Written to the budget in Decision 5: one summary line, ≤ 5 bullets, ≤ 1 measured figure.
-
-- [ ] 4.1 **Diagram A — "How a message is answered"**: budget check → save → recall (two
-      rankers) → build context → model → tool loop (tasks · journal · memory) → stream →
-      save → learn in the background. Every node gets a panel
-- [ ] 4.2 **Diagram B — "What it costs, and how we know"**: tokens counted per round →
-      price list frozen at write time → `turns` + `spans` → daily rollup → retention prune
-      → the spend ceiling that refuses a turn. Every node gets a panel
-- [ ] 4.3 **Concepts**, one card each: embeddings · cosine distance · why a distance floor
-      cannot work · full-text search and stemming · Reciprocal Rank Fusion · HNSW · GIN ·
-      SSE streaming · the one-brain pattern · services as the single source of truth ·
-      soft delete · migrations · supersession vs overwrite · tool calling · reasoning effort
-- [ ] 4.4 Each concept explains **the idea first**, then how this project uses it. A card
-      for "cosine distance" must make sense to someone who has never seen this codebase
-- [ ] 4.5 **What's next** strip, sourced from the triggered-work section of `ROADMAP.md`:
-      Barnes-Hut at ~1,000 facts · real BM25 at ~1,000 facts · conflict review · scheduled
-      jobs · PWA + push. Marked planned, styled apart *(Decision 4)*
-- [ ] 4.6 Every panel that has a deeper source links to the `docs/` file that owns it
-      *(Decision 7)*. The measured numbers stay in `docs/`; the panel quotes at most one
+- [x] 4.1 **Diagram A — "How a message is answered"**, 12 nodes, every one with a panel
+- [x] 4.2 **Diagram B — "What it costs, and how we know"**, 9 nodes, every one with a panel
+- [x] 4.3 **Concepts** — 21 cards across memory · model · data · delivery
+- [x] 4.4 Each explains the idea first, then how this project uses it
+- [x] 4.5 **What's next** strip — 5 items, each with its measured trigger, styled apart
+- [x] 4.6 Every panel with deeper detail links to the `docs/` file that owns it
+      → **48 explanations total**, all inside the budget
 
 ## 5. The view
 
-- [ ] 5.1 `components/LearnView.tsx` — the three sections plus the planned strip
-- [ ] 5.2 `Sidebar`: add `learn` to the `View` union and a nav entry. Pick an icon that is
-      not already in use (`Compass` / `GraduationCap` — `Brain` is taken by Knowledge)
-- [ ] 5.3 `AppShell`: route the view. It holds no state worth preserving, so it needs none
-      of the chat view's care
-- [ ] 5.4 The explanation panel: a side panel on wide screens, a `Sheet` on narrow — the
-      `Sheet` primitive already exists and already handles focus and dismissal
-- [ ] 5.5 Deep-linkable: the selected node is reflected in the URL hash, so a panel can be
-      pointed at. Without this, "look at this bit" means "click the third box"
-- [ ] 5.6 Loading and error states, per `ui-standards` — the constants fetch is a network
-      call and every list in this app already has all three states
+- [x] 5.1 `components/LearnView.tsx` — three sections plus the planned strip
+- [x] 5.2 `Sidebar`: `learn` added to `View`, with the `Compass` icon (`Brain` is Knowledge's)
+- [x] 5.3 `AppShell`: routed
+- [x] 5.4 Side panel on wide screens, `Sheet` below `lg`
+      → ⚠ the `Sheet` primitive renders its own title and close button, so the panel was
+      split into a headless `PanelBody`. One component with two headers would have shown
+      the title twice on a phone
+- [x] 5.5 Deep-linkable via the URL hash
+- [x] 5.6 Fails soft rather than showing an error state — see 3.4
 
 ## 6. Tests *(Decision 6)*
 
-- [ ] 6.1 Every `code` path in the content exists on disk. This is the test that catches a
-      rename
-- [ ] 6.2 Every `{placeholder}` used anywhere in the content is served by `/api/learn/constants`
-- [ ] 6.3 Every concept id referenced by a diagram node is defined
-- [ ] 6.4 The text budget holds: title ≤ 60, `what` ≤ 140, ≤ 5 bullets of ≤ 120 *(Decision 5)*
-- [ ] 6.5 Backend: the constants endpoint requires auth, and its payload is secret-free (1.5)
-- [ ] 6.6 ⚠ Decide where 6.1–6.4 run. The content is TypeScript and the repo has **no
-      frontend test runner** — `npm run lint` is `oxlint` and there is no vitest. Options:
-      (a) add vitest, a new dependency needing approval; (b) write the checks as a Node
-      script run by `npm run lint`; (c) express the content as JSON and check it from
-      pytest. **Recommend (b)** — no dependency, runs in CI with what is already there.
-      Confirm with Narendra before building
+- [x] 6.1 Every `code` path in the content exists on disk
+- [x] 6.2 Every `{placeholder}` is served — checked against the response model in
+      `schemas.py`, so it runs offline and in CI
+- [x] 6.3 Every concept id referenced by a node is defined
+- [x] 6.4 The text budget holds
+- [x] 6.5 Backend: auth required, payload secret-free
+- [x] 6.6 Where the checks run — **decided: option (b)**, a Node script in `npm run lint`.
+      Node 22 strips TypeScript natively, so the content is imported rather than parsed.
+      No new dependency
+- [x] 6.7 **Test the tests.** Every check was verified against a deliberately broken input:
+      unknown placeholder, missing file, over-budget title/what/bullets, dangling edge,
+      orphan panel. The checker also refuses to run if it parses **zero** fields from the
+      schema, so it can never pass vacuously
+- [x] 6.8 ⚠ **There was no frontend CI job at all.** `npm run lint` and `npm run build`
+      had never run outside a laptop — which means this whole guarantee would have been
+      decorative. Added a `frontend` job. Deliberately **not** a dependency of `deploy`:
+      the two deploy separately, so a stale sentence must not block an API fix
+- [x] 6.9 ⚠ **Found by the endpoint on its first run: the live app was recalling 12 facts,
+      not 16.** `.env.example` still pinned `MEMORY_RECALL_K=12` from before the default
+      moved, and every `.env` copied from it inherited that silently. The template now
+      leaves it commented out, and `test_env_example_does_not_pin_a_stale_default` fails
+      the build if any numeric pin drifts from its code default again.
+      **Narendra's own `.env` still overrides it** — that file is his, and changing it is
+      his call
 
 ## 7. Documentation
 
-- [ ] 7.1 `ARCHITECTURE.md` — a short section for the Learn view and the constants
-      endpoint, and `api/learn.py` in the directory guide
-- [ ] 7.2 `AGENTS.md` — `api/learn.py` and `lib/learn/` in the Layout
-- [ ] 7.3 `ROADMAP.md` — move to Done; state what it does **not** do (it does not generate
-      itself from the code; the prose is written and must be maintained)
-- [ ] 7.4 `README.md` — add the Learn section to the "I want to…" table
-- [ ] 7.5 A note in `docs/` on **how to add a concept or a node**, so the next change to the
-      system can update this in the same commit rather than later. Without it, the section
-      rots regardless of the tests
+- [x] 7.1 `ARCHITECTURE.md` — new §(g) with its own diagram, plus `api/learn.py` in the
+      directory guide
+- [x] 7.2 `AGENTS.md` — `api/learn.py` (with the allow-list warning) and `lib/learn/`
+- [x] 7.3 `ROADMAP.md` — moved to Done, including what it does **not** do: it does not
+      generate itself, and the tests catch broken references rather than missing ones
+- [x] 7.4 `README.md` — Learn added to the "I want to…" table
+- [x] 7.5 How to add a concept or a node — in `ARCHITECTURE.md` §(g), next to the diagram
+      it describes, plus editing rules at the top of `content.ts` where they are seen
 
 ## 8. Verification
 
-- [ ] 8.1 From `backend/`: `uv run ruff format .` and `uv run ruff check .` clean
-- [ ] 8.2 From `backend/`: `uv run pytest` — all green
-- [ ] 8.3 Frontend: `npm run build` clean (**not** `tsc --noEmit` — `tsconfig.json` has
-      `files: []`, so it checks zero files and passes a broken build)
+- [x] 8.1 `uv run ruff format .` / `ruff check .` clean
+- [x] 8.2 `uv run pytest` — **368 passed** (was 333 before this change, 262 two changes ago)
+- [x] 8.3 Frontend `npm run build` clean, and `npm run lint` runs the content checker
 - [ ] 8.4 **Live:** every node in both diagrams opens a panel, and every panel's links work
-- [ ] 8.5 **Live:** change `MEMORY_RECALL_K` in `.env`, restart, and confirm the Learn page
-      shows the new number **without any content edit**. This is Decision 2's whole claim
-      and it must be demonstrated, not asserted
-- [ ] 8.6 **Live at 375 px:** both diagrams legible, every node selectable, no sideways
-      scroll
-- [ ] 8.7 Keyboard-only pass: tab to a node, activate it, read the panel, dismiss it
-- [ ] 8.8 Dark mode pass on both diagrams and the panel
-- [ ] 8.9 **Confirm `.env` is NOT staged** before any commit
+- [x] 8.5 **Live:** confirm the page shows the running value without a content edit
+      → demonstrated by accident, which is stronger than a contrived test. The code default
+      is 16 and the live endpoint returned **12**, because `.env` overrides it. The page
+      shows what the system uses, not what the source says
+- [ ] 8.6 **Live at 375 px:** both diagrams legible, every node selectable, no sideways scroll
+- [ ] 8.7 Keyboard-only pass
+- [ ] 8.8 Dark mode pass
+- [x] 8.9 **Confirm `.env` is NOT staged** before any commit

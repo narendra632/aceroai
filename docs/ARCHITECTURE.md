@@ -124,7 +124,8 @@ by the assistant are validated identically.
 | `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` |
 | `app/api/journal.py` | `/api/journal` CRUD |
 | `app/api/settings.py` | `GET/PATCH /api/settings` + `GET /api/settings/budget` |
-| `app/api/memory.py` | Facts list/search/detail/edit/confirm/forget/restore · graph · stats |
+| `app/api/memory.py` | Facts list/search/detail/edit/confirm/forget/restore/not-duplicate · graph · stats |
+| `app/api/learn.py` | The tuning values the Learn section quotes. Read-only, derived from `settings`, allow-listed |
 | `app/api/insights.py` | `overview` · `turns` · `turns/{id}` — read-only |
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` |
@@ -447,6 +448,54 @@ Three properties this shape buys, each learned from a defect:
 - **A failure in recording can never reach the reply.** `telemetry.record` guarantees this
   at the call site, not inside `persist` — proven by a test that replaces `persist` with a
   function that always raises.
+
+### (g) Explaining itself
+
+The **Learn** section teaches how the system works from inside the product: two
+click-through diagrams and a set of concept cards. It holds no user data and writes
+nothing.
+
+The interesting part is not the page, it is how it avoids going stale. Two mechanisms:
+
+```mermaid
+flowchart LR
+    C["content<br/><small>typed data in the frontend</small>"] --> P["placeholders<br/><small>{recall_k}, never a literal</small>"]
+    S[("settings")] --> A["GET /api/learn/constants<br/><small>allow-listed, read-only</small>"]
+    A --> P
+    P --> UI["the panel the reader sees"]
+    C --> K["npm run lint<br/><small>content checker</small>"]
+    K --> V{"does every reference resolve?"}
+    V -->|no| F([build fails])
+    V -->|yes| OK([ship])
+```
+
+**Numbers are fetched, never written.** A sentence saying "recall sends at most 16 facts"
+is correct on the day and wrong later — not as a risk, as a certainty. It had already
+happened: `MEMORY_RECALL_K` moved 12 → 16, and the live server was *still* on 12 because
+`.env.example` pinned the old value and every copied `.env` inherited it. The endpoint
+surfaced that on its first run.
+
+**References are checked, not trusted.** `scripts/check-learn-content.mjs` runs as part of
+`npm run lint` and fails the build if a panel points at a file that no longer exists, uses
+a `{placeholder}` the endpoint does not serve, or references an undefined concept. It
+cannot check that prose is true — nothing can — but that is not where staleness gets in.
+
+Diagrams here are **hand-built SVG + CSS grid**, not Mermaid. Mermaid is right for a
+diagram in a document, which is why `docs/` uses it for all eleven; it is wrong for a
+component where every box is a button that opens a panel, must be keyboard-reachable, and
+has to reflow at 375 px.
+
+**Adding to it** — content lives in `frontend/src/lib/learn/content.ts`:
+
+- a **concept**: append to `CONCEPTS` with a unique `id` and a `group`
+- a **diagram step**: add to `nodes`, give it a `panels[id]` entry, and wire its `edges`
+- keep to the budget (one summary line, ≤ 5 bullets, ≤ 1 measured figure) — the checker
+  enforces it
+- never write a number the system decides; write `{the_setting}` and add it to
+  `LearnConstants` if it is not served yet
+
+The rule of thumb: **a change to the system updates this in the same commit**. The tests
+catch broken references, not missing ones.
 
 ## 5. Data model
 

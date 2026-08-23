@@ -13,6 +13,7 @@ FastAPI + Postgres/pgvector backend, React SPA, Telegram channel. Private projec
 | Know what a message costs | [`docs/REQUEST-ANATOMY.md`](docs/REQUEST-ANATOMY.md) |
 | Read the Insights page | [`docs/INSIGHTS.md`](docs/INSIGHTS.md) |
 | Understand what it remembers about you | [`docs/MEMORY.md`](docs/MEMORY.md) |
+| Learn how the whole thing works | the **Learn** section in the app (diagrams you can click into) |
 | Follow the conventions | [`AGENTS.md`](AGENTS.md) |
 
 ## Quick start

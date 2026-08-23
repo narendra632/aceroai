@@ -97,6 +97,31 @@
   also does not re-rank *within* keyword matches — `ts_rank` is not BM25 and has no IDF,
   which is worth revisiting in the thousands of facts, not now.
 
+- **A Learn section, and diagrams that cannot quietly rot** — everything learned building
+  this lived in `docs/`, written for whoever maintains the code and unreachable from the
+  product. The app now explains itself: two diagrams you click into (how a message is
+  answered; what it costs and how we know) and concept cards for the ideas underneath —
+  embeddings, rank fusion, streaming, soft delete, one brain.
+
+  It is built to stay accurate rather than to be accurate once. **Every number is fetched**
+  from a read-only endpoint that reads the live configuration, so a tuned setting changes
+  the lesson instead of making it wrong. **Every reference is checked** — a panel pointing
+  at a file that no longer exists fails the build. That mechanism earned itself
+  immediately: the endpoint revealed that the running app was recalling **12** facts, not
+  the 16 the code defaults to, because `.env.example` still pinned the old value and every
+  copied `.env` inherited it silently.
+
+  Two other things fell out of it. An audit of all eleven Mermaid diagrams found **four
+  defects**, the worst being a node id declared twice — Mermaid keeps one label and drops
+  the other, so the diagram rendered *wrong* rather than failing. All eleven are now checked
+  structurally on every CI run. And the **frontend had no CI job at all**, which meant
+  `npm run build` — the only thing that typechecks this project — had never run outside a
+  laptop. It does now.
+
+  **What it does *not* do:** it does not generate itself from the code. The prose is written
+  by hand and must be maintained by hand; the tests catch broken references, not missing
+  ones. A change to the system updates the Learn content in the same commit, or not at all.
+
 ## Now
 
 *(Nothing in flight — the next change on the list below starts when Narendra says so.)*

@@ -635,3 +635,43 @@ export async function getTurn(id: string): Promise<TurnDetail> {
   if (!r.ok) throw new Error("Could not load that call");
   return r.json();
 }
+
+// --- learn (read-only, derived from settings) ---
+
+/** The tuning values the Learn section quotes.
+ *
+ * Fetched rather than hardcoded, because a number written into a sentence is correct on
+ * the day and wrong later. `memory_recall_k` moved 12 -> 16 in a single commit; anything
+ * that had typed "12" would already have been teaching something false. */
+export type LearnConstants = {
+  recall_k: number;
+  recall_pool: number;
+  rrf_k: number;
+  vector_only_max: number;
+  lexical_only_max: number;
+  lexical_terms_max: number;
+  lexical_max_df: number;
+  lexical_rare_df: number;
+  vector_only_max_distance: number;
+  consensus_max_distance: number;
+  memory_recall_timeout_s: number;
+  memory_dedup_distance: number;
+  embed_dim: number;
+  history_limit: number;
+  context_tasks_limit: number;
+  tools_max_iters: number;
+  tool_count: number;
+  max_input_chars: number;
+  graph_limit: number;
+  graph_warn_at: number;
+  graph_neighbours: number;
+  graph_max_distance: number;
+  span_retention_days: number;
+  turn_retention_days: number;
+};
+
+export async function getLearnConstants(): Promise<LearnConstants> {
+  const r = await req("/api/learn/constants");
+  if (!r.ok) throw new Error("Could not load the current settings");
+  return r.json();
+}

@@ -358,3 +358,49 @@ class InsightsOverview(BaseModel):
     data_start: dt.datetime | None
     # Cost is an estimate; this names the price list behind it.
     pricing_version: str
+
+
+class LearnConstants(BaseModel):
+    """The tuning values the Learn section is allowed to quote.
+
+    Typed field by field on purpose. A settings key that is removed becomes a **type
+    error at import**, not a missing key discovered by a reader seeing `{recall_k}` on
+    the page. And an explicit model is what makes the allow-list in `api/learn.py`
+    readable at a glance — which matters, because that allow-list is the only thing
+    standing between this endpoint and the database URL, the JWT secret, and both
+    provider keys.
+    """
+
+    # recall — how a message finds the facts that answer it
+    recall_k: int
+    recall_pool: int
+    rrf_k: int
+    vector_only_max: int
+    lexical_only_max: int
+    lexical_terms_max: int
+    lexical_max_df: float
+    lexical_rare_df: float
+    vector_only_max_distance: float
+    consensus_max_distance: float
+    memory_recall_timeout_s: float
+
+    # memory — how a fact is judged on the way in
+    memory_dedup_distance: float
+    embed_dim: int
+
+    # the prompt — what the model is shown each turn
+    history_limit: int
+    context_tasks_limit: int
+    tools_max_iters: int
+    tool_count: int
+    max_input_chars: int
+
+    # the knowledge map
+    graph_limit: int
+    graph_warn_at: int
+    graph_neighbours: int
+    graph_max_distance: float
+
+    # observability — how long the record is kept
+    span_retention_days: int
+    turn_retention_days: int

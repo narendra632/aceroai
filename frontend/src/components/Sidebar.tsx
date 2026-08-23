@@ -4,6 +4,7 @@ import {
   BookOpen,
   Brain,
   Check,
+  Compass,
   ListTodo,
   LogOut,
   MessageSquare,
@@ -23,7 +24,14 @@ import { useTheme } from "@/hooks/useTheme";
 import type { Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export type View = "chat" | "tasks" | "journal" | "knowledge" | "insights" | "settings";
+export type View =
+  | "chat"
+  | "tasks"
+  | "journal"
+  | "knowledge"
+  | "insights"
+  | "learn"
+  | "settings";
 
 const NAV: { view: View; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { view: "chat", label: "Chat", icon: MessageSquare },
@@ -31,6 +39,9 @@ const NAV: { view: View; label: string; icon: ComponentType<{ className?: string
   { view: "journal", label: "Journal", icon: BookOpen },
   { view: "knowledge", label: "Knowledge", icon: Brain },
   { view: "insights", label: "Insights", icon: Activity },
+  // Not `Brain` — Knowledge already owns that, and two identical icons in one nav is a
+  // worse problem than a slightly less obvious metaphor.
+  { view: "learn", label: "Learn", icon: Compass },
   { view: "settings", label: "Settings", icon: SettingsIcon },
 ];
 

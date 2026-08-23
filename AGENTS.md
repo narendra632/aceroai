@@ -73,12 +73,16 @@ incremental change.
                         user_settings.py, errors.py —
                         the single source of truth for the API *and* the tools
 - backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal, settings,
-                        memory, insights)
+                        memory, insights, learn). learn.py is read-only and serves an
+                        ALLOW-LISTED set of tuning values — never settings.model_dump()
 - backend/app/channels/ telegram.py long-poller
 - backend/app/jobs/     empty package — no scheduled job built yet
                         (retention currently sweeps from telemetry.record instead)
 - backend/app/db/       models.py (10 tables), session.py
 - frontend/src/         Vite SPA — components/, hooks/, lib/api.ts
+- frontend/src/lib/learn/  the Learn section's content as typed data. Numbers are
+                        written as {placeholders} and resolved from /api/learn/constants;
+                        `npm run lint` fails if a reference does not resolve
 - docs/SOUL.md          assistant persona (read by composer every turn)
 - openspec/             specs (source of truth) + changes
 

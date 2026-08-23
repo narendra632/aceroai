@@ -10,6 +10,7 @@ import Composer, { type ComposerHandle } from "./Composer";
 import JournalView from "./JournalView";
 import InsightsView from "./InsightsView";
 import KnowledgeView from "./KnowledgeView";
+import LearnView from "./LearnView";
 import MessageList from "./MessageList";
 import type { UIMessage } from "./MessageBubble";
 import SettingsView from "./SettingsView";
@@ -287,6 +288,7 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     journal: "Journal",
     knowledge: "Knowledge",
     insights: "Insights",
+    learn: "Learn",
     settings: "Settings",
   };
 
@@ -378,6 +380,10 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
           // `openSession` is exactly what a fact's provenance link needs: switch to chat
           // and load the conversation the belief came from.
           <KnowledgeView onOpenSession={(id) => void openSession(id)} />
+        ) : view === "learn" ? (
+          // Holds no state worth preserving — it describes the system rather than the
+          // user — so unlike chat it needs none of the care above.
+          <LearnView />
         ) : (
           <SettingsView />
         )}

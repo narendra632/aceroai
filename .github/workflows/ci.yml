@@ -35,6 +35,31 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest
 
+  # The frontend had NO CI job at all until the Learn section needed one. That meant
+  # `npm run build` — the only thing that actually typechecks this project, since
+  # tsconfig.json sets `files: []` and so `tsc --noEmit` checks zero files — had never
+  # run outside a laptop. `npm run lint` also runs the Learn content checker, which is
+  # what keeps the in-app explanations from quietly drifting away from the code.
+  #
+  # Deliberately NOT a dependency of `deploy`: the backend and the frontend deploy
+  # separately (Vercel builds its own), so a stale sentence on a docs page must not
+  # block an API fix from shipping.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22        # the Learn content check imports .ts directly
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
   # Stage 2 CD: only after `backend` (tests) is green, and only for a real push to
   # main — never on PRs. Builds the image on GitHub (the 1 GB VM can't build well),
   # pushes it to GHCR, then SSHes to the VM to pull + restart. Migrations run inside
