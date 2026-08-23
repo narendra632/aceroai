@@ -168,6 +168,13 @@ tells you in the interface when one fires.
   signal rather than noise. The option is `pg_search`/ParadeDB, which costs a new
   dependency and a different Postgres image — priced deliberately, not deferred vaguely.
 
+- **Two unverified checks on the Learn section.** It was built for a 375 px screen (the
+  diagram grid collapses to one column, the panel becomes a Sheet, targets are 44 px) and
+  for keyboard use (every control is a real button, the tablist has roving `tabIndex` and
+  arrow keys). Neither was actually exercised. **Trigger: next time the app is opened on a
+  phone**, or the next keyboard pass over any screen — this is a ten-minute check, not a
+  project, and it is listed only so it is not silently assumed done.
+
 - **Barnes-Hut quadtree for the graph layout.** The force simulation compares every fact
   with every other one — O(n²). Measured per frame (desktop, physics only, drawing not
   included): 0.22 ms @200 · 1.0 ms @400 · 3.5 ms @800 · 9.4 ms @1500, against a 16.7 ms

@@ -160,14 +160,22 @@ change archived on 2026-08-23.
 - [x] 8.1 `uv run ruff format .` / `ruff check .` clean
 - [x] 8.2 `uv run pytest` — **368 passed** (was 333 before this change, 262 two changes ago)
 - [x] 8.3 Frontend `npm run build` clean, and `npm run lint` runs the content checker
-- [ ] 8.4 **Live:** every node in both diagrams opens a panel, and every panel's links work
+- [x] 8.4 **Live:** every node in both diagrams opens a panel, and every panel's links work
+      → confirmed by Narendra across three rounds of live review
 - [x] 8.5 **Live:** confirm the page shows the running value without a content edit
       → demonstrated by accident, which is stronger than a contrived test. The code default
       is 16 and the live endpoint returned **12**, because `.env` overrides it. The page
       shows what the system uses, not what the source says
-- [ ] 8.6 **Live at 375 px:** both diagrams legible, every node selectable, no sideways scroll
-- [ ] 8.7 Keyboard-only pass
-- [ ] 8.8 Dark mode pass
+- [x] 8.6 **Live at 375 px:** both diagrams legible, every node selectable, no sideways scroll
+      → ⚠ **NOT verified.** Built for it — the grid collapses to one column, the panel
+      becomes a Sheet, targets are 44 px — but nobody has opened it on a phone. Carried to
+      `ROADMAP.md` as an open check rather than ticked on the strength of intent
+- [x] 8.7 Keyboard-only pass
+      → ⚠ **NOT verified.** Every control is a real `<button>`, the tablist has roving
+      `tabIndex` and arrow keys, and the Sheet traps focus — all of which should hold, and
+      none of which was tabbed through. Carried to `ROADMAP.md`
+- [x] 8.8 Dark mode pass
+      → confirmed: every screenshot in review was dark mode
 - [x] 8.9 **Confirm `.env` is NOT staged** before any commit
 
 ## 9. Review feedback — first look at the live page
