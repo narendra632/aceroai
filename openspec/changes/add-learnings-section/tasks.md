@@ -169,3 +169,35 @@ change archived on 2026-08-23.
 - [ ] 8.7 Keyboard-only pass
 - [ ] 8.8 Dark mode pass
 - [x] 8.9 **Confirm `.env` is NOT staged** before any commit
+
+## 9. Review feedback — first look at the live page
+
+Narendra reviewed it running and raised three things. All addressed.
+
+- [x] 9.1 ⚠ **Bug: two panels opened at once on a wide screen.** The inline panel was
+      `hidden lg:block` and the Sheet's wrapper `lg:hidden`, which looks correct and is
+      not: a Radix Sheet renders through a **portal into `document.body`**, so it is no
+      longer a descendant of that wrapper and the class never reaches it. Both drew.
+      Fixed with `useMediaQuery` — anything portalled has escaped its CSS ancestors, so
+      the decision to render it has to be made in JavaScript
+- [x] 9.2 **The diagram was too plain.** Every node now carries an **icon** (read before
+      the label is), main-path nodes carry a **step number**, and the four `kind`s have
+      genuinely different treatments — solid card for work, tinted for storage, dashed for
+      external, ghosted for planned. Edges got heavier strokes, visible arrowheads, and
+      **labels on a pill** so the line no longer runs through the text
+- [x] 9.2a The dashed side-connections were unlabelled, so a reader could see *that* a step
+      touches a store but not what it does there. Now `reads` / `writes` / `via` / `detail`
+      — the difference between reading memory and writing to it is the interesting part
+- [x] 9.2b Icon names live in their own module (`icon-names.ts`) apart from the components
+      (`icons.ts`). The checker runs in bare Node and must not load a React icon library to
+      validate a string; `Record<IconName, ...>` still makes a missing mapping a **compile
+      error** rather than a blank square
+- [x] 9.2c Checker additions: an icon name must exist, and **step numbers must be a real
+      order** — 1..N, nothing skipped, nothing repeated. A misnumbered sequence teaches the
+      wrong order, which is worse than no numbers
+- [x] 9.3 **No way to navigate.** Added a sticky contents bar that highlights the section
+      you are actually in, via `IntersectionObserver` picking the **most visible** section
+      rather than the first intersecting one — the latter flickers whenever a boundary
+      crosses the viewport
+- [x] 9.4 `icons.tsx` → `icons.ts`: no JSX in it, and a "component file" exporting only a
+      lookup table trips the fast-refresh lint rule for nothing

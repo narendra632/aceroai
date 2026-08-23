@@ -24,6 +24,10 @@ const REPO = resolve(HERE, "..", "..");
 
 const { DIAGRAMS, CONCEPTS, PLANNED } = await import("../src/lib/learn/content.ts");
 const { BUDGET } = await import("../src/lib/learn/types.ts");
+// Icon NAMES only. `icons.tsx` maps them to components and pulls in lucide-react; this
+// check must stay importable from bare Node, so the names live in their own module.
+const { ICON_NAMES } = await import("../src/lib/learn/icon-names.ts");
+const ICONS = new Set(ICON_NAMES);
 
 const problems = [];
 const fail = (where, message) => problems.push(`${where}: ${message}`);
@@ -119,6 +123,24 @@ for (const diagram of DIAGRAMS) {
       fail(`${diagram.id}/${node.id}`, `node has no panel`);
     }
     checkText(`${diagram.id}/${node.id}`, `${node.label} ${node.hint ?? ""}`);
+    // A typo here renders as an empty square, which reads as a loading bug rather than a
+    // mistake — so it fails the build instead.
+    if (node.icon && !ICONS.has(node.icon)) {
+      fail(`${diagram.id}/${node.id}`, `icon "${node.icon}" is not in icon-names.ts`);
+    }
+  }
+
+  // Step numbers are the reader's sense of order, so they must actually be an order:
+  // 1..N with nothing skipped and nothing repeated.
+  const steps = diagram.nodes
+    .filter((n) => n.step !== undefined)
+    .map((n) => n.step)
+    .sort((a, b) => a - b);
+  for (const [i, step] of steps.entries()) {
+    if (step !== i + 1) {
+      fail(`${diagram.id}`, `step numbers are ${steps.join(", ")} — expected 1..${steps.length}`);
+      break;
+    }
   }
   for (const id of Object.keys(diagram.panels)) {
     if (!nodeIds.has(id)) {

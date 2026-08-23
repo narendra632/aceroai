@@ -11,6 +11,8 @@
  * be kept honest by whoever edits it; references can be checked.
  */
 
+import type { IconName } from "./icon-names";
+
 /** A number the running system decides. Written as `{recall_k}` in any text field and
  *  resolved at view time from `GET /api/learn/constants` — never hardcoded, because a
  *  quoted number that has drifted teaches something false with the authority of a fact. */
@@ -38,6 +40,12 @@ export type FlowNodeSpec = {
   id: string;
   label: string;
   hint?: string;
+  /** Read before the label is. Names come from `icon-names.ts`, which the checker
+   *  validates against — a typo would otherwise render as an empty square. */
+  icon?: IconName;
+  /** Position on the main path. Omitted for a store sitting off to the side: numbering
+   *  those would imply a sequence that does not exist. */
+  step?: number;
   col: number;
   row: number;
   kind?: "stage" | "store" | "external" | "planned";
