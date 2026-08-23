@@ -43,7 +43,9 @@ raw ids beyond task ids, or any provider credentials.
 ```mermaid
 flowchart TD
     A["POST /api/chat"] --> B["1 · auth<br/><small>decode bearer token → user · ~1 ms</small>"]
-    B --> C["2 · persist_user<br/><small>INSERT message (+session) · ~20-40 ms</small>"]
+    B --> BG{"2 · monthly spend ceiling<br/><small>refuse before anything is written</small>"}
+    BG -->|over| STOP([SSE 'error' — no turn recorded])
+    BG -->|under| C["3 · persist_user<br/><small>INSERT message (+session) · ~20-40 ms</small>"]
     C -.->|SSE 'session'| U1([UI has a session id])
     C --> D["3 · memory_recall<br/><small>embed + vector search + keyword search, fused</small>"]
     D -.->|SSE 'recall'| U2([UI can show which facts were used])
@@ -54,7 +56,7 @@ flowchart TD
     G -->|tool calls| H1["6 · tool:name<br/><small>via services/ · ~7-20 ms</small>"]
     H1 --> H2["7 · llm_round2<br/><small>results → final answer · ~1-2 s</small>"]
     H2 --> I
-    I -.->|SSE 'done'| U2([reply complete])
+    I -.->|SSE 'done'| U3([reply complete])
     I --> J["9 · background: extract facts → embed → store<br/><small>after 'done' — never felt</small>"]
 
     style D fill:#c15f3c,stroke:#8a3f26,color:#fff

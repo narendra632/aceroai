@@ -33,7 +33,7 @@ flowchart TB
     end
 
     subgraph api ["FastAPI — backend/app/main.py"]
-        ROUTES["api/<br/><small>auth · chat SSE · tasks · journal · settings</small>"]
+        ROUTES["api/<br/><small>auth · chat SSE · tasks · journal<br/>memory · insights · settings · learn</small>"]
         CHAN["channels/telegram.py<br/><small>thin adapter, no chat logic</small>"]
     end
 
@@ -42,7 +42,8 @@ flowchart TB
     subgraph brainparts ["core/"]
         COMP["composer<br/><small>persona · date · tasks · facts · history</small>"]
         TOOLS["tools<br/><small>bounded tool-use loop</small>"]
-        MEM["memory<br/><small>extract · embed · recall</small>"]
+        MEM["memory<br/><small>extract · embed · store</small>"]
+        REC["recall<br/><small>vector + keyword, fused</small>"]
         TEL["telemetry<br/><small>per-turn timings</small>"]
     end
 
@@ -56,8 +57,10 @@ flowchart TB
     SPA --> ROUTES --> BRAIN
     TG --> CHAN --> BRAIN
     BRAIN --> COMP & TOOLS & MEM & TEL
+    MEM --> REC
     BRAIN --> LLM --> GOOG & OAI
     TOOLS --> SVC
+    MEM --> SVC
     ROUTES --> SVC
     SVC --> DB
     COMP --> DB
@@ -176,11 +179,17 @@ sequenceDiagram
 
     U->>R: POST /api/chat (Bearer token)
     R->>H: handle_message(user, text, channel)
+    H->>D: month-to-date spend vs the ceiling
+    alt over the monthly limit
+        H-->>U: SSE "error" — nothing is persisted, no provider call
+    end
     H->>D: persist user message (+session if new)
     H-->>U: SSE "session"
     Note over H,M: ~340 ms prod · ~1.8 s local
-    H->>M: recall(text) — embed, then two rankers fused by rank
-    M->>D: embedding <=> query, top-K active facts
+    H->>M: recall(text)
+    M->>D: term frequencies, then vector + keyword search
+    M-->>H: facts, fused by rank
+    H-->>U: SSE "recall" — the facts this reply will use
     H->>C: build_context(...)
     C->>D: open tasks + last 20 messages
     C-->>H: persona · now · tasks · facts · history
@@ -270,7 +279,7 @@ The extractor may add and supersede but **never delete**. Superseding preserves 
 replaced; deletion in an unattended loop with nobody watching is neither observed nor
 prompted.
 
-Reading is two rankers fused by rank — see **(e) Recall** below.
+Reading is two rankers fused by rank — see **(d) Recall** below.
 
 Recall is **best-effort and time-bounded** (`MEMORY_RECALL_TIMEOUT_S`, 4 s). If embedding
 stalls, the turn proceeds without recalled facts rather than making the user wait — this
@@ -296,7 +305,7 @@ a deliberate re-embed migration of every row.
 > next contradicting statement rather than persisting as truth. Worth revisiting if
 > regeneration ever becomes a common action.
 
-### (e) Recall: two rankers
+### (d) Recall: two rankers
 
 Recall used to be one query — the `MEMORY_RECALL_K` nearest facts by cosine distance — and
 it returned exactly that many facts on *every* message, including `write a python function
@@ -386,7 +395,7 @@ reads 0.0 ms on a short query: the GIN index turns it into a dictionary lookup r
 a comparison against every fact. Against a 300-500 ms embedding round trip inside a 4 s
 recall budget, the second ranker is rounding error even at its worst.
 
-### (d) The knowledge map
+### (e) The knowledge map
 
 The Knowledge page draws stored facts as a graph. Edges are not stored — they are computed
 from the same vectors recall already uses, so the map cannot drift out of step with what
@@ -411,7 +420,7 @@ the cap the interface says so rather than quietly degrading.
 Edges are scoped to the drawn nodes at *both* ends. Without that, capping the node list
 produces edges pointing at facts that are not on screen.
 
-### (e) Trace capture
+### (f) Trace capture
 
 Every provider call — including the ones nobody sees — records what it cost and where its
 time went. Writing happens **after** the reply, and cannot affect it.

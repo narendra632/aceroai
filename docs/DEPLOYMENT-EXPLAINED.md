@@ -131,9 +131,10 @@ SSH — no long-lived password is stored on the box.
 ## The full journey of one chat message
 You type in Vercel → it sends an HTTPS request to `aceroai.duckdns.org/api/chat` →
 DNS routes it to the VM's IP → Caddy decrypts and forwards to `api:8000` → FastAPI
-checks your token, saves the message to Postgres, recalls your memory (vector
-search), calls **your chosen provider** (Gemini or OpenAI — a per-user setting), and
-streams the reply back → saved to the DB → back through Caddy → your browser.
+checks your token, checks the month's spend against your ceiling, saves the message to
+Postgres, recalls your memory (**two searches — meaning and wording — fused**), calls
+**your chosen provider** (Gemini or OpenAI — a per-user setting), and streams the reply
+back → saved to the DB → back through Caddy → your browser.
 Measured end-to-end in production: **~1.9 s**, first word at ~1.35 s.
 
 ## What it costs

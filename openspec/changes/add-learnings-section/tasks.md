@@ -8,26 +8,49 @@ wrong. A task that cannot be done as written is annotated, never quietly ticked.
 Four defects found by auditing all eleven Mermaid diagrams. Three were introduced by the
 change archived on 2026-08-23.
 
-- [ ] 0.1 `ARCHITECTURE.md` — sections run **(a) (b) (c) (e) (d) (e)**. Re-letter so the
+- [x] 0.1 `ARCHITECTURE.md` — sections run **(a) (b) (c) (e) (d) (e)**. Re-letter so the
       recall section is `(d)`, the knowledge map `(e)`, trace capture `(f)`, and move the
       recall section after the memory section it belongs with
-- [ ] 0.2 `ARCHITECTURE.md` §2 — the `api/` node omits the **memory** and **insights**
+      → the recall section was already positioned correctly; only the letters were wrong.
+      Now (a)…(f) in order, and the cross-reference from §(c) points at (d)
+- [x] 0.2 `ARCHITECTURE.md` §2 — the `api/` node omits the **memory** and **insights**
       routers (7 routers are registered in `main.py`, 5 are drawn). The `core/` box omits
       **recall**, which is now its own module
-- [ ] 0.3 `ARCHITECTURE.md` §4a sequence — add the **budget check**, which runs *before*
+      → all routers drawn (including `learn`, added by this change), and `recall` is its
+      own node with an edge from `memory`. `memory → services` added too: the one writer
+      lives in `services/`, and the old diagram showed only tools reaching it
+- [x] 0.3 `ARCHITECTURE.md` §4a sequence — add the **budget check**, which runs *before*
       the user message is persisted, and the **`recall` SSE event**. The diagram currently
       shows a turn that cannot be refused and a recall the browser never hears about
-- [ ] 0.4 `REQUEST-ANATOMY.md` — node id **`U2` is declared twice** with different labels
+      → budget check drawn as an `alt` that ends the turn with an `error` event and no
+      persistence; recall now shows the term-frequency probe, both searches, and the
+      `recall` event going back to the browser
+- [x] 0.4 `REQUEST-ANATOMY.md` — node id **`U2` is declared twice** with different labels
       (`UI can show which facts were used` and `reply complete`). Mermaid keeps one and
       silently drops the other. Rename the second to `U3`
-- [ ] 0.5 `DEPLOYMENT-EXPLAINED.md` — the prose still says recall is a "vector search";
+      → renamed, and the budget check added here too for the same reason as 0.3
+- [x] 0.5 `DEPLOYMENT-EXPLAINED.md` — the prose still says recall is a "vector search";
       it is two searches now. Diagram itself is correct
-- [ ] 0.6 Record what the audit found **correct**, so it is not re-checked later: four
+- [x] 0.6 Record what the audit found **correct**, so it is not re-checked later: four
       containers matches `docker-compose.prod.yml`; the CI→GHCR→SSH→migrate→api chain
       matches `ci.yml`; the tool-use loop, memory write flow and knowledge-graph flow are
       accurate; all ten tables in the ER diagram match `db/models.py`
-- [ ] 0.7 Render every repaired diagram and confirm it parses — a Mermaid syntax error
+- [x] 0.7 Render every repaired diagram and confirm it parses — a Mermaid syntax error
       shows as a blank block on GitHub, which is exactly how 0.4 survived
+      → done better than "render and look". `tests/test_docs_diagrams.py` checks all
+      eleven structurally on every CI run: duplicate node ids with different labels, edges
+      to undeclared nodes, unbalanced brackets, sequence messages to undeclared
+      participants, fences that are not diagrams, and the section lettering from 0.1.
+      **45 checks, all passing.** No `mermaid-cli` — it would pull Puppeteer and a headless
+      Chromium into CI to catch strictly less
+- [x] 0.7a **Test the tests.** Each defect was re-introduced synthetically to prove the
+      guard fires. ⚠ One did **not**: `test_every_edge_connects_declared_nodes` was passing
+      **vacuously** — the edge pattern expects an id where `A["label"] --> B` has a `]`, so
+      it matched zero edges and asserted nothing. Fixed by stripping labels before matching.
+      A guard nobody has tried to trip is not a guard
+- [x] 0.7b ⚠ The bracket-balance check failed on a **correct** ER diagram: `||--o{` is
+      crow's-foot cardinality, not braces. Cardinality is stripped before counting.
+      Recorded because the first instinct was to look at the diagram, not the checker
 
 ## 1. The live constants endpoint *(Decision 2)*
 
