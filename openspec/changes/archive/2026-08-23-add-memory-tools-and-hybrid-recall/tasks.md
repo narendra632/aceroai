@@ -276,4 +276,6 @@ message now matches the fact by word as well as by meaning. Worth revisiting if 
       `test_the_exact_same_sentence_is_not_stored_twice` rather than by the live run.)
 - [x] 8.9 Re-run the recall measurement and confirm the numbers match the design's table
       → exact match after the 4.5c fix: 7 / 6 / 8 / 5 / 4 / 4 / **0**
-- [ ] 8.10 **Confirm `.env` is NOT staged** before any commit
+- [x] 8.10 **Confirm `.env` is NOT staged** before any commit
+      → checked before the commit and re-checked after: `.env` is gitignored, absent from
+      commit `378479f`, and not tracked anywhere in the repository
