@@ -201,3 +201,19 @@ Narendra reviewed it running and raised three things. All addressed.
       crosses the viewport
 - [x] 9.4 `icons.tsx` → `icons.ts`: no JSX in it, and a "component file" exporting only a
       lookup table trips the fast-refresh lint rule for nothing
+
+## 10. Second review — sections became tabs
+
+- [x] 10.1 The four sections were one long scroll with a jump-to bar. They are four
+      **separate questions**, so they are now four tabs: only one renders at a time, and
+      switching returns to the top. The scroll-spy went with it — there is nothing left to
+      spy on, and "where am I" stops being a question the interface has to answer
+- [x] 10.2 The URL carries both: `#tab` or `#tab/selection`, so a specific explanation is
+      still linkable. A **bare id is still accepted** on the way in, so links written before
+      tabs existed keep working — but never written, because resolving one relies on ids
+      being unique across tabs, which is true today by coincidence rather than by rule
+- [x] 10.3 A concept chip inside a diagram panel now **switches to the Concepts tab** with
+      that idea open. Before, it set a selection the visible tab could not render
+- [x] 10.4 Proper `tablist` semantics — `role`, `aria-selected`, `aria-controls`, roving
+      `tabIndex`, and left/right arrow keys moving between tabs with focus following. These
+      are tabs, so they should behave like tabs for someone not using a mouse
