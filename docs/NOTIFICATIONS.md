@@ -69,8 +69,9 @@ uv run python -m app.scripts.generate_vapid
 It prints a public and a private key and **writes nothing** — you paste them into `.env`
 yourself.
 
-- `VAPID_PUBLIC_KEY` — genuinely public. It is served to the browser, and the frontend needs
-  it as `VITE_VAPID_PUBLIC_KEY` to subscribe at all.
+- `VAPID_PUBLIC_KEY` — genuinely public. The frontend **fetches** it from
+  `GET /api/notifications/push` rather than holding a build-time copy, so there is one source
+  of truth and rotating the pair needs no frontend rebuild.
 - `VAPID_PRIVATE_KEY` — a secret. It lives only in `.env`, is never serialised into any
   response, and a test asserts it never appears in the push-status payload.
 - `VAPID_SUBJECT` — a contact URI (`mailto:` or `https:`) the push service can use to reach

@@ -362,10 +362,11 @@ the *device*, never against the job that raised it.
 `core/push.py` encrypts with the browser's own keys (aes128gcm) and signs with a
 VAPID token. It imports fine with no keys configured, which is the state of CI.
 
-Setup: `uv run python -m app.scripts.generate_vapid`, paste the two keys into
-`.env` and the public one into `frontend/.env` as `VITE_VAPID_PUBLIC_KEY`.
-**Generate once** — replacing the pair silently invalidates every existing
-subscription.
+Setup: `uv run python -m app.scripts.generate_vapid`, then paste both keys
+into `.env`. **The frontend needs nothing** — it reads the public key from
+`GET /api/notifications/push`, so there is one source of truth and rotating the
+pair needs no rebuild. **Generate once**: replacing the pair silently invalidates
+every existing subscription.
 
 Full detail, including what to check when nothing arrives:
 [`../docs/NOTIFICATIONS.md`](../docs/NOTIFICATIONS.md).

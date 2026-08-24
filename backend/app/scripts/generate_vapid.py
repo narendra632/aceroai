@@ -10,7 +10,7 @@ to have found a subscription endpoint. The private key signs a short-lived token
 send; the public key is handed to the browser at subscribe time so it can bind the
 subscription to you.
 
-⚠ **Generate this ONCE.** Every existing subscription is bound to the public key it was
+**Generate this ONCE.** Every existing subscription is bound to the public key it was
 created with, so replacing the pair silently invalidates every device that has already
 subscribed — they keep their permission and simply stop receiving anything. Recovering means
 unsubscribing and re-subscribing on each device.
@@ -41,16 +41,24 @@ def generate() -> tuple[str, str]:
 
 
 def main() -> int:
+    # ASCII only, deliberately. A Windows console defaults to cp1252, which cannot encode
+    # the warning sign or an em dash — and this crashed with UnicodeEncodeError on the
+    # first real run, which would have been the very first command anyone typed after
+    # reading the setup docs. A setup script that dies on the platform it is run from is
+    # worse than no script.
     public, private = generate()
-    print("VAPID keypair generated. Add these to .env — this script writes nothing.\n")
+    print("VAPID keypair generated. Add these to .env - this script writes nothing.\n")
     print(f"VAPID_PUBLIC_KEY={public}")
     print(f"VAPID_PRIVATE_KEY={private}")
     print("VAPID_SUBJECT=mailto:you@example.com   # a real contact for the push service\n")
-    print("And in frontend/.env (the PUBLIC half only — it is public by design):\n")
-    print(f"VITE_VAPID_PUBLIC_KEY={public}\n")
     print(
-        "⚠ Generate this ONCE. Replacing the pair invalidates every device that has\n"
-        "  already subscribed: they keep their permission and quietly receive nothing."
+        "The frontend needs nothing. It fetches the public key from\n"
+        "GET /api/notifications/push, so there is one source of truth and rotating the\n"
+        "pair needs no frontend rebuild.\n"
+    )
+    print(
+        "WARNING: generate this ONCE. Replacing the pair invalidates every device that\n"
+        "has already subscribed: they keep their permission and quietly receive nothing."
     )
     return 0
 

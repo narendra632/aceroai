@@ -137,6 +137,15 @@ The riskiest premises in the design, checked first.
       tool produces), and `push.py` loads with `from_string`, which accepts either — because a
       key pasted from a different tool is likely to be the other form
 - [x] 4.11 Config added, all of it numeric or a key
+- [x] 4.11a ⚠ **The docs told him to set an env var nothing reads.** Five places said to put
+      `VITE_VAPID_PUBLIC_KEY` in `frontend/.env` — a leftover from the plan. The frontend
+      actually fetches the public key from `GET /api/notifications/push`, which is the better
+      design (one source of truth, and rotating the pair needs no frontend rebuild). All five
+      corrected; nothing references it now
+- [x] 4.11b ⚠ **`generate_vapid` crashed on Windows.** Found by running it: the `⚠` character
+      cannot be encoded by a cp1252 console, so it died with `UnicodeEncodeError` **after**
+      printing the keys. This is the first command in the setup instructions, on the platform
+      this project is developed on. Output is now ASCII-only
 
 ## 5. The user-facing jobs
 

@@ -170,5 +170,7 @@ the app's side — the panel says so rather than offering a button that silently
 ⚠ **On iPhone and iPad, notifications require the app to be installed first.** Safari also
 never fires an install prompt, so those steps are described rather than offered.
 
-Set `VITE_VAPID_PUBLIC_KEY` in `frontend/.env` — the public half only; it is public by design.
-Full detail in [`../docs/NOTIFICATIONS.md`](../docs/NOTIFICATIONS.md).
+**No frontend configuration is needed for notifications.** The VAPID public key comes from
+`GET /api/notifications/push` at runtime, not from an env var — one source of truth, and
+rotating the server's key pair needs no rebuild here. Full detail in
+[`../docs/NOTIFICATIONS.md`](../docs/NOTIFICATIONS.md).
