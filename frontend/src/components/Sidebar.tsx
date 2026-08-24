@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/useTheme";
 import type { Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import Wordmark from "@/components/ui/wordmark";
 
 export type View =
   | "chat"
@@ -33,7 +34,11 @@ export type View =
   | "learn"
   | "settings";
 
-const NAV: { view: View; label: string; icon: ComponentType<{ className?: string }> }[] = [
+const NAV: {
+  view: View;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+}[] = [
   { view: "chat", label: "Chat", icon: MessageSquare },
   { view: "tasks", label: "Tasks", icon: ListTodo },
   { view: "journal", label: "Journal", icon: BookOpen },
@@ -60,7 +65,13 @@ function bucketOf(iso: string): string {
   return "Older";
 }
 
-const BUCKET_ORDER = ["Today", "Yesterday", "Previous 7 days", "Previous 30 days", "Older"];
+const BUCKET_ORDER = [
+  "Today",
+  "Yesterday",
+  "Previous 7 days",
+  "Previous 30 days",
+  "Older",
+];
 
 type Props = {
   email: string;
@@ -106,7 +117,9 @@ export default function Sidebar({
       const b = bucketOf(s.last_active_at);
       by.set(b, [...(by.get(b) ?? []), s]);
     }
-    return BUCKET_ORDER.filter((b) => by.has(b)).map((b) => [b, by.get(b)!] as const);
+    return BUCKET_ORDER.filter((b) => by.has(b)).map(
+      (b) => [b, by.get(b)!] as const,
+    );
   }, [sessions, filter]);
 
   function commitRename(id: string) {
@@ -123,7 +136,11 @@ export default function Sidebar({
   return (
     <>
       {open && (
-        <div className="fixed inset-0 z-20 bg-black/30 md:hidden" onClick={onClose} aria-hidden />
+        <div
+          className="fixed inset-0 z-20 bg-black/30 md:hidden"
+          onClick={onClose}
+          aria-hidden
+        />
       )}
       <aside
         className={cn(
@@ -132,9 +149,14 @@ export default function Sidebar({
         )}
       >
         <div className="flex items-center justify-between px-4 py-4">
-          <span className="text-lg font-semibold tracking-tight">aceroai</span>
+          <Wordmark className="h-5 w-auto" />
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon-sm" onClick={toggle} aria-label="Toggle theme">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={toggle}
+              aria-label="Toggle theme"
+            >
               {theme === "dark" ? <Sun /> : <Moon />}
             </Button>
             <Button
@@ -169,7 +191,11 @@ export default function Sidebar({
         {view === "chat" && (
           <>
             <div className="mt-4 space-y-2 px-3">
-              <Button variant="outline" onClick={onNewChat} className="w-full justify-start gap-2">
+              <Button
+                variant="outline"
+                onClick={onNewChat}
+                className="w-full justify-start gap-2"
+              >
                 <Plus /> New chat
               </Button>
               {sessions.length > 5 && (
@@ -188,9 +214,13 @@ export default function Sidebar({
 
             <div className="no-scrollbar mt-2 flex-1 overflow-y-auto px-3 pb-3">
               {sessions.length === 0 ? (
-                <p className="px-2 py-4 text-sm text-faint">No conversations yet.</p>
+                <p className="px-2 py-4 text-sm text-faint">
+                  No conversations yet.
+                </p>
               ) : groups.length === 0 ? (
-                <p className="px-2 py-4 text-sm text-faint">No chats match that.</p>
+                <p className="px-2 py-4 text-sm text-faint">
+                  No chats match that.
+                </p>
               ) : (
                 groups.map(([bucket, items]) => (
                   <div key={bucket} className="mb-3">

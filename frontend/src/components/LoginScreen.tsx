@@ -3,8 +3,13 @@ import { Eye, EyeOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api";
+import Wordmark from "@/components/ui/wordmark";
 
-export default function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
+export default function LoginScreen({
+  onLogin,
+}: {
+  onLogin: (email: string) => void;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -26,12 +31,23 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="rise w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight">aceroai</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Your personal chief-of-staff.</p>
+        <div className="mb-8 flex flex-col items-center text-center">
+          {/* The wordmark carries the name, so the heading is visually hidden rather than
+              removed — the page still needs an <h1> for structure and screen readers. */}
+          <h1 className="sr-only">Acero</h1>
+          <Wordmark className="h-10 w-auto" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            Your personal chief-of-staff.
+          </p>
         </div>
-        <form onSubmit={submit} className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-          <label className="block text-sm font-medium text-muted-foreground" htmlFor="email">
+        <form
+          onSubmit={submit}
+          className="rounded-2xl border border-border bg-card p-6 shadow-sm"
+        >
+          <label
+            className="block text-sm font-medium text-muted-foreground"
+            htmlFor="email"
+          >
             Email
           </label>
           <input
@@ -43,7 +59,10 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
             required
             className="mt-1 mb-4 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
-          <label className="block text-sm font-medium text-muted-foreground" htmlFor="password">
+          <label
+            className="block text-sm font-medium text-muted-foreground"
+            htmlFor="password"
+          >
             Password
           </label>
           <div className="relative mt-1">
@@ -63,7 +82,11 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
               aria-pressed={show}
               className="absolute top-1/2 right-1 grid size-10 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              {show ? (
+                <EyeOff className="size-4" />
+              ) : (
+                <Eye className="size-4" />
+              )}
             </button>
           </div>
           {/* role="alert" so a screen reader announces the failure rather than
@@ -73,7 +96,12 @@ export default function LoginScreen({ onLogin }: { onLogin: (email: string) => v
               {error}
             </p>
           )}
-          <Button type="submit" disabled={busy} size="lg" className="mt-5 w-full">
+          <Button
+            type="submit"
+            disabled={busy}
+            size="lg"
+            className="mt-5 w-full"
+          >
             {busy ? "Signing in…" : "Sign in"}
           </Button>
         </form>
