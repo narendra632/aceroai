@@ -318,12 +318,29 @@ The riskiest premises in the design, checked first.
       `missed` row for a job with no history — which is now skipped. Both were given history
       first, and a new pair of tests pins BOTH halves of the rule: a first evaluation is never
       a miss, and once a job has run, a gap **is** recorded. The suite caught this, not I
-- [ ] 12.7 ⚠ **Live push on the Pixel — NOT DONE, and cannot be.** It needs VAPID keys in
-      `.env` (Narendra generates them), the app open on his phone, and a permission tap. Every
-      layer beneath it is verified in CI, including real encryption and real VAPID signing
-      against a synthetic subscription. **This is the one thing left, and it is in the handover
-      note**
-- [ ] 12.8 ⚠ Live briefing in Journal → Briefings — blocked with 12.7 on a real run
+- [x] 12.7 **Live push on the Pixel — VERIFIED in production, 2026-08-24.** Narendra
+      generated VAPID keys, deployed, installed the PWA from Chrome, permitted notifications
+      and received them — including with the app closed, which is the only test that proves
+      the service worker is running independently of any page. Icons, wordmark and the
+      Settings panel confirmed on the device
+- [x] 12.8 **Live briefing verified** in Journal → Acero's briefings, in production
+- [x] 12.12 ⚠ **Two deployment defects, both found only by deploying.** Neither could have
+      been caught locally, and that is the lesson rather than an excuse:
+      **(a) `vercel.json` used `"//"` as a comment key.** JSON has no comments; the key is a
+      convention some tools tolerate and Vercel's schema rejects outright
+      (`should NOT have additional property '//'`). It is valid JSON, so parsing it locally
+      proved nothing — only the deploy target's schema knew. The reasoning now lives in
+      `frontend/README.md`, together with a note saying why it cannot live in the file.
+      **(b) The API sat in Docker's `Created` state**, never started, with empty logs. The
+      `docker compose up` was interrupted while waiting on `migrate` (which succeeded,
+      exit 0), and with nothing left supervising, `api` was never started. Presented as a
+      **CORS error in the browser** — Caddy answered 502, a 502 carries no
+      `Access-Control-Allow-Origin`, and the browser reported the symptom it could see.
+      `curl -i https://.../health` separated the two in one step. Re-running
+      `docker compose up -d` fixed it. Nothing was wrong with the code, the schema or `.env`
+- [x] 12.13 Verified from outside the network after the fix: `/health` 200, and the CORS
+      preflight from `https://aceroai.vercel.app` returns the correct
+      `access-control-allow-origin`
 - [x] 12.9 Insights will show a `job` slice: `turns.kind="job"` is asserted by a test to be
       written by a digest
 - [x] 12.10 `.env` confirmed not staged before committing

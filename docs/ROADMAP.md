@@ -224,8 +224,13 @@ tells you in the interface when one fires.
   signal rather than noise. The option is `pg_search`/ParadeDB, which costs a new
   dependency and a different Postgres image — priced deliberately, not deferred vaguely.
 
-- **Three unverified checks on the interface.** The Learn section, and now the notification
-  bell and Journal tabs added with the jobs change. It was built for a 375 px screen (the
+- **One unverified check on the interface: the keyboard pass.** The 375 px pass is now
+  **done** — the app was installed from Chrome on a Pixel on 2026-08-24 and used there, which
+  exercised the Learn section, the notification bell and the Journal tabs at phone width.
+  What has still never been exercised is **keyboard-only navigation**: every control is a real
+  button, the tablists have roving `tabIndex` and arrow keys, and the switches are Radix — but
+  nobody has tabbed through any of it. This is a ten-minute check, listed so it is not
+  silently assumed done. It was built for a 375 px screen (the
   diagram grid collapses to one column, the panel becomes a Sheet, targets are 44 px) and
   for keyboard use (every control is a real button, the tablist has roving `tabIndex` and
   arrow keys). Neither was actually exercised. **Trigger: next time the app is opened on a
