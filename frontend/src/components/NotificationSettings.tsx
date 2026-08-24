@@ -23,48 +23,12 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { useInstallPrompt } from "@/hooks/useInstallPrompt";
 import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
 import type { JobRow, PushStatus } from "@/lib/api";
 import * as push from "@/lib/push";
-import { cn } from "@/lib/utils";
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-6 w-10 shrink-0 rounded-full transition-colors",
-        "focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
-        checked ? "bg-primary" : "bg-input",
-        disabled && "cursor-not-allowed opacity-50",
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 size-5 rounded-full bg-background transition-transform",
-          checked ? "translate-x-[1.125rem]" : "translate-x-0.5",
-        )}
-      />
-    </button>
-  );
-}
 
 function JobList() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
@@ -132,11 +96,12 @@ function JobList() {
               )}
             </p>
           </div>
-          <Toggle
+          <Switch
             checked={job.enabled}
             disabled={busy === job.name}
-            onChange={(v) => void toggle(job, v)}
-            label={job.description}
+            onCheckedChange={(v) => void toggle(job, v)}
+            aria-label={job.description}
+            className="mt-0.5"
           />
         </li>
       ))}
