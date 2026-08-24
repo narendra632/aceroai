@@ -23,7 +23,7 @@ flowchart LR
 
 ## 1. The VM (e2-micro) — a computer that never sleeps
 A small computer rented in Google's Oregon data center, running 24/7. Unlike a
-laptop, it's always on — so the Telegram bot and future scheduled jobs run any
+laptop, it's always on — so the scheduled jobs (briefings, nudges, retention) run any
 time. 1 GB RAM is tiny but fine, because the heavy AI thinking happens on Google's
 servers, not ours. Our server is fast "glue."
 
@@ -40,7 +40,7 @@ box that runs the same on any machine. We run four:
 |---|---|
 | **db** | Postgres + pgvector — stores users, chats, and memory facts (with embeddings) |
 | **migrate** | Runs once to build/update the database tables, then exits |
-| **api** | The FastAPI backend — auth, chat, memory, tasks, journal, settings, Telegram |
+| **api** | The FastAPI backend — auth, chat, memory, tasks, journal, settings, notifications, **and the job scheduler** |
 | **caddy** | The doorman that handles the internet + HTTPS |
 
 They sit on a **private internal network** and talk by name (`caddy → api:8000 →

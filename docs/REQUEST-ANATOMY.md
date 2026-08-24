@@ -172,7 +172,7 @@ Every turn logs one line (logger `aceroai.timing`). Watch the backend console, o
 
 ```powershell
 # from backend/
-$env:TELEGRAM_BOT_TOKEN=""; uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 ```
 
 Send a message and compare against your stopwatch:
@@ -286,6 +286,53 @@ which more than pays for the ~12 tokens per fact now spent carrying its id — t
 what lets the assistant correct or forget a fact in one step instead of two.
 
 ---
+
+## 5c. The anatomy of a job (measured 2026-08-24)
+
+A request is answered because you asked. A **job** runs because a clock said so, and its
+shape is different in ways worth setting side by side.
+
+| | A request | A job |
+|---|---|---|
+| Starts because | you sent something | the tick found a due occurrence |
+| Waits for | a first token, visibly | nothing — nobody is watching |
+| Streams | yes, token by token | no; `llm.complete`, one response |
+| Memory recall | yes, ~300-500 ms embedding | **no** — one call, no embedding |
+| Tools | up to `tools_max_iters` rounds | **none, ever** |
+| Model calls | 1 reply + 1 extraction + 2 embeddings | **at most one**, and only for the two digests |
+| Failure | the user sees an error | a row in `job_runs`, and nothing else moves |
+
+**What the tick costs when nothing is due**, which is the overwhelmingly common case:
+
+```
+resolve the due occurrence per job    0.02 - 3.3 ms   (measured; the 3.3 ms
+                                                       worst case is a 7-day
+                                                       window on an hourly job)
+one indexed lookup per job            ~0.3 ms
+------------------------------------------------------
+six jobs, nothing due                 under 10 ms, every 5 minutes
+```
+
+That is 288 ticks a day against a 1 GB machine — small enough that no caching, batching or
+back-off is worth the complexity of reasoning about.
+
+**What a digest costs when it does run.** Only `morning_brief` and `day_end_summary` call a
+model, once each per day:
+
+```
+gather the brief (pure SQL)           ~5 ms
+one non-streaming model call          ~1-3 s      (nobody is waiting)
+write the review + notification       ~10 ms
+encrypt + sign + POST the push        ~200 ms     (191 bytes of ciphertext,
+                                                   measured on a realistic payload)
+```
+
+Two model calls a day, against roughly four per *message*. Job spend appears on Insights as
+its own `job` slice, which is how that claim stays checkable rather than remembered.
+
+**The nudges cost nothing at all** — `task_nudge`, `budget_watch` and `journal_nudge` are
+plain queries. That is the intended ratio: a model is involved only where prose is genuinely
+needed, and *"which tasks are overdue"* is not prose.
 
 ## 6. Where the remaining time goes (honest assessment)
 

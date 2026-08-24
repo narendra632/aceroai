@@ -19,7 +19,6 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(sa.Text, unique=True)
     password_hash: Mapped[str] = mapped_column(sa.Text)
-    telegram_chat_id: Mapped[int | None] = mapped_column(sa.BigInteger, unique=True)
     timezone: Mapped[str] = mapped_column(sa.Text, default="Asia/Kolkata")
     # Model preferences (migration 003). NULL = use the server's configured default,
     # so an untouched account behaves exactly as before.
@@ -29,11 +28,21 @@ class User(Base):
     # Monthly spend ceiling in USD (migration 009). NULL = no limit, so an account that
     # never sets one behaves exactly as it did before the cap existed.
     monthly_budget_usd: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2))
+    # Notification policy (migration 011). Local hours; NULL on either = quiet hours off.
+    # A notification raised inside the window is still WRITTEN — only the push to the
+    # device is suppressed, so nothing is lost, it just waits until morning.
+    quiet_hours_start: Mapped[int | None] = mapped_column(sa.SmallInteger)
+    quiet_hours_end: Mapped[int | None] = mapped_column(sa.SmallInteger)
+    daily_push_cap: Mapped[int | None] = mapped_column(sa.SmallInteger)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
 
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
+    # 'telegram' is retained DELIBERATELY though the channel was retired in migration 011.
+    # Sessions with this value are real conversations Narendra had; rewriting them to 'web'
+    # would make the record misstate where they happened, and dropping them would destroy
+    # history to tidy a constraint. Do not "clean this up".
     __table_args__ = (
         sa.CheckConstraint("channel in ('web','telegram')", name="chat_sessions_channel"),
     )
@@ -279,3 +288,119 @@ class DailyUsage(Base):
     tokens_in: Mapped[int]
     tokens_out: Mapped[int]
     tokens_thinking: Mapped[int]
+
+
+class JobRun(Base):
+    """One attempted execution of a scheduled job (migration 011).
+
+    This table — not the scheduler — is the source of truth about whether a job has run.
+    APScheduler holds exactly one job (a five-minute tick) and forgets everything on
+    restart; a deploy at 20:58 would otherwise kill the 21:00 summary and report nothing.
+
+    `occurrence_key` is the scheduled instant the run satisfies, as an ISO string in local
+    time. Together with `job_name` it is unique, which is what makes exactly-once a
+    *database* guarantee rather than something the runner has to be careful about.
+
+    `status` distinguishes six outcomes, and the distinction is the point. `silent` means
+    the job ran and correctly had nothing to say — `task_nudge` does this twelve times a
+    day — which must be readable at a glance as success, not mistaken for a failure or for
+    a run that never happened.
+    """
+
+    __tablename__ = "job_runs"
+    __table_args__ = (
+        sa.UniqueConstraint("job_name", "occurrence_key", name="job_runs_occurrence"),
+        sa.CheckConstraint(
+            "status in ('ok','silent','failed','skipped_budget','skipped_disabled','missed')",
+            name="job_runs_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    job_name: Mapped[str] = mapped_column(sa.Text)
+    occurrence_key: Mapped[str] = mapped_column(sa.Text)
+    status: Mapped[str] = mapped_column(sa.Text)
+    started_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    duration_ms: Mapped[int | None]
+    error_type: Mapped[str | None] = mapped_column(sa.Text)
+    # Counts and identifiers only, never message text — the same rule as `spans.meta`.
+    detail: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class Notification(Base):
+    """Something the system decided to tell the user (migration 011).
+
+    A notification is a ROW; push is one way of drawing attention to it. The row is written
+    *before* any delivery is attempted, so what Acero had to say survives a refused
+    permission, a closed laptop, a dead subscription, and a notification swiped off a
+    lockscreen while walking.
+
+    That ordering is the whole design. A system whose only memory of "two tasks are overdue"
+    is an OS toast you dismissed is not a system that reduces what you have to remember.
+
+    `pushed_at` NULL means it never reached a device — which is information, not a failure:
+    quiet hours, the daily cap, no subscription, or a send that did not succeed.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(sa.Text)
+    title: Mapped[str] = mapped_column(sa.Text)
+    body: Mapped[str] = mapped_column(sa.Text)
+    # An in-app route, so selecting the notification lands on what it is about.
+    url: Mapped[str | None] = mapped_column(sa.Text)
+    # Groups notifications that replace one another on the device rather than stacking.
+    tag: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+    read_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    pushed_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
+
+class PushSubscription(Base):
+    """A browser that has agreed to receive notifications (migration 011).
+
+    What the browser's push service hands us: an endpoint URL plus two keys used to encrypt
+    the payload. The content is encrypted end to end, so the push service relays it and
+    cannot read it.
+
+    `endpoint` is unique because re-subscribing the same browser must UPDATE this row.
+    Subscriptions also die — a push service returns 404/410 when a browser is uninstalled or
+    its storage is cleared — and a dead endpoint must be DELETED rather than retried, or
+    every job pays for it forever.
+    """
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id"))
+    endpoint: Mapped[str] = mapped_column(sa.Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(sa.Text)
+    auth: Mapped[str] = mapped_column(sa.Text)
+    # Only so the user can tell two devices apart in Settings.
+    user_agent: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+    last_ok_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    last_error_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(sa.Text)
+
+
+class UserJobPref(Base):
+    """Whether one user wants one job to run (migration 011).
+
+    Deliberately SPARSE: no row means "use the job's declared default". That is not a
+    space optimisation — it is what makes adding a future job a code change with no
+    migration, no backfill, and no per-user default row behind it, which was an explicit
+    requirement of this change rather than a happy accident.
+    """
+
+    __tablename__ = "user_job_prefs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id"), primary_key=True)
+    job_name: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(sa.Boolean)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=now, onupdate=now
+    )

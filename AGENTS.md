@@ -2,7 +2,7 @@
 
 ## What this is
 A single-user personal AI assistant (chat + journaling + tasks + scheduled
-reviews, later: memory, habits, investments). Web frontend + Telegram bot,
+reviews, later: memory, habits, investments). Installable web app with push,
 one FastAPI backend. Long-term evolving project — optimize for clarity and
 incremental change.
 
@@ -16,7 +16,7 @@ incremental change.
 
 ## Golden rules
 1. **One brain.** All conversational logic flows through
-   `core/handler.handle_message()`. Channels (web SSE route, Telegram
+   `core/handler.handle_message()`. Callers (the web SSE route, any future
    poller) are thin adapters. Never put chat logic in a channel file.
 2. **Derived values are computed, never stored.** Task urgency is derived
    from `due_at` + `priority` at read time.
@@ -33,12 +33,20 @@ incremental change.
 9. Small diffs. After edits run `uv run ruff format .` and `uv run pytest`
    from `backend/`.
 10. When unsure about a product decision, ask — don't assume.
-11. **Docs and diagrams are updated by the change that alters the behavior**,
+11. **Scheduled work is idempotent and records its runs.** A job resolves to an
+    occurrence that is unique in `job_runs`; the scheduler is only a ticker and
+    never the source of truth about what has run. A job never reaches the tool
+    loop, and never learns facts from its own output. See `docs/JOBS.md`.
+12. **Notifications are stored, then delivered.** The row is written before any
+    push is attempted, so it survives a refused permission, a dead subscription
+    and a swipe on a lockscreen. A failed push is recorded against the device,
+    never as a failure of the work that raised it.
+13. **Docs and diagrams are updated by the change that alters the behavior**,
     never afterwards. Every OpenSpec `tasks.md` ends with that item, checked
     like tests. `ARCHITECTURE.md` describes only what is built; anything
     planned goes in `ROADMAP.md`. Never annotate a doc `(planned — Feature N)`:
     each one becomes a lie on ship, and nothing forces a revisit.
-12. **No shortcuts on UI/UX.** The bar is a finished product, not "it works" —
+14. **No shortcuts on UI/UX.** The bar is a finished product, not "it works" —
     no raw native controls where a themed one is needed, no destructive action
     without confirmation, no silent success. Known gaps: `docs/UI-AUDIT.md`.
 
@@ -75,7 +83,7 @@ incremental change.
 - backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal, settings,
                         memory, insights, learn). learn.py is read-only and serves an
                         ALLOW-LISTED set of tuning values — never settings.model_dump()
-- backend/app/channels/ telegram.py long-poller
+- backend/app/jobs/     registry, runner, scheduler + the six scheduled jobs
 - backend/app/jobs/     empty package — no scheduled job built yet
                         (retention currently sweeps from telemetry.record instead)
 - backend/app/db/       models.py (10 tables), session.py
@@ -88,7 +96,7 @@ incremental change.
 
 ## Current status
 
-**Built and live:** web chat (SSE) · Telegram channel · cross-session memory
+**Built and live:** web chat (SSE) · scheduled jobs + web push · cross-session memory
 (hybrid recall: pgvector/HNSW + Postgres full-text, fused by RRF; memory tools;
 one writer) · adaptive reasoning · tasks + journal with assistant tool-use ·
 multi-provider LLM + Settings · observability + monthly spend cap ·

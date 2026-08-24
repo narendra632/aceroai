@@ -179,7 +179,7 @@ async def handle_message(
         yield "error", f"That message is too long (max {settings.max_input_chars} characters)."
         return
 
-    # The spend ceiling, checked HERE so every channel inherits it — web and Telegram —
+    # The spend ceiling, checked HERE so every caller of the one brain inherits it,
     # and no channel can forget it. Before anything is persisted, so a message that was
     # never answered does not end up in the history.
     #

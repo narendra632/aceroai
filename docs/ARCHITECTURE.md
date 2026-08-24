@@ -10,7 +10,7 @@
 
 aceroai is a **single-user** personal AI assistant: chat, journaling, tasks, and
 cross-session memory. One FastAPI backend serves two thin channels — a React SPA and a
-Telegram bot — and **all conversational logic lives in one place**
+installable web app — and **all conversational logic lives in one place**
 (`core/handler.handle_message`), so both channels get identical behavior.
 
 The model is reached through a **provider layer** (`core/providers/`) in which every
@@ -28,16 +28,23 @@ embedded facts that make up long-term memory.
 ```mermaid
 flowchart TB
     subgraph clients [" "]
-        SPA["React SPA<br/><small>Vercel · Bearer token</small>"]
-        TG["Telegram bot<br/><small>long-poll</small>"]
+        SPA["React SPA<br/><small>Vercel · Bearer token · installable</small>"]
+        SW["public/sw.js<br/><small>service worker — offline shell, push</small>"]
     end
 
+    PUSHSVC["Push service<br/><small>FCM / Mozilla / Apple</small>"]
+
     subgraph api ["FastAPI — backend/app/main.py"]
-        ROUTES["api/<br/><small>auth · chat SSE · tasks · journal<br/>memory · insights · settings · learn</small>"]
-        CHAN["channels/telegram.py<br/><small>thin adapter, no chat logic</small>"]
+        ROUTES["api/<br/><small>auth · chat SSE · tasks · journal · memory<br/>insights · settings · learn · notifications · jobs</small>"]
+        SCHED["jobs/scheduler<br/><small>one tick, every 5 min</small>"]
     end
 
     BRAIN["core/handler.handle_message<br/><b>the one brain</b>"]
+
+    subgraph jobsbox ["jobs/"]
+        RUNNER["runner<br/><small>what is due · exactly once</small>"]
+        JOBSET["6 jobs<br/><small>briefs · nudges · retention</small>"]
+    end
 
     subgraph brainparts ["core/"]
         COMP["composer<br/><small>persona · date · tasks · facts · history</small>"]
@@ -45,33 +52,52 @@ flowchart TB
         MEM["memory<br/><small>extract · embed · store</small>"]
         REC["recall<br/><small>vector + keyword, fused</small>"]
         TEL["telemetry<br/><small>per-turn timings</small>"]
+        PUSH["push<br/><small>aes128gcm · VAPID</small>"]
     end
 
     LLM["core/llm<br/><small>facade</small>"]
     GOOG["providers/google<br/><small>google-genai → Agent Platform</small>"]
     OAI["providers/openai_provider<br/><small>openai SDK → Responses API</small>"]
 
-    SVC["services/<br/><small>tasks · journal · memory · insights · retention · budget · user_settings</small>"]
+    SVC["services/<br/><small>tasks · journal · memory · insights · retention<br/>budget · notifications · job_prefs · user_settings</small>"]
     DB[("Postgres 17 + pgvector")]
 
     SPA --> ROUTES --> BRAIN
-    TG --> CHAN --> BRAIN
+    SPA -.registers.-> SW
+    SCHED --> RUNNER --> JOBSET
+    JOBSET --> SVC
+    JOBSET --> LLM
     BRAIN --> COMP & TOOLS & MEM & TEL
     MEM --> REC
     BRAIN --> LLM --> GOOG & OAI
     TOOLS --> SVC
     MEM --> SVC
     ROUTES --> SVC
+    SVC --> PUSH --> PUSHSVC --> SW
     SVC --> DB
     COMP --> DB
     MEM --> DB
 ```
 
-**The rule that shapes everything:** channels are transport only. A message from the web
-and a message from Telegram enter the *same* `handle_message`, so a feature built once
-works in both places. `services/` plays the same role for data: the REST API and the
-assistant's tools both go through it, so a task created by tapping **Add** and one created
-by the assistant are validated identically.
+**The rule that shapes everything:** transport is transport only. Every conversational
+message enters the *same* `handle_message`, whatever asked for it, so a feature built once
+works everywhere. `services/` plays the same role for data: the REST API and the assistant's
+tools both go through it, so a task created by tapping **Add** and one created by the
+assistant are validated identically.
+
+**The same shape, applied to notifications.** `services/notifications` is the one place
+anything Acero wants to say is recorded. Push is a *transport* hanging off it — which is why
+a refused permission, a closed laptop or a dead subscription costs the delivery and never the
+record.
+
+**Two directions, one system.** Left to right is you asking. `jobs/` is the other direction:
+work on a clock that decides whether there is anything worth saying, and reaches you through
+the service worker even with the app closed. It has no access to the tool loop — see
+[`JOBS.md`](JOBS.md) §3.
+
+> The Telegram channel was retired in migration 011. `handle_message` still takes a
+> `channel` argument and `chat_sessions.channel` still permits `'telegram'`, because those
+> conversations really happened and the record should not say otherwise.
 
 ## 3. Directory guide
 
@@ -96,7 +122,7 @@ by the assistant are validated identically.
 
 | Path | Role |
 |---|---|
-| `app/main.py` | FastAPI app: CORS, router includes, `/health`, lifespan (Telegram poller), domain-error handlers |
+| `app/main.py` | FastAPI app: CORS, router includes, `/health`, lifespan (job scheduler), log redaction, domain-error handlers |
 | `app/config.py` | `Settings(BaseSettings)` — every runtime knob; `MODEL_CATALOG`; provider-credential checks |
 | `app/core/handler.py` | **`handle_message`** — the one brain: persist, recall, compose, stream, tool-loop, persist, telemetry |
 | `app/core/composer.py` | Builds context: persona + current date/time + open tasks + recalled facts + history |
@@ -128,7 +154,9 @@ by the assistant are validated identically.
 | `app/api/learn.py` | The tuning values the Learn section quotes. Read-only, derived from `settings`, allow-listed |
 | `app/api/insights.py` | `overview` · `turns` · `turns/{id}` — read-only |
 | `app/api/schemas.py` | Pydantic request/response models |
-| `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` |
+| `app/jobs/` | Recurring work: `registry` (what a job is), `runner` (what is due, exactly once), `scheduler` (the tick), plus the six jobs. See [`JOBS.md`](JOBS.md) |
+| `app/core/push.py` | Encrypts and signs a web-push message. No key needed to import it |
+| `app/services/notifications.py` | Store-then-deliver, quiet hours, the daily cap |
 | `app/db/models.py` | The 10 ORM tables (typed `Mapped[]`) |
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` |
 | `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet |
@@ -139,7 +167,7 @@ by the assistant are validated identically.
 | `alembic/versions/…003_user_model_prefs.py` | `users.llm_provider` · `model_chat` · `model_deep` |
 | `alembic/versions/…004…010` | soft delete · memory lifecycle · live-facts HNSW · `turns`+`spans` · `daily_usage` · monthly budget · `possible_duplicate_of` + full-text index |
 | `alembic/versions/…009_monthly_budget.py` | `users.monthly_budget_usd` — NULL = no limit |
-| `tests/` | auth, chat, memory (+ contradiction), telegram, providers, tools loop, traces, usage accounting, pricing, retention, budget, services, API (tasks/journal/settings/memory/insights), context awareness, soft delete, prod config, health |
+| `tests/` | auth, chat, memory (+ contradiction), providers, tools loop, traces, usage accounting, pricing, retention, budget, jobs (machinery + content), notifications (+ push), services, API (tasks/journal/settings/memory/insights/notifications), context awareness, soft delete, prod config, docs diagrams, health |
 
 ### Frontend (`frontend/`)
 
@@ -497,6 +525,79 @@ has to reflow at 375 px.
 The rule of thumb: **a change to the system updates this in the same commit**. The tests
 catch broken references, not missing ones.
 
+### (h) A scheduled job
+
+The other direction: work that runs on a clock rather than because you asked.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T as scheduler (tick, 5 min)
+    participant R as jobs/runner
+    participant DB as job_runs
+    participant J as the job
+    participant N as services/notifications
+    participant P as push service
+
+    T->>R: tick(now)
+    R->>R: most recent occurrence for each job
+    R->>DB: already ran for this occurrence?
+    alt already recorded
+        DB-->>R: yes
+        R-->>T: nothing to do
+    else due, and not yet run
+        R->>DB: pg_try_advisory_lock
+        opt job uses a model
+            R->>R: budget.check — over the cap ends it here
+        end
+        R->>J: run(db, user)
+        J->>J: gather the facts in SQL
+        opt a digest
+            J->>J: one model call — facts in, prose out
+        end
+        J-->>R: JobResult(notify?, review?, silent?)
+        R->>N: raise_notification
+        N->>P: encrypted payload (unless quiet / capped)
+        R->>DB: record ok | silent | failed
+    end
+```
+
+**The scheduler is only a ticker.** `job_runs` is the source of truth about what has run, and
+`UNIQUE (job_name, occurrence_key)` is what makes exactly-once a database guarantee rather
+than something the runner has to be careful about. An in-memory scheduler would lose the
+21:00 summary to a 20:58 deploy and report nothing at all.
+
+⚠ **Measured**: a daily job with a 24-hour catch-up window can never be missed — its
+occurrences are 24 hours apart, so one is always inside the window. The registry now refuses
+such a window at import; "however late" must be written `catch_up=None`. See
+[`JOBS.md`](JOBS.md) §2.
+
+### (i) A notification's journey
+
+```mermaid
+flowchart LR
+    J["a job has something to say"] --> ROW[("notifications<br/><small>written FIRST</small>")]
+    ROW --> POL{"quiet hours?<br/>daily cap?"}
+    POL -->|suppressed| BELL["the bell in the app"]
+    POL -->|deliver| SUBS[("push_subscriptions")]
+    SUBS --> ENC["encrypt with the BROWSER's keys<br/><small>aes128gcm</small>"]
+    ENC --> SIG["sign with our VAPID key"]
+    SIG --> SVC["the browser's push service"]
+    SVC --> SW["service worker"]
+    SW --> DEV["notification on the device"]
+    DEV --> BELL
+    SVC -.410 Gone.-> DEL["delete the subscription"]
+```
+
+**Write the row, then attempt delivery — never the reverse.** The record survives a refused
+permission, a closed laptop, a dead subscription and a swipe on a lockscreen. A failed push
+is recorded against the *device*, and the job that raised it is still a success: a phone in a
+drawer must not make working software look broken.
+
+The payload is encrypted with keys the **browser** generated, so the push service relays
+something it cannot read. It is capped at ~4 KB, which is why it is a pointer — the substance
+stays in the app. Full detail in [`NOTIFICATIONS.md`](NOTIFICATIONS.md).
+
 ## 5. Data model
 
 ```mermaid
@@ -508,6 +609,9 @@ erDiagram
     users ||--o{ generated_reviews : receives
     users ||--o{ turns : "is billed for"
     users ||--o{ daily_usage : "is summarised by"
+    users ||--o{ notifications : "is told"
+    users ||--o{ push_subscriptions : "is reachable at"
+    users ||--o{ user_job_prefs : configures
     chat_sessions ||--o{ messages : contains
     profile_facts ||--o| profile_facts : "superseded_by"
     profile_facts ||--o| profile_facts : "possible_duplicate_of"
@@ -517,8 +621,10 @@ erDiagram
         uuid id PK
         text email UK
         text password_hash
-        bigint telegram_chat_id UK
         text timezone
+        smallint quiet_hours_start "local hour; == end means off"
+        smallint quiet_hours_end
+        smallint daily_push_cap
         text llm_provider "null = use default"
         text model_chat "null = use default"
         text model_deep "null = use default"
@@ -527,7 +633,7 @@ erDiagram
     chat_sessions {
         uuid id PK
         uuid user_id FK
-        text channel "web | telegram"
+        text channel "web | telegram (historical)"
         text title
         timestamptz last_active_at
         timestamptz deleted_at "soft delete — undo"
@@ -617,6 +723,41 @@ erDiagram
         int unpriced
         numeric cost_usd
     }
+    job_runs {
+        uuid id PK
+        text job_name
+        text occurrence_key "the scheduled instant, ISO local"
+        text status "ok|silent|failed|skipped_*|missed"
+        timestamptz started_at
+        int duration_ms
+        text error_type
+        jsonb detail "counts only, never message text"
+    }
+    notifications {
+        uuid id PK
+        uuid user_id FK
+        text kind
+        text title
+        text body
+        text url "in-app route"
+        text tag "same tag replaces on the device"
+        timestamptz read_at
+        timestamptz pushed_at "null = never reached a device"
+    }
+    push_subscriptions {
+        uuid id PK
+        uuid user_id FK
+        text endpoint UK
+        text p256dh "the BROWSER's key"
+        text auth "the BROWSER's key"
+        timestamptz last_ok_at
+        timestamptz last_error_at
+    }
+    user_job_prefs {
+        uuid user_id PK
+        text job_name PK
+        boolean enabled "sparse — absent = registry default"
+    }
 ```
 
 Why it is shaped this way:
@@ -640,7 +781,10 @@ Why it is shaped this way:
   `deleted_at IS NULL` would leak deleted records into the model's context, where the
   assistant would act confidently on something the user believes is gone. Deleting a
   conversation keeps its messages, so a restore returns it intact.
-- **`generated_reviews` exists but is unwritten** — the table is ready; no job writes to it
+- **`generated_reviews` is written by the two digest jobs** (migration 011) — it held no
+  rows between migration 001 and that change. `job_runs` has **no `user_id`**: a job is a
+  property of the deployment, not of a person, and the single-user assumption lives in the
+  runner rather than in the schema
   yet (`app/jobs/` is empty).
 - **Traces are three tiers, not one table** — `spans` hold per-stage detail and are pruned
   after 30 days; `turns` hold one row per model call and are pruned after 400; `daily_usage`
@@ -675,7 +819,7 @@ with `extra="ignore"`. Each lowercase field maps to its UPPERCASE env var.
 **Choosing a provider is a per-user setting, not a config change.** It is stored on
 `users` (migration 003) and edited in the Settings screen;
 `services/user_settings.resolve()` is the single place that resolves *user value →
-configured default*. Because the handler calls it, **Telegram honors the same choice with
+configured default*. Because the handler calls it, **every caller honors the same choice with
 no channel code**.
 
 **Credentials never enter the UI.** Google authenticates with Application Default

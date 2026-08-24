@@ -12,6 +12,7 @@ import InsightsView from "./InsightsView";
 import KnowledgeView from "./KnowledgeView";
 import LearnView from "./LearnView";
 import MessageList from "./MessageList";
+import NotificationBell from "./NotificationBell";
 import type { UIMessage } from "./MessageBubble";
 import SettingsView from "./SettingsView";
 import Sidebar, { type View } from "./Sidebar";
@@ -22,7 +23,13 @@ const newId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
 
-export default function AppShell({ email, onLogout }: { email: string; onLogout: () => void }) {
+export default function AppShell({
+  email,
+  onLogout,
+}: {
+  email: string;
+  onLogout: () => void;
+}) {
   const [view, setView] = useState<View>("chat");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -47,13 +54,19 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
   const composerRef = useRef<ComposerHandle>(null);
 
   const refreshSessions = useCallback(() => {
-    api.listSessions().then(setSessions).catch(() => toast.error("Couldn't refresh your chats"));
+    api
+      .listSessions()
+      .then(setSessions)
+      .catch(() => toast.error("Couldn't refresh your chats"));
   }, [toast]);
 
   // Best-effort: a failure here must never block chat, so it stays silent and the
   // composer simply behaves as it did before the limit existed.
   const refreshBudget = useCallback(() => {
-    api.getBudget().then(setBudget).catch(() => {});
+    api
+      .getBudget()
+      .then(setBudget)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -125,7 +138,9 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
   function renameSession(id: string, title: string) {
     void (async () => {
       const previous = sessions;
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title } : s)),
+      );
       try {
         await api.renameSession(id, title);
       } catch {
@@ -155,7 +170,12 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
       setWorking(null);
       setMessages((prev) => [
         ...prev,
-        { id: newId(), role: "user", content: text, created_at: new Date().toISOString() },
+        {
+          id: newId(),
+          role: "user",
+          content: text,
+          created_at: new Date().toISOString(),
+        },
       ]);
       reveal.begin();
 
@@ -187,7 +207,12 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
       };
 
       try {
-        for await (const ev of api.streamChat(text, currentId, controller.signal, useDeep)) {
+        for await (const ev of api.streamChat(
+          text,
+          currentId,
+          controller.signal,
+          useDeep,
+        )) {
           if (ev.event === "session") {
             setCurrentId(ev.data);
           } else if (ev.event === "recall") {
@@ -212,7 +237,12 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
             reveal.cancel();
             setMessages((prev) => [
               ...prev,
-              { id: newId(), role: "assistant", content: `⚠ ${ev.data}`, error: true },
+              {
+                id: newId(),
+                role: "assistant",
+                content: `⚠ ${ev.data}`,
+                error: true,
+              },
             ]);
             setThinking(false);
             setWorking(null);
@@ -265,7 +295,10 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     function onKey(e: KeyboardEvent) {
       const el = e.target as HTMLElement | null;
       const typing =
-        !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+        !!el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         newChat();
@@ -281,7 +314,32 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
     return () => window.removeEventListener("keydown", onKey);
   }, [newChat, sidebarOpen]);
 
-  const streaming = busy ? { thinking, text: reveal.text, label: working ?? undefined } : null;
+  /** Follow a notification to whatever it is about.
+   *
+   * A notification's `url` is an in-app hash route written by the backend ("/#tasks",
+   * "/#journal/briefings"). Parsed here rather than passed as a view name so a future job
+   * can point at a sub-section without the notification schema having to learn about
+   * views. An unrecognised route falls back to chat rather than showing a blank screen. */
+  const followNotification = useCallback((url: string) => {
+    const [section, sub] = url.replace(/^\/?#?/, "").split("/");
+    const known: View[] = [
+      "chat",
+      "tasks",
+      "journal",
+      "knowledge",
+      "insights",
+      "learn",
+      "settings",
+    ];
+    const target = known.includes(section as View) ? (section as View) : "chat";
+    setView(target);
+    setSidebarOpen(false);
+    if (sub) window.location.hash = `${section}/${sub}`;
+  }, []);
+
+  const streaming = busy
+    ? { thinking, text: reveal.text, label: working ?? undefined }
+    : null;
   const TITLES: Record<View, string> = {
     chat: "aceroai",
     tasks: "Tasks",
@@ -320,7 +378,17 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
             <Menu />
           </Button>
           <span className="font-semibold tracking-tight">{TITLES[view]}</span>
+          <div className="ml-auto">
+            <NotificationBell onNavigate={followNotification} />
+          </div>
         </header>
+
+        {/* On desktop the sidebar carries the navigation, so this strip exists only to
+            give the bell somewhere to live. Kept to the bell's own height so it does not
+            steal space from the conversation. */}
+        <div className="hidden justify-end border-b border-border px-3 py-1.5 md:flex">
+          <NotificationBell onNavigate={followNotification} />
+        </div>
 
         {view === "chat" ? (
           <>
@@ -336,8 +404,8 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
               <div className="border-t border-border bg-background px-4 pt-3">
                 <p className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 rounded-lg bg-secondary px-3 py-2 text-xs text-muted-foreground">
                   <span>
-                    {Math.round(budget.used_ratio * 100)}% of this month&rsquo;s spend limit
-                    used.
+                    {Math.round(budget.used_ratio * 100)}% of this month&rsquo;s
+                    spend limit used.
                   </span>
                   <button
                     type="button"
@@ -363,7 +431,10 @@ export default function AppShell({ email, onLogout }: { email: string; onLogout:
                   ? {
                       reason: `Monthly spend limit reached. Replies resume on ${new Date(
                         `${budget.resets_on}T00:00:00`,
-                      ).toLocaleDateString(undefined, { day: "numeric", month: "long" })}.`,
+                      ).toLocaleDateString(undefined, {
+                        day: "numeric",
+                        month: "long",
+                      })}.`,
                       onResolve: () => navigate("settings"),
                     }
                   : undefined

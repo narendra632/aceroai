@@ -45,8 +45,8 @@ POST /api/chat  ->  get_current_user (Bearer token -> user)
                 ->  route wraps yielded deltas as SSE  ->  browser
 ```
 
-The route is pure transport; all conversation logic lives in the handler, so the
-Telegram channel reuses the exact same brain. Every stage is timed under logger
+The route is pure transport; all conversation logic lives in the handler, so any
+future caller reuses the exact same brain. Every stage is timed under logger
 `aceroai.timing` — measured numbers in
 [`../docs/REQUEST-ANATOMY.md`](../docs/REQUEST-ANATOMY.md).
 
@@ -144,7 +144,7 @@ server — **no key file, no secret in `.env`**. It needs `roles/aiplatform.user
 **Choosing provider + model:** per user, stored on `users` (migration 003) and
 edited in the app's **Settings** screen. `services/user_settings.resolve()` is the
 single source of truth (user value → configured default), and because the handler
-calls it, **Telegram honors the same choice with no channel code**.
+calls it, **every caller honors the same choice with no per-caller code**.
 
 **Embeddings are pinned** (`EMBED_PROVIDER`/`EMBED_MODEL`/`EMBED_DIM`) and never
 follow the chat provider: every stored `profile_facts` vector came from one model,
@@ -188,10 +188,14 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/core/telemetry.py` | `Timeline` — per-turn stage timings and context description; `record()` persists a trace **after** the reply and guarantees a failure there can never reach it |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
 | `app/scripts/verify_llm.py` | **Legacy** smoke test against the Gemini *Developer* API — does not exercise `core/providers/` |
-| `app/channels/telegram.py` | Telegram long-poll adapter → `handle_message` |
+| `app/jobs/` | Recurring work — `registry`, `runner`, `scheduler`, `run` (the CLI), and the six jobs |
+| `app/core/push.py` | Web-push encryption and VAPID signing; importable with no keys set |
+| `app/services/notifications.py` | Store-then-deliver, quiet hours, the daily cap |
+| `app/services/job_prefs.py` | Per-job on/off (sparse table) and the human-readable schedule |
+| `app/scripts/generate_vapid.py` | One-time key generation. Prints; writes nothing |
 | `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet. Retention currently sweeps opportunistically from `telemetry.record` instead — see the TODO in `services/retention.py` |
 | `alembic/` | `…_001_core_tables.py` schema + pgvector · `…_002_fact_embeddings.py` `profile_facts.embedding` + HNSW · `…_003_user_model_prefs.py` per-user provider/models |
-| `tests/` | 13 modules: `conftest.py` (fake LLM/embeddings + scoped data), `test_auth`, `test_chat`, `test_memory`, `test_telegram`, `test_providers`, `test_tools_loop`, `test_context_awareness`, `test_services_{tasks,journal}`, `test_api_{journal_tasks,settings}`, `test_prod_config`, `test_health` |
+| `tests/` | `conftest.py` (fake LLM/embeddings, scoped data, a fake push transport, a swappable job registry), `test_auth`, `test_chat`, `test_memory`, `test_providers`, `test_tools_loop`, `test_context_awareness`, `test_jobs`, `test_job_content`, `test_notifications`, `test_api_notifications`, `test_retention`, `test_services_{tasks,journal}`, `test_api_{journal_tasks,settings,learn}`, `test_docs_diagrams`, `test_prod_config`, `test_health` |
 | `Dockerfile` | Production image (`uv sync --frozen --no-dev`) |
 
 ## Config & secrets
@@ -304,12 +308,11 @@ is a per-request dial (`REASONING_EFFORT_CHAT=low` for fast chat,
 provider-swap safe). It's *adaptive* because the effort is chosen per turn, two ways:
 
 - **Explicit user control** — the web composer has a "think harder" (🧠) toggle
-  that sends `deep: true`; on Telegram, prefix a message with **`/think`**. Either
-  routes that turn to `REASONING_EFFORT_DEEP`.
+  that sends `deep: true`, routing that turn to `REASONING_EFFORT_DEEP`.
 - **Task routing** — `handle_message(..., reasoning_effort=...)` lets any caller
-  set the effort. Channels use it for the controls above; **future tasks** (e.g.
-  the daily review) will pass `high` for deep work while chat stays fast. This is
-  the hook new task types plug into over time.
+  set the effort. The composer uses it for the control above; this is the hook new
+  task types plug into over time. Note the scheduled digests do **not** go through
+  `handle_message` at all — see [`../docs/JOBS.md`](../docs/JOBS.md) §3.
 
 *(A fully automatic router — a model that classifies each message and picks the
 effort — is deferred until billing is enabled, since it adds an API call per
@@ -323,20 +326,49 @@ Developer API, whose separate **prepaid balance** the credits cannot pay for.
 OpenAI usage bills to the OpenAI account. Set a **budget alert** so credit
 exhaustion surfaces as a warning rather than as errors.
 
-## Telegram channel
+## Scheduled jobs
 
-`channels/telegram.py` long-polls the Telegram Bot API (`getUpdates`) and routes
-each authorized message through the **same** `handle_message` — the channel is a
-thin adapter with no chat logic (golden rule 1). It replies with `sendMessage`
-(one complete message, not token-streamed). The poller starts in the app
-lifespan **only when `TELEGRAM_BOT_TOKEN` is set**, so runs without it are
-unaffected. Long-polling is outbound, so **no hosting is needed** to test — run
-the backend locally and message the bot from your phone.
+`jobs/scheduler.py` registers **exactly one** APScheduler job — a tick every five
+minutes — and `jobs/runner.py` decides what actually runs. The source of truth is
+the `job_runs` table, not the scheduler's memory: each job resolves to an
+*occurrence* (a specific scheduled instant) which is `UNIQUE` per job, so a
+repeated tick, a restart mid-deploy, and a hand-run command all converge on one
+execution.
 
-Setup: get a token from **@BotFather**, put it in `.env` as `TELEGRAM_BOT_TOKEN`,
-restart the backend, then send **`/start`** to the bot once — the first `/start`
-links your chat to your account (trust-on-first-use); afterward only that chat is
-served.
+Six jobs ship: `morning_brief` (07:30) and `day_end_summary` (21:00) are the only
+two that call a model; `task_nudge`, `budget_watch`, `journal_nudge` and
+`retention_sweep` are pure SQL. The digests gather every fact themselves and hand
+the model **only** that — no tools, no database access — so an unreviewed message
+cannot report a task you did not finish.
+
+```bash
+uv run python -m app.jobs.run --list                    # what exists
+uv run python -m app.jobs.run day_end_summary --force   # run one now
+```
+
+⚠ Never write a numeric day-of-week in a schedule. APScheduler counts from Monday,
+crontab counts from Sunday, so `* * * * 0` runs on the wrong day and reports
+nothing. The registry refuses it at import.
+
+Full detail: [`../docs/JOBS.md`](../docs/JOBS.md).
+
+## Notifications
+
+`services/notifications.py` holds one rule: **write the row, then attempt
+delivery.** A notification survives a refused permission, a closed laptop, a dead
+subscription and a swipe on a lockscreen — and a failed push is recorded against
+the *device*, never against the job that raised it.
+
+`core/push.py` encrypts with the browser's own keys (aes128gcm) and signs with a
+VAPID token. It imports fine with no keys configured, which is the state of CI.
+
+Setup: `uv run python -m app.scripts.generate_vapid`, paste the two keys into
+`.env` and the public one into `frontend/.env` as `VITE_VAPID_PUBLIC_KEY`.
+**Generate once** — replacing the pair silently invalidates every existing
+subscription.
+
+Full detail, including what to check when nothing arrives:
+[`../docs/NOTIFICATIONS.md`](../docs/NOTIFICATIONS.md).
 
 ## Deploying
 

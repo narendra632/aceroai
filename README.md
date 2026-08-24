@@ -1,7 +1,7 @@
 # aceroai
 
 Single-user personal AI assistant — chat, tasks, journal, and cross-session memory.
-FastAPI + Postgres/pgvector backend, React SPA, Telegram channel. Private project.
+FastAPI + Postgres/pgvector backend, installable React SPA with web push. Private project.
 
 | I want to… | Read |
 |---|---|

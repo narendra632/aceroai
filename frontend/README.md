@@ -62,19 +62,27 @@ persist it.
 
 | Path | Role |
 |---|---|
-| `index.html` | SPA shell; title; no-flash theme script |
-| `src/main.tsx` | React entry — mounts `<App/>`, imports the theme |
+| `index.html` | SPA shell; title; icons; manifest link; theme-color; no-flash theme script |
+| `public/manifest.webmanifest` | What makes the app installable: name, icons, colours, shortcuts |
+| `public/sw.js` | Service worker — offline shell, push handler, notification clicks. Hand-written |
+| `vercel.json` | Keeps `sw.js` and the manifest out of the CDN cache. Without it a new deploy could never replace the worker |
+| `src/main.tsx` | React entry — mounts `<App/>`, imports the theme, registers the service worker |
 | `src/App.tsx` | Auth gate (LoginScreen vs AppShell) inside `TooltipProvider` |
 | `src/index.css` | Tailwind v4 + shadcn tokens in a warm palette + animations |
-| `src/lib/api.ts` | Backend calls (auth, chat SSE, tasks, journal) + the token header |
+| `src/lib/api.ts` | Backend calls (auth, chat SSE, tasks, journal, notifications, jobs) + the token header |
+| `src/lib/push.ts` | Permission state, subscribe/unsubscribe, and why push cannot work here when it cannot |
 | `src/lib/utils.ts` | `cn()` class-merge helper (shadcn) |
 | `src/hooks/useSmoothReveal.ts` | Steady-rate typewriter reveal of streamed text |
 | `src/hooks/useTheme.ts` | Light/dark toggle + persistence |
+| `src/hooks/useInstallPrompt.ts` | Captures Chrome's install event; falls back to iOS instructions, which Safari never fires |
+| `src/hooks/useOnlineStatus.ts` | Whether the device has a connection, so views can say so instead of spinning |
 | `src/components/AppShell.tsx` | Top-level shell: view switch + chat state (sessions, streaming, abort) |
 | `src/components/Sidebar.tsx` | Chat/Tasks/Journal/Settings nav + (in chat) session list; theme, sign out; mobile drawer |
 | `src/components/TasksView.tsx` | Tasks screen: quick-add, complete, priority, due, delete |
-| `src/components/JournalView.tsx` | Journal screen: dated entries, mood, tags |
-| `src/components/SettingsView.tsx` | Pick AI provider + chat/think-harder models; read-only pinned memory model |
+| `src/components/JournalView.tsx` | Journal screen: two tabs — your entries, and Acero's briefings |
+| `src/components/NotificationBell.tsx` | The notification centre: unread count, panel, links to the subject |
+| `src/components/NotificationSettings.tsx` | Turning push on, the per-job toggles, and the install offer |
+| `src/components/SettingsView.tsx` | Provider + models; spend limit; notifications and jobs; install; pinned memory model |
 | `src/components/MessageList.tsx` | Transcript + live streaming bubble + "working…" + empty state |
 | `src/components/MessageBubble.tsx` | One message (markdown + copy for assistant) |
 | `src/components/Markdown.tsx` | Safe markdown renderer |
@@ -139,3 +147,28 @@ Hosted on **Vercel** (Root Directory `frontend`, framework Vite), which
 auto-deploys on every push to `main`. Set `VITE_API_URL` in the Vercel project to
 the backend's HTTPS URL (the DuckDNS subdomain). Full runbook:
 [`../docs/DEPLOY.md`](../docs/DEPLOY.md).
+
+## Installable, and notifications
+
+The app registers a **hand-written** service worker (`public/sw.js`) rather than using
+`vite-plugin-pwa`. Only two things are needed — an offline shell and a `push` listener — and
+the strategy chosen needs no generated precache manifest:
+
+| Request | Strategy |
+|---|---|
+| navigation | network first, falling back to a cached shell |
+| hashed build assets | cache first (content-addressed, so they cannot go stale) |
+| the API | **never cached** — cross-origin, authenticated, always current |
+
+Bumping `VERSION` in `sw.js` is the entire cache-invalidation story; `activate` deletes every
+older cache.
+
+**Subscribing needs a user gesture**, so `main.tsx` only *registers* the worker and the
+permission prompt lives behind a button in Settings. A refused permission is permanent from
+the app's side — the panel says so rather than offering a button that silently does nothing.
+
+⚠ **On iPhone and iPad, notifications require the app to be installed first.** Safari also
+never fires an install prompt, so those steps are described rather than offered.
+
+Set `VITE_VAPID_PUBLIC_KEY` in `frontend/.env` — the public half only; it is public by design.
+Full detail in [`../docs/NOTIFICATIONS.md`](../docs/NOTIFICATIONS.md).

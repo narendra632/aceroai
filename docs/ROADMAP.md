@@ -122,28 +122,84 @@
   by hand and must be maintained by hand; the tests catch broken references, not missing
   ones. A change to the system updates the Learn content in the same commit, or not at all.
 
+- **Acero speaks first, and Telegram is retired** — the assistant had never once started a
+  conversation. Everything it knew about your day sat in Postgres waiting for you to think to
+  ask. `app/jobs/` had been an empty package since Phase 0 and `apscheduler` an unused
+  dependency for just as long.
+
+  Six jobs now run on a schedule: a **morning brief**, a **day-end summary**, an **overdue-task
+  nudge** (coalesced, and silent when nothing has changed), a **spend warning** at 80% of the
+  monthly limit, an optional **journal prompt**, and the **retention sweep** — which used to
+  ride on the back of a delivered reply, so a quiet week pruned nothing at all.
+
+  **The scheduler is only a ticker.** A `job_runs` table decides what has run, keyed on the
+  job plus the exact scheduled instant, unique in the database. That is not bookkeeping for
+  its own sake: an in-memory scheduler loses the 21:00 summary to a 20:58 deploy and reports
+  *nothing*, because nothing failed. Here the run happens at 21:05 instead.
+
+  **Two defects were found by measurement rather than by reasoning.** APScheduler counts
+  weekdays from Monday while every crontab reference counts from Sunday, so `* * * * 0` — which
+  reads unmistakably as Sunday — fires on **Monday**, silently, forever. And a daily job with a
+  24-hour catch-up window can never be missed, because its occurrences are 24 hours apart; the
+  window read like a staleness policy while actually meaning "deliver however late". Both are
+  now startup failures rather than comments.
+
+  **On the AI:** most jobs use no model at all — *"which tasks are overdue"* is a query. The
+  two digests gather every fact in SQL and hand the model **only that**, with no tools and no
+  database access, so it cannot report a task you did not finish. A job that could *act* on a
+  timer was considered and rejected: unsupervised action is a different risk class from
+  unsupervised writing.
+
+  **Notifications are stored, then delivered.** The row is written before any push is
+  attempted, so it survives a refused permission, a closed laptop, a dead subscription and a
+  swipe on a lockscreen. A failed push is recorded against the *device* — a phone in a drawer
+  must not make working software look broken. Everything lands in a bell in the header, and the
+  longer briefings get their own tab in Journal beside your own entries.
+
+  **Web push replaced Telegram**, which had been the weakest part of the system since it
+  shipped: a long-poll loop that only ran while the backend was up, and a bot token that
+  **leaked into production logs** before it was caught. Writing the test for that redaction
+  found a second hole — the pattern's comment claimed to cover `?key=` while the regex required
+  `api` before `key`, which is exactly the shape the Gemini Developer API uses.
+
+  Telegram conversations are **preserved unchanged**: `chat_sessions.channel` still permits
+  `'telegram'`, because rewriting those rows would make the record misstate where they happened.
+
+  The app is also **installable** now — a manifest, a hand-written service worker, an offline
+  shell, and its own icon. On iPhone that installation is the precondition for notifications at
+  all; on Android it is optional.
+
+  **What it does *not* do:** no offline message queue, no weekly review, no email fallback, and
+  no job that can take an action. Each is named in the list below rather than implied.
+
 ## Now
 
 *(Nothing in flight — the next change on the list below starts when Narendra says so.)*
 
 ## Next (planned, in order)
 
-1. **Scheduled jobs** — `app/jobs/` exists but is empty; APScheduler is in the stack
-   and unused. A day-end summary and proactive nudges (overdue tasks, journal
-   prompts) would make Acero the first to speak instead of purely reactive.
-
-2. **PWA + web push** — installable app, native notifications. This is the feature
-   that lets the **Telegram channel be retired**; it has been deferred twice and
-   should not slip again.
-
-3. **Investments page** — Narendra has **local Markdown research files** describing
+1. **Investments page** — Narendra has **local Markdown research files** describing
    exactly how he wants this to work. **⚠ ASK HIM for those `.md` files when we
    reach this feature** — do not design it before reading them.
 
-4. **MCP-powered real-world capabilities** — expose the tools Narendra actually
-   uses through MCP so Acero can act in the real world, not just chat.
+2. **MCP-powered real-world capabilities** — expose the tools Narendra actually
+   uses through MCP so Acero can act in the real world, not just chat. The tool
+   registry (`core/tools/`) was shaped with this in mind.
 
-5. **Beyond** — additional features as they come up; this list grows over time.
+3. **Beyond** — additional features as they come up; this list grows over time.
+
+### Small things the jobs change made cheap
+
+Each is roughly one file now that the registry exists — which was the point of building it
+that way.
+
+- **A weekly review.** `generated_reviews.kind='weekly'` already permits it.
+- **Memory hygiene.** A weekly job surfacing flagged duplicates and conflicts — the delivery
+  mechanism the "Review conflicts" item below has been missing.
+- **Disk watch.** 10 GB, no backup. A push at 80% full is about twenty lines and is the
+  cheapest insurance this project can buy.
+- **A nightly `pg_dump`.** The deliberately-deferred backup finally has somewhere to live.
+- **A stale in-progress nudge.** A task that has been `in_progress` for a fortnight.
 
 ## Deliberately deferred
 
@@ -168,7 +224,8 @@ tells you in the interface when one fires.
   signal rather than noise. The option is `pg_search`/ParadeDB, which costs a new
   dependency and a different Postgres image — priced deliberately, not deferred vaguely.
 
-- **Two unverified checks on the Learn section.** It was built for a 375 px screen (the
+- **Three unverified checks on the interface.** The Learn section, and now the notification
+  bell and Journal tabs added with the jobs change. It was built for a 375 px screen (the
   diagram grid collapses to one column, the panel becomes a Sheet, targets are 44 px) and
   for keyboard use (every control is a real button, the tablist has roving `tabIndex` and
   arrow keys). Neither was actually exercised. **Trigger: next time the app is opened on a
@@ -239,7 +296,7 @@ tells you in the interface when one fires.
 
 - **Public / multi-user app** — Narendra may later open this up to other users.
   If so, the auth and user model (currently deliberately single-user: one seeded
-  user, one Telegram allowlist) will need rework: real signup, per-user isolation,
+  user) will need rework: real signup, per-user isolation,
   onboarding. Keep this in mind so we don't over-couple to single-user assumptions
   where it's cheap to avoid.
 

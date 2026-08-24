@@ -138,7 +138,41 @@ class Settings(BaseSettings):
 
     app_timezone: str = "Asia/Kolkata"
     frontend_origin: str = "http://localhost:5173"
-    telegram_bot_token: str = ""
+
+    # --- scheduled jobs (migration 011) ---
+    # How often the ticker asks "is anything due". NOT how often jobs run — a job's own
+    # cron decides that. This only bounds how late a due job starts, and how quickly a run
+    # missed during a deploy is recovered. Five minutes is well under the shortest gap
+    # between any job's occurrences (one hour).
+    job_tick_seconds: int = 300
+    # Default staleness policy: a job missed by more than this is recorded and NOT run
+    # late, because a morning brief delivered at 6pm is noise. Per-job overridable.
+    job_catch_up_hours: int = 24
+
+    # --- notifications and web push (migration 011) ---
+    # A P-256 keypair identifying this server to the browsers' push services. Generate ONCE
+    # with `uv run python -m app.scripts.generate_vapid`; rotating it invalidates every
+    # existing subscription. The public half is genuinely public and is served to the
+    # browser; the private half is a secret and lives only in .env.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    # A contact URI the push service can use to reach the operator about a misbehaving
+    # sender. Required by the VAPID spec; "mailto:" or "https:".
+    vapid_subject: str = "mailto:acero@localhost"
+    # How long a push service holds an undelivered message for a device that is offline.
+    # Digests are worth waiting a day for; a nudge about something time-sensitive is not.
+    push_ttl_digest_s: int = 86400
+    push_ttl_nudge_s: int = 14400
+    # Quiet hours, as local hours. A notification raised inside the window is still
+    # WRITTEN — only the push is suppressed, so it is waiting in the app in the morning.
+    quiet_hours_start: int = 22
+    quiet_hours_end: int = 7
+    # Notification fatigue is the most common way a feature like this dies. Beyond the cap
+    # notifications are still recorded; they just stop interrupting.
+    daily_push_cap: int = 6
+    # The notification history is a third table that only grows, so it is bounded by the
+    # same nightly sweep that bounds traces.
+    notification_retention_days: int = 90
 
     # --- trace retention (migration 008) ---
     # Observability must not consume the storage the application depends on. Spans are
@@ -192,7 +226,7 @@ MODEL_CATALOG: dict[str, list[str]] = {
 # Models that do NOT accept a reasoning/thinking control.
 #
 # This matters beyond a crash. The app's whole adaptive-reasoning feature — "think harder"
-# on web, `/think` on Telegram — is a request for MORE deliberation. On a model without
+# on web — is a request for MORE deliberation. On a model without
 # that capability the toggle changes nothing at all, and a control that silently does
 # nothing is worse than one that isn't offered. Settings says so rather than letting the
 # user discover it by not noticing a difference.

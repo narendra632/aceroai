@@ -6,7 +6,13 @@ import { FlowDiagram } from "@/components/ui/flow-diagram";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useLearnConstants } from "@/hooks/useLearnConstants";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { CONCEPTS, COST_FLOW, MESSAGE_FLOW, PLANNED } from "@/lib/learn/content";
+import {
+  CONCEPTS,
+  COST_FLOW,
+  MESSAGE_FLOW,
+  PLANNED,
+  PROACTIVE_FLOW,
+} from "@/lib/learn/content";
 import { ICONS } from "@/lib/learn/icons";
 import { interpolate } from "@/lib/learn/interpolate";
 import type { Concept, Diagram, Explanation } from "@/lib/learn/types";
@@ -36,6 +42,7 @@ const WIDE = "(min-width: 1024px)";
 
 const TABS = [
   { id: "message", label: "How a message is answered" },
+  { id: "proactive", label: "How Acero speaks first" },
   { id: "cost", label: "What it costs" },
   { id: "concepts", label: "The ideas underneath" },
   { id: "planned", label: "Not built yet" },
@@ -45,6 +52,7 @@ type TabId = (typeof TABS)[number]["id"];
 
 const DIAGRAM_BY_TAB: Partial<Record<TabId, Diagram>> = {
   message: MESSAGE_FLOW,
+  proactive: PROACTIVE_FLOW,
   cost: COST_FLOW,
 };
 
@@ -68,14 +76,17 @@ const isTab = (v: string): v is TabId => TABS.some((t) => t.id === v);
  * working. Reading one is safe; writing one would bake in the coincidence. */
 function useRoute() {
   const read = useCallback((): { tab: TabId; selected: string | null } => {
-    const raw = typeof window === "undefined" ? "" : window.location.hash.slice(1);
+    const raw =
+      typeof window === "undefined" ? "" : window.location.hash.slice(1);
     const [first, second] = raw.split("/");
     if (isTab(first)) return { tab: first, selected: second || null };
     // Fall back to resolving a bare id, so links made before tabs existed still land in
     // the right place. Only a LAST resort — as the tab prefix, it would be guessing.
-    if (first && CONCEPTS.some((c) => c.id === first)) return { tab: "concepts", selected: first };
+    if (first && CONCEPTS.some((c) => c.id === first))
+      return { tab: "concepts", selected: first };
     for (const [id, d] of Object.entries(DIAGRAM_BY_TAB)) {
-      if (first && d?.panels[first]) return { tab: id as TabId, selected: first };
+      if (first && d?.panels[first])
+        return { tab: id as TabId, selected: first };
     }
     return { tab: "message", selected: null };
   }, []);
@@ -118,8 +129,14 @@ function PanelBody({
 
       <ul className="space-y-2">
         {item.how.map((line) => (
-          <li key={line} className="flex gap-2 text-sm leading-snug text-muted-foreground">
-            <span aria-hidden className="mt-2 size-1 shrink-0 rounded-full bg-primary/60" />
+          <li
+            key={line}
+            className="flex gap-2 text-sm leading-snug text-muted-foreground"
+          >
+            <span
+              aria-hidden
+              className="mt-2 size-1 shrink-0 rounded-full bg-primary/60"
+            />
             <span>{text(line)}</span>
           </li>
         ))}
@@ -191,7 +208,10 @@ export default function LearnView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
-  const text = useCallback((s: string) => interpolate(s, constants), [constants]);
+  const text = useCallback(
+    (s: string) => interpolate(s, constants),
+    [constants],
+  );
 
   // Switching subject scrolls back to the top. Landing mid-page in a tab you have not
   // read yet is disorienting, and it is the thing tabs were meant to fix.
@@ -218,7 +238,8 @@ export default function LearnView() {
   /** Left/right arrows move between tabs — the standard tablist behaviour, and the reason
    *  the buttons carry `role="tab"` rather than being styled links. */
   function onTabKey(event: React.KeyboardEvent) {
-    const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const delta =
+      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     if (!delta) return;
     event.preventDefault();
     const i = TABS.findIndex((t) => t.id === tab);
@@ -226,7 +247,9 @@ export default function LearnView() {
     go(next.id);
     // Focus follows selection in this pattern, so the arrow keys keep working.
     requestAnimationFrame(() => {
-      tabsRef.current?.querySelector<HTMLButtonElement>(`[data-tab="${next.id}"]`)?.focus();
+      tabsRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-tab="${next.id}"]`)
+        ?.focus();
     });
   }
 
@@ -244,13 +267,19 @@ export default function LearnView() {
           <X />
         </Button>
       </div>
-      <PanelBody item={open} text={text} onConcept={(id) => go("concepts", id)} />
+      <PanelBody
+        item={open}
+        text={text}
+        onConcept={(id) => go("concepts", id)}
+      />
     </div>
   );
 
   const emptyHint = (
     <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-      {tab === "concepts" ? "Pick an idea to read about it." : "Pick a step to see what happens there."}
+      {tab === "concepts"
+        ? "Pick an idea to read about it."
+        : "Pick a step to see what happens there."}
     </p>
   );
 
@@ -260,14 +289,14 @@ export default function LearnView() {
         <header className="space-y-2 pt-8 pb-5">
           <h1 className="text-2xl font-semibold">How this works</h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Everything Acero does, explained by the app itself. Click any box or card to
-            open it. The numbers come from the running system, so they are never out of
-            date.
+            Everything Acero does, explained by the app itself. Click any box or
+            card to open it. The numbers come from the running system, so they
+            are never out of date.
           </p>
           {failed && (
             <p className="text-xs text-muted-foreground">
-              Couldn't reach the server for the current settings, so a few figures below
-              show their placeholder instead of a number.
+              Couldn't reach the server for the current settings, so a few
+              figures below show their placeholder instead of a number.
             </p>
           )}
         </header>
@@ -304,7 +333,11 @@ export default function LearnView() {
           ))}
         </div>
 
-        <div id="learn-tabpanel" role="tabpanel" aria-labelledby={`learn-tab-${tab}`}>
+        <div
+          id="learn-tabpanel"
+          role="tabpanel"
+          aria-labelledby={`learn-tab-${tab}`}
+        >
           {diagram && (
             <section className="space-y-5">
               <div className="space-y-1.5">
@@ -323,7 +356,9 @@ export default function LearnView() {
                   onSelect={(id) => go(tab, id)}
                 />
                 <aside className="hidden lg:block">
-                  <div className="sticky top-16">{open ? panelCard : emptyHint}</div>
+                  <div className="sticky top-16">
+                    {open ? panelCard : emptyHint}
+                  </div>
                 </aside>
               </div>
             </section>
@@ -334,8 +369,9 @@ export default function LearnView() {
               <div className="space-y-1.5">
                 <h2 className="text-lg font-semibold">The ideas underneath</h2>
                 <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  The concepts this is built on. Each one explains the idea first, then how
-                  Acero uses it — so they are worth knowing outside this project too.
+                  The concepts this is built on. Each one explains the idea
+                  first, then how Acero uses it — so they are worth knowing
+                  outside this project too.
                 </p>
               </div>
 
@@ -351,7 +387,10 @@ export default function LearnView() {
                           <button
                             key={concept.id}
                             onClick={() =>
-                              go("concepts", selected === concept.id ? null : concept.id)
+                              go(
+                                "concepts",
+                                selected === concept.id ? null : concept.id,
+                              )
                             }
                             aria-pressed={selected === concept.id}
                             className={cn(
@@ -362,7 +401,9 @@ export default function LearnView() {
                                 "border-primary shadow-sm ring-[3px] ring-primary/25",
                             )}
                           >
-                            <span className="block text-sm font-medium">{concept.title}</span>
+                            <span className="block text-sm font-medium">
+                              {concept.title}
+                            </span>
                             <span className="mt-1 block text-xs leading-snug text-muted-foreground">
                               {text(concept.what)}
                             </span>
@@ -373,7 +414,9 @@ export default function LearnView() {
                   ))}
                 </div>
                 <aside className="hidden lg:block">
-                  <div className="sticky top-16">{open ? panelCard : emptyHint}</div>
+                  <div className="sticky top-16">
+                    {open ? panelCard : emptyHint}
+                  </div>
                 </aside>
               </div>
             </section>
@@ -384,8 +427,8 @@ export default function LearnView() {
               <div className="space-y-1.5">
                 <h2 className="text-lg font-semibold">Not built yet</h2>
                 <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Kept separate on purpose. Each one is scheduled by a measurement rather
-                  than a date — the app says when it is time.
+                  Kept separate on purpose. Each one is scheduled by a
+                  measurement rather than a date — the app says when it is time.
                 </p>
               </div>
               <ul className="grid gap-2 sm:grid-cols-2">
@@ -425,7 +468,11 @@ export default function LearnView() {
           {open && (
             <SheetContent title={text(open.title)} className="overflow-y-auto">
               <div className="px-4 pb-6">
-                <PanelBody item={open} text={text} onConcept={(id) => go("concepts", id)} />
+                <PanelBody
+                  item={open}
+                  text={text}
+                  onConcept={(id) => go("concepts", id)}
+                />
               </div>
             </SheetContent>
           )}

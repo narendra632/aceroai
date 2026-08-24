@@ -11,13 +11,18 @@ from app.core.security import hash_password
 from app.db.models import (
     ChatSession,
     DailyUsage,
+    GeneratedReview,
+    JobRun,
     JournalEntry,
     Message,
+    Notification,
     ProfileFact,
+    PushSubscription,
     Span,
     Task,
     Turn,
     User,
+    UserJobPref,
 )
 from app.db.session import SessionLocal
 from app.main import app
@@ -26,6 +31,14 @@ TEST_EMAIL = "pytest-user@example.com"
 TEST_PASSWORD = "pytest-secret-123"
 OTHER_EMAIL = "pytest-other@example.com"
 _ALL_TEST_EMAILS = (TEST_EMAIL, OTHER_EMAIL)
+
+#: Prefix for test job names AND test occurrence keys, so `job_runs` can be cleaned
+#: without touching real scheduled runs on a shared development database.
+#:
+#: Both are matched, because the two kinds of test need different things: a test with its
+#: own synthetic job is identified by NAME, while a test exercising a real job (the
+#: retention sweep) keeps that job's name and marks the OCCURRENCE instead.
+TEST_PREFIX = "pytest-job-"
 
 
 def _purge(db):
@@ -50,7 +63,23 @@ def _purge(db):
         db.execute(delete(ProfileFact).where(ProfileFact.user_id == u.id))
         db.execute(delete(Task).where(Task.user_id == u.id))
         db.execute(delete(JournalEntry).where(JournalEntry.user_id == u.id))
+        # Migration 011. Every one of these references the user, so a missing delete here
+        # does not leak rows — it breaks the purge outright with a foreign key violation,
+        # which is how this list stays complete.
+        db.execute(delete(Notification).where(Notification.user_id == u.id))
+        db.execute(delete(PushSubscription).where(PushSubscription.user_id == u.id))
+        db.execute(delete(UserJobPref).where(UserJobPref.user_id == u.id))
+        db.execute(delete(GeneratedReview).where(GeneratedReview.user_id == u.id))
     db.execute(delete(User).where(User.email.in_(_ALL_TEST_EMAILS)))
+    # `job_runs` has no user column, so it cannot be scoped by test email. It is scoped by
+    # the TEST_PREFIX on either the job name or the occurrence key. Deleting every row would
+    # destroy the real run history on a shared dev database — the same reason every other
+    # delete here is scoped rather than a TRUNCATE.
+    db.execute(
+        delete(JobRun).where(
+            JobRun.job_name.like(f"{TEST_PREFIX}%") | JobRun.occurrence_key.like(f"{TEST_PREFIX}%")
+        )
+    )
     db.commit()
 
 
@@ -137,3 +166,77 @@ def auth_client(client, user):
     r = client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
     assert r.status_code == 200
     return client
+
+
+@pytest.fixture
+def jobs_registry():
+    """Give a test the job registry to itself.
+
+    Tests that exercise the scheduler must not run the REAL jobs — `tick` would fire the
+    digests, call a model, and write briefings into the developer's own database. So the
+    registry is swapped for an empty one and restored afterwards.
+
+    Reaching into `_REGISTRY` is deliberate. The alternative is a public "unregister"
+    function that exists only for tests and that production code could then call.
+    """
+    from app.jobs import registry
+
+    saved = dict(registry._REGISTRY)
+    registry._REGISTRY.clear()
+    try:
+        yield registry
+    finally:
+        registry._REGISTRY.clear()
+        registry._REGISTRY.update(saved)
+
+
+@pytest.fixture
+def fake_push(monkeypatch):
+    """A push transport that records what would have been sent.
+
+    Encryption and VAPID signing stay REAL — only the network call is replaced — so the
+    parts most likely to be wrong are genuinely exercised in CI. Returns the list of
+    (endpoint, body, headers) tuples, plus a `status` attribute the test can set to
+    simulate a push service refusing.
+    """
+    from app.config import settings
+    from app.core import push
+    from app.scripts.generate_vapid import generate
+
+    public, private = generate()
+    monkeypatch.setattr(settings, "vapid_public_key", public)
+    monkeypatch.setattr(settings, "vapid_private_key", private)
+    monkeypatch.setattr(settings, "vapid_subject", "mailto:pytest@example.com")
+
+    class Recorder(list):
+        status = 201
+
+        def __call__(self, endpoint, body, headers):
+            self.append((endpoint, body, headers))
+            return self.status
+
+    recorder = Recorder()
+    # Patched at the module level rather than passed in, so it applies to every caller —
+    # `raise_notification` does not thread a transport through, and it should not have to
+    # carry a parameter that exists only for tests.
+    monkeypatch.setattr(push, "_http_post", recorder)
+    return recorder
+
+
+def make_subscription():
+    """A synthetic browser subscription, with real P-256 keys so encryption succeeds."""
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    client = ec.generate_private_key(ec.SECP256R1())
+    raw = client.public_key().public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+    )
+    b64 = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")  # noqa: E731
+    return {
+        "endpoint": "https://fcm.googleapis.com/fcm/send/PYTEST-ENDPOINT",
+        "p256dh": b64(raw),
+        "auth": b64(b"0123456789abcdef"),
+    }

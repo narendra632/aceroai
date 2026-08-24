@@ -13,11 +13,15 @@ import {
 import { ErrorState } from "@/components/ui/states";
 import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
+import NotificationSettings from "./NotificationSettings";
 import type { BudgetStatus, Settings, SettingsUpdate } from "@/lib/api";
 import { formatINR, formatUSD } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const PROVIDER_LABEL: Record<string, string> = { google: "Google (Gemini)", openai: "OpenAI" };
+const PROVIDER_LABEL: Record<string, string> = {
+  google: "Google (Gemini)",
+  openai: "OpenAI",
+};
 const CUSTOM = "__custom__";
 
 /** A model picker that also accepts a model we don't list yet, so a newly released
@@ -88,7 +92,13 @@ function ModelField({
  * model pickers: raising a limit is something you do *while blocked*, and making that
  * share a Save button with an unrelated provider switch would be a trap.
  */
-function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Settings) => void }) {
+function SpendLimit({
+  budget,
+  onSaved,
+}: {
+  budget: BudgetStatus;
+  onSaved: (s: Settings) => void;
+}) {
   const [value, setValue] = useState(budget.limit_usd ?? "");
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -96,10 +106,13 @@ function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Se
   const spent = Number(budget.spent_usd);
   const limit = budget.limit_usd == null ? null : Number(budget.limit_usd);
   const pct = Math.min(100, Math.round(budget.used_ratio * 100));
-  const resets = new Date(`${budget.resets_on}T00:00:00`).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "long",
-  });
+  const resets = new Date(`${budget.resets_on}T00:00:00`).toLocaleDateString(
+    undefined,
+    {
+      day: "numeric",
+      month: "long",
+    },
+  );
 
   // One hue per state, so the bar says which state you are in without reading the text.
   const barColor =
@@ -113,7 +126,9 @@ function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Se
     setSaving(true);
     try {
       onSaved(await api.updateSettings(patch));
-      toast.success(patch.clear_budget ? "Spend limit turned off" : "Spend limit updated");
+      toast.success(
+        patch.clear_budget ? "Spend limit turned off" : "Spend limit updated",
+      );
     } catch {
       toast.error("Could not save the spend limit");
     } finally {
@@ -136,14 +151,20 @@ function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Se
         )}
       </h2>
       <p className="text-sm text-muted-foreground">
-        Pause replies once this month&rsquo;s estimated spend passes a ceiling you set.
+        Pause replies once this month&rsquo;s estimated spend passes a ceiling
+        you set.
       </p>
 
       <div className="mt-4">
         <div className="flex items-baseline justify-between gap-3 text-sm">
           <span style={{ fontVariantNumeric: "tabular-nums" }}>
             <strong className="font-medium">{formatUSD(spent)}</strong>
-            {limit != null && <span className="text-muted-foreground"> of {formatUSD(limit)}</span>}
+            {limit != null && (
+              <span className="text-muted-foreground">
+                {" "}
+                of {formatUSD(limit)}
+              </span>
+            )}
             <span className="text-muted-foreground"> this month</span>
           </span>
           <span className="text-muted-foreground">
@@ -162,7 +183,8 @@ function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Se
 
       {budget.state === "exceeded" && (
         <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Replies are paused. Raise the limit below to carry on, or wait until {resets}.
+          Replies are paused. Raise the limit below to carry on, or wait until{" "}
+          {resets}.
         </p>
       )}
       {budget.state === "warning" && (
@@ -173,7 +195,9 @@ function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Se
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">Monthly limit</span>
+          <span className="mb-1 block text-muted-foreground">
+            Monthly limit
+          </span>
           <span className="flex items-center gap-1.5">
             <span className="text-muted-foreground">$</span>
             <input
@@ -210,11 +234,14 @@ function SpendLimit({ budget, onSaved }: { budget: BudgetStatus; onSaved: (s: Se
       </div>
 
       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-        Checked before each message, and it counts everything — replies, recalling what
-        Acero knows, and learning from the turn afterwards. A reply already in progress
-        finishes, so the total can pass the limit by one message. Spend is an{" "}
-        <strong className="font-medium">estimate</strong>, not your provider&rsquo;s bill.
-        {limit != null && ` About ${formatINR(limit)} at the rate on the Insights page.`}
+        Checked before each message, and it counts everything — replies,
+        recalling what Acero knows, and learning from the turn afterwards. A
+        reply already in progress finishes, so the total can pass the limit by
+        one message. Spend is an{" "}
+        <strong className="font-medium">estimate</strong>, not your
+        provider&rsquo;s bill.
+        {limit != null &&
+          ` About ${formatINR(limit)} at the rate on the Insights page.`}
       </p>
     </section>
   );
@@ -236,7 +263,12 @@ export default function SettingsView() {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toast = useToast();
 
-  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
+  useEffect(
+    () => () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+    },
+    [],
+  );
 
   const apply = useCallback((s: Settings) => {
     setData(s);
@@ -279,7 +311,13 @@ export default function SettingsView() {
   async function save() {
     setSaving(true);
     try {
-      apply(await api.updateSettings({ provider, model_chat: chat, model_deep: deep }));
+      apply(
+        await api.updateSettings({
+          provider,
+          model_chat: chat,
+          model_deep: deep,
+        }),
+      );
       setSwitchNote(null);
       setSaved(true);
       if (savedTimer.current) clearTimeout(savedTimer.current);
@@ -316,14 +354,20 @@ export default function SettingsView() {
   }
 
   const models = data.model_catalog[provider] ?? [];
-  const dirty = provider !== data.provider || chat !== data.model_chat || deep !== data.model_deep;
+  const dirty =
+    provider !== data.provider ||
+    chat !== data.model_chat ||
+    deep !== data.model_deep;
 
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-2xl px-4 py-6">
-        <h1 className="mb-1 hidden text-xl font-semibold tracking-tight md:block">Settings</h1>
+        <h1 className="mb-1 hidden text-xl font-semibold tracking-tight md:block">
+          Settings
+        </h1>
         <p className="mb-5 text-sm text-muted-foreground">
-          Choose which AI answers you. This applies everywhere — web and Telegram.
+          Choose which AI answers you. This applies everywhere — web and
+          Telegram.
         </p>
 
         {/* What is ACTUALLY answering right now — saved state, not the pending picker. */}
@@ -333,7 +377,8 @@ export default function SettingsView() {
             <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
           </span>
           <span className="text-sm">
-            Answering with <strong>{PROVIDER_LABEL[data.provider] ?? data.provider}</strong>
+            Answering with{" "}
+            <strong>{PROVIDER_LABEL[data.provider] ?? data.provider}</strong>
             <span className="text-muted-foreground"> · </span>
             <span className="font-mono text-xs">{data.model_chat}</span>
           </span>
@@ -367,7 +412,9 @@ export default function SettingsView() {
                     <span
                       className={cn(
                         "rounded-full px-1.5 py-0.5 text-[10px] tracking-wide uppercase",
-                        picked ? "bg-primary-foreground/20" : "bg-accent text-accent-foreground",
+                        picked
+                          ? "bg-primary-foreground/20"
+                          : "bg-accent text-accent-foreground",
                       )}
                     >
                       active
@@ -378,12 +425,15 @@ export default function SettingsView() {
             })}
           </div>
 
-          {switchNote && <p className="mt-3 text-xs text-muted-foreground">{switchNote}</p>}
+          {switchNote && (
+            <p className="mt-3 text-xs text-muted-foreground">{switchNote}</p>
+          )}
 
           {data.available_providers.length < 2 && (
             <p className="mt-3 text-xs text-faint">
-              Only providers with credentials configured on the server are shown. Add another
-              provider's key to the server's environment to enable it here.
+              Only providers with credentials configured on the server are
+              shown. Add another provider's key to the server's environment to
+              enable it here.
             </p>
           )}
 
@@ -415,10 +465,11 @@ export default function SettingsView() {
             >
               <Info className="mt-0.5 size-4 shrink-0" />
               <span>
-                <strong className="font-medium text-foreground">{deep}</strong> has no
-                reasoning setting, so the 🧠 toggle and <code>/think</code> will behave
-                exactly like a normal reply. Pick a model that supports deeper thinking if
-                you want that toggle to do something.
+                <strong className="font-medium text-foreground">{deep}</strong>{" "}
+                has no reasoning setting, so the 🧠 toggle and{" "}
+                <code>/think</code> will behave exactly like a normal reply.
+                Pick a model that supports deeper thinking if you want that
+                toggle to do something.
               </span>
             </p>
           )}
@@ -437,6 +488,8 @@ export default function SettingsView() {
 
         <SpendLimit budget={data.budget} onSaved={apply} />
 
+        <NotificationSettings />
+
         {/* Pinned on purpose — changing this would invalidate stored memory. */}
         <section className="mt-4 rounded-xl border border-border bg-secondary/50 p-4">
           <h2 className="mb-1 flex items-center gap-2 font-medium">
@@ -448,7 +501,8 @@ export default function SettingsView() {
           <p className="text-sm">
             <span className="font-mono text-xs">{data.embedding.model}</span>{" "}
             <span className="text-muted-foreground">
-              · {data.embedding.dimensions} dimensions · {data.embedding.provider}
+              · {data.embedding.dimensions} dimensions ·{" "}
+              {data.embedding.provider}
             </span>
           </p>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">

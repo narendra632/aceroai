@@ -1,7 +1,7 @@
 """Journal service: add/read/update/delete dated entries, always user-scoped.
 
 An entry records its `entry_date`, free-text `content`, optional `mood` (1-5),
-`tags`, and the `channel` it came from (web / telegram / assistant). Multiple
+`tags`, and the `channel` it came from (web / assistant). Multiple
 entries per day are allowed.
 """
 

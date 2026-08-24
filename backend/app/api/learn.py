@@ -14,10 +14,15 @@ handler builds a dict from values already in memory since startup — there is n
 database query.
 
 **The allow-list is a security boundary, not a convenience.** `settings` holds the database
-URL, the JWT secret, both provider keys and the Telegram bot token. Serialising it wholesale
+URL, the JWT secret, both provider keys and the VAPID private key. Serialising it wholesale
 would put every one of them in a browser. So each field is named explicitly below, the
 response model is typed, and `test_api_learn.py` fails the build if anything secret-shaped
 ever appears here. **Never replace this with `settings.model_dump()`.**
+
+The same test asserts every field is `int` or `float`, which is what makes that boundary
+structural rather than vigilant: a string field is the only shape a secret could take, so
+none is permitted. Cron schedules therefore do not come through here — the Learn page reads
+those from `/api/jobs`.
 """
 
 from fastapi import APIRouter, Depends
@@ -25,9 +30,10 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_current_user
 from app.api.schemas import LearnConstants
 from app.config import settings
-from app.core import tools
+from app.core import push, tools
 from app.core.composer import HISTORY_LIMIT
 from app.db.models import User
+from app.jobs import all_jobs
 from app.services import memory as memory_svc
 
 router = APIRouter(prefix="/api/learn", tags=["learn"])
@@ -72,4 +78,16 @@ def get_constants(user: User = Depends(get_current_user)) -> LearnConstants:
         # observability — how long the record is kept
         span_retention_days=settings.span_retention_days,
         turn_retention_days=settings.turn_retention_days,
+        # scheduled work and notifications — counts and durations only, never a schedule
+        # string (see the module docstring)
+        job_count=len(all_jobs()),
+        job_tick_seconds=settings.job_tick_seconds,
+        job_catch_up_hours=settings.job_catch_up_hours,
+        notification_retention_days=settings.notification_retention_days,
+        daily_push_cap=settings.daily_push_cap,
+        quiet_hours_start=settings.quiet_hours_start,
+        quiet_hours_end=settings.quiet_hours_end,
+        push_ttl_digest_s=settings.push_ttl_digest_s,
+        push_ttl_nudge_s=settings.push_ttl_nudge_s,
+        push_payload_max_bytes=push.MAX_PAYLOAD_BYTES,
     )

@@ -14,20 +14,25 @@ So there are three tiers:
 The order matters and is enforced in `sweep`: a day is rolled up **before** the turns
 behind it can be deleted. Getting that backwards silently destroys history.
 
-Everything here is idempotent. Running the sweep twice in a row changes nothing the second
-time, which is what makes it safe to trigger opportunistically rather than from a
-scheduler.
+A fourth table joined them in migration 011: `notifications` is the record of everything
+Acero has told the user, and it only grows. It is pruned here rather than anywhere else,
+because adding a third unbounded table in the same change that fixes the other two would
+have been a poor joke.
 
-TODO(scheduled-jobs): when the scheduler lands this becomes a proper nightly job and
-`maybe_sweep` can go away. Until then it runs off the back of a real turn.
+Everything here is idempotent. Running the sweep twice in a row changes nothing the second
+time — which is what made it safe to trigger opportunistically before the scheduler existed,
+and is now what makes a missed nightly run safe to catch up on.
+
+Triggered by `app/jobs/housekeeping.py` at 03:15 local. It used to run off the back of a
+delivered reply, which meant a quiet week pruned nothing and the sweep contended with real
+requests for locks on the very tables it was deleting from.
 """
 
 import datetime as dt
 import logging
-import threading
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, delete, func, select, text
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -48,6 +53,18 @@ _ROLLUP_COLUMNS = (
     "tokens_out",
     "tokens_thinking",
 )
+
+
+def _rows(result) -> int:
+    """A statement's affected-row count, floored at zero.
+
+    `rowcount` is **-1** when the driver cannot report one — measured, that is what the
+    rollup's INSERT..SELECT..ON CONFLICT returns here. `or 0` does not catch it, because -1
+    is truthy, so the sweep reported "-1 days rolled up" and, worse, counted that as having
+    done something. Surfaced the moment these counts started being recorded on `job_runs`.
+    """
+    count = result.rowcount
+    return count if count and count > 0 else 0
 
 
 def _tz() -> ZoneInfo:
@@ -122,7 +139,7 @@ def rollup(db: Session, *, through: dt.date | None = None) -> int:
     )
     result = db.execute(stmt)
     db.commit()
-    return result.rowcount or 0
+    return _rows(result)
 
 
 def prune_spans(db: Session, *, before: dt.datetime | None = None) -> int:
@@ -131,7 +148,7 @@ def prune_spans(db: Session, *, before: dt.datetime | None = None) -> int:
     old = select(Turn.id).where(Turn.started_at < before)
     result = db.execute(delete(Span).where(Span.turn_id.in_(old)))
     db.commit()
-    return result.rowcount or 0
+    return _rows(result)
 
 
 def prune_turns(db: Session, *, before: dt.datetime | None = None) -> int:
@@ -150,7 +167,7 @@ def prune_turns(db: Session, *, before: dt.datetime | None = None) -> int:
     covered = select(DailyUsage.id).where(DailyUsage.user_id == Turn.user_id, DailyUsage.day == day)
     result = db.execute(delete(Turn).where(Turn.started_at < before, covered.exists()))
     db.commit()
-    return result.rowcount or 0
+    return _rows(result)
 
 
 def sweep(db: Session) -> dict[str, int]:
@@ -165,50 +182,22 @@ def sweep(db: Session) -> dict[str, int]:
     return {"rolled_up": days, "spans_pruned": spans, "turns_pruned": turns}
 
 
-# --- opportunistic triggering -------------------------------------------------------
+def notification_cutoff(now: dt.datetime | None = None) -> dt.datetime:
+    now = now or dt.datetime.now(dt.UTC)
+    return now - dt.timedelta(days=settings.notification_retention_days)
 
-_lock = threading.Lock()
-_last_run: dt.date | None = None
 
+def prune_notifications(db: Session, *, before: dt.datetime | None = None) -> int:
+    """Drop notifications the user was told long ago (migration 011).
 
-def maybe_sweep(db: Session) -> bool:
-    """Run the sweep at most once per local day, per process. Returns whether it ran.
-
-    Deliberately not on a timer and not on every turn: the work is trivial but pointless to
-    repeat, and a background thread would be a second thing to reason about at startup. The
-    state is in memory, so a restart can cause one extra sweep — harmless, because the
-    sweep is idempotent.
-
-    Never raises. This runs behind a reply that has already been sent, and housekeeping
-    must not be able to turn a delivered answer into an error.
+    Unlike traces there is nothing to roll up first: a notification's value is entirely in
+    being read, and one from three months ago has already served its purpose or never will.
+    Kept far longer than spans because the table is tiny — a handful of rows a day against
+    thirty-odd spans per message.
     """
-    global _last_run
-    today = today_local()
-    with _lock:
-        if _last_run == today:
-            return False
-        _last_run = today
-    try:
-        # Housekeeping must never WAIT. The prunes take row locks on `turns` and `spans`,
-        # and this runs while real requests hold their own transactions on the same tables;
-        # without a timeout a contended DELETE would block a threadpool worker indefinitely.
-        # Giving up costs a day of pruning — the sweep is idempotent and catches up
-        # tomorrow — which is a far better failure than a stuck worker.
-        db.execute(text("SET lock_timeout = '3s'"))
-        db.execute(text("SET statement_timeout = '60s'"))
-        db.commit()
-        sweep(db)
-        return True
-    except Exception:
-        log.warning("retention sweep failed; nothing else is affected", exc_info=True)
-        db.rollback()
-        return False
-    finally:
-        # The session is closed by the caller, but a pooled connection would otherwise
-        # carry these settings into whatever runs next.
-        try:
-            db.execute(text("RESET lock_timeout"))
-            db.execute(text("RESET statement_timeout"))
-            db.commit()
-        except Exception:  # noqa: BLE001 - a dead connection has nothing to reset
-            db.rollback()
+    from app.db.models import Notification
+
+    before = before or notification_cutoff()
+    result = db.execute(delete(Notification).where(Notification.created_at < before))
+    db.commit()
+    return _rows(result)

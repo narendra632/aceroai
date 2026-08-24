@@ -153,19 +153,89 @@ def test_sweep_rolls_up_before_it_prunes(db, user):
     assert len(rows) == 1 and rows[0].cost_usd == Decimal("0.009000")
 
 
-def test_sweep_runs_once_per_day(db, user, monkeypatch):
-    monkeypatch.setattr(retention, "_last_run", None)
-    assert retention.maybe_sweep(db) is True
-    assert retention.maybe_sweep(db) is False
+def test_the_sweep_is_a_scheduled_job_not_a_side_effect_of_replying(db, user):
+    """It used to run off the back of a delivered reply, gated by an in-memory date. That
+    meant a quiet week pruned nothing, and the sweep took DELETE locks on `turns` while the
+    app was in use. Both of those are the trigger's fault, not the sweep's — so the sweep is
+    unchanged and only its trigger moved."""
+    from app.core import telemetry
+    from app.jobs import registry
+
+    entry = registry.get("retention_sweep")
+    assert entry is not None, "retention must be a registered job"
+    assert entry.schedule == "15 3 * * *", "it should run at a quiet hour, not during use"
+    assert entry.uses_ai is False
+
+    # The opportunistic path is GONE, not merely unused. A dormant `maybe_sweep` would
+    # invite a caller back.
+    assert not hasattr(retention, "maybe_sweep")
+    assert not hasattr(retention, "_last_run")
+    assert not hasattr(telemetry, "_housekeeping")
+
+
+def test_the_sweep_runs_however_late_it_is(db, user):
+    """The opposite policy to a nudge. Sweeping late is strictly better than not sweeping at
+    all, so this is the one job with no expiry — and it has to be spelled `None` rather than
+    reached by choosing a large number.
+
+    A large number would not even work: a window as long as the gap between occurrences can
+    never expire, so `timedelta(days=7)` on a daily job silently means the same thing while
+    reading like a limit. The registry now refuses that at import."""
+    from app.jobs import registry
+
+    assert registry.get("retention_sweep").catch_up is None
 
 
 def test_a_failing_sweep_never_reaches_the_caller(db, user, monkeypatch):
-    """This runs behind a reply that has already been sent. Housekeeping must not be able
-    to turn a delivered answer into an error."""
-    monkeypatch.setattr(retention, "_last_run", None)
-    monkeypatch.setattr(retention, "sweep", lambda _db: 1 / 0)
+    """A job that raises must be recorded and contained. Nothing about a failed sweep may
+    reach the scheduler, another job, or the code serving the user."""
+    from app.db.models import JobRun
+    from app.jobs import registry, runner
 
-    assert retention.maybe_sweep(db) is False
+    from .conftest import TEST_PREFIX
+
+    monkeypatch.setattr(retention, "sweep", lambda _db: 1 / 0)
+    entry = registry.get("retention_sweep")
+    # Prefixed so the conftest purge removes it. Without the prefix the row survives the
+    # test and the SECOND run of this test reports "duplicate" instead of running.
+    key = f"{TEST_PREFIX}failing-sweep"
+
+    status = runner.run_job(db, entry, user, key)
+
+    assert status == "failed"
+    row = db.execute(
+        select(JobRun).where(JobRun.job_name == "retention_sweep", JobRun.occurrence_key == key)
+    ).scalar_one()
+    assert row.status == "failed"
+    assert row.error_type == "ZeroDivisionError"
+
+
+def test_notifications_are_pruned_too(db, user):
+    """The notification history is the third table that only grows. Adding one in the same
+    change that bounds the other two, and leaving it unbounded, would have been a poor joke."""
+    import datetime as dt
+    import uuid as _uuid
+
+    from app.db.models import Notification
+
+    old = dt.datetime.now(dt.UTC) - dt.timedelta(days=settings.notification_retention_days + 5)
+    recent = dt.datetime.now(dt.UTC) - dt.timedelta(days=1)
+    for created in (old, recent):
+        db.add(
+            Notification(
+                id=_uuid.uuid4(),
+                user_id=user.id,
+                kind="test",
+                title="t",
+                body="b",
+                created_at=created,
+            )
+        )
+    db.commit()
+
+    assert retention.prune_notifications(db) == 1
+    left = db.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
+    assert len(left) == 1 and left[0].created_at > old
 
 
 # --- the property that matters ------------------------------------------------------
@@ -229,3 +299,39 @@ def test_latency_percentiles_are_honestly_absent_for_pruned_periods(db, user):
     s = insights.summary(db, user.id)
     assert s["calls"] == 1  # the call is still counted
     assert s["p50_ms"] is None  # its speed is not claimed
+
+
+def test_a_rowcount_of_minus_one_is_not_counted_as_work(db, user):
+    """`rowcount` is -1 when the driver cannot report one, and `or 0` does not catch it
+    because -1 is truthy.
+
+    Measured on the first live sweep: the rollup's INSERT..SELECT..ON CONFLICT returns
+    exactly that, so the sweep recorded `{'rolled_up': -1}` and — worse — counted it as
+    having done something, reporting `ok` where it should have reported `silent`.
+    Pre-existing since the observability change; invisible until these counts started being
+    written to `job_runs`."""
+
+    class _Unreported:
+        rowcount = -1
+
+    class _None:
+        rowcount = None
+
+    class _Real:
+        rowcount = 3
+
+    assert retention._rows(_Unreported()) == 0
+    assert retention._rows(_None()) == 0
+    assert retention._rows(_Real()) == 3
+
+
+def test_a_sweep_with_nothing_to_do_is_silent(db, user):
+    """The consequence of the above, at the level that matters: a quiet night must read as
+    `silent` in `job_runs`, not as `ok`. A column of `ok` for work that did nothing makes
+    the record useless for spotting the night something actually happened."""
+    from app.jobs import housekeeping
+
+    result = housekeeping.retention_sweep(db, user)
+
+    assert result.silent is True, result.detail
+    assert all(v == 0 for v in result.detail.values()), result.detail

@@ -64,17 +64,20 @@ def test_httpx_request_logging_is_silenced():
 
 
 def test_secrets_are_scrubbed_from_log_text_including_tracebacks():
-    """Silencing httpx was necessary and NOT sufficient. The token also travels inside the
-    exception message — `HTTPStatusError` embeds the failing URL — and that text is
-    rendered by the formatter, well after any filter on the record has run. Verified live:
-    the token was still in the logs after httpx was raised to WARNING.
+    """Silencing httpx was necessary and NOT sufficient. A credential also travels inside
+    the exception message — `HTTPStatusError` embeds the failing URL — and that text is
+    rendered by the formatter, well after any filter on the record has run. Verified live
+    against a Telegram bot token, which was still reaching the logs after httpx had been
+    raised to WARNING.
+
+    That channel is retired; the property is not. Provider URLs carry `?key=`, and push
+    endpoints are third-party URLs this application POSTs to.
     """
     import logging
 
     from app.main import RedactingFormatter
 
     fmt = RedactingFormatter("%(message)s")
-    token = "bot8661034745:AAEP7sRaeg-o6dr4XmukfcSEyqxKk8BeKN4"
 
     def render(message: str, exc: Exception | None = None) -> str:
         record = logging.LogRecord("t", logging.ERROR, __file__, 1, message, (), None)
@@ -82,17 +85,70 @@ def test_secrets_are_scrubbed_from_log_text_including_tracebacks():
             record.exc_info = (type(exc), exc, None)
         return fmt.format(record)
 
+    # A fake credential, bound once. It has to LOOK real for the assertion to be worth
+    # anything — a value the pattern would obviously catch proves nothing — which is also
+    # why the scanner needs telling.
+    fake = "sk-abc" + "123secret"  # gitleaks:allow
+
     # 1. in a plain message
-    assert token not in render(f"calling https://api.telegram.org/{token}/getUpdates")
-    # 2. in an exception's text, which is where it survived the first fix
-    leaked = RuntimeError(f"409 for url 'https://api.telegram.org/{token}/getUpdates'")
-    rendered = render("poll failed", leaked)
-    assert token not in rendered
-    assert "AAEP7sRaeg" not in rendered
-    # 3. generic credential-bearing query parameters
-    assert "sk-abc123secret" not in render("GET /v1?api_key=sk-abc123secret&x=1")
+    assert fake not in render(f"GET /v1?api_key={fake}&x=1")
+    # 2. in an exception's text, which is where a secret survived the first fix
+    leaked = RuntimeError(f"401 for url 'https://api.example.com/v1/x?key={fake}'")
+    rendered = render("call failed", leaked)
+    assert fake not in rendered
     # Redaction must not swallow the surrounding message.
-    assert "poll failed" in rendered
+    assert "call failed" in rendered
+    # 3. every credential-bearing parameter spelling the pattern claims to cover.
+    #    Asserted one at a time on purpose: a single representative case is exactly how the
+    #    bare `key=` gap survived — the comment said it was covered and the regex disagreed.
+    for param in ("api_key", "api-key", "apikey", "key", "token", "access_token"):
+        assert "SECRETVALUE" not in render(f"GET /v1?{param}=SECRETVALUE&x=1"), param
+
+
+def test_redaction_does_not_destroy_legitimate_telemetry():
+    """A redaction that removes real data is its own kind of bug.
+
+    An earlier version of the URL pattern had no lookbehind and ate `first_token=2584ms`
+    out of the per-turn timing line — silently destroying the measurement that exists to
+    catch latency regressions, in order to protect a secret that was never there.
+    """
+    import logging
+
+    from app.main import RedactingFormatter
+
+    fmt = RedactingFormatter("%(message)s")
+    record = logging.LogRecord(
+        "aceroai.timing",
+        logging.INFO,
+        __file__,
+        1,
+        "turn ok first_token=2584ms total=6120ms rounds=1",
+        (),
+        None,
+    )
+    rendered = fmt.format(record)
+    assert "first_token=2584ms" in rendered
+    assert "total=6120ms" in rendered
+
+
+def test_the_telegram_channel_is_gone():
+    """The channel was retired in migration 011. Its absence is asserted rather than
+    assumed, because a leftover poller would start a long-poll loop against a bot token
+    that should by then have been revoked."""
+    import importlib
+
+    import pytest
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.channels.telegram")
+
+    from app.config import Settings
+
+    assert "telegram_bot_token" not in Settings.model_fields
+
+    from app import main
+
+    assert not hasattr(main, "telegram")
 
 
 # --- .env.example must not silently override a code default ------------------------

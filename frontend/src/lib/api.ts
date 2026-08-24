@@ -97,12 +97,17 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 /** Undo a delete. The conversation and its messages come back unchanged. */
 export async function restoreSession(sessionId: string): Promise<Session> {
-  const r = await req(`/api/chat/sessions/${sessionId}/restore`, { method: "POST" });
+  const r = await req(`/api/chat/sessions/${sessionId}/restore`, {
+    method: "POST",
+  });
   if (!r.ok) throw new Error("could not restore the conversation");
   return r.json();
 }
 
-export async function renameSession(sessionId: string, title: string): Promise<Session> {
+export async function renameSession(
+  sessionId: string,
+  title: string,
+): Promise<Session> {
   const r = await req(`/api/chat/sessions/${sessionId}`, {
     method: "PATCH",
     body: JSON.stringify({ title }),
@@ -113,7 +118,9 @@ export async function renameSession(sessionId: string, title: string): Promise<S
 
 /** Drop the trailing assistant reply so the turn can be sent again. */
 export async function regenerate(sessionId: string): Promise<void> {
-  const r = await req(`/api/chat/sessions/${sessionId}/regenerate`, { method: "POST" });
+  const r = await req(`/api/chat/sessions/${sessionId}/regenerate`, {
+    method: "POST",
+  });
   if (!r.ok) throw new Error("could not regenerate");
 }
 
@@ -148,13 +155,22 @@ export async function listTasks(status?: string): Promise<Task[]> {
 }
 
 export async function createTask(input: TaskInput): Promise<Task> {
-  const r = await req("/api/tasks", { method: "POST", body: JSON.stringify(input) });
+  const r = await req("/api/tasks", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
   if (!r.ok) throw new Error("could not create task");
   return r.json();
 }
 
-export async function updateTask(id: string, patch: Partial<Task>): Promise<Task> {
-  const r = await req(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+export async function updateTask(
+  id: string,
+  patch: Partial<Task>,
+): Promise<Task> {
+  const r = await req(`/api/tasks/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
   if (!r.ok) throw new Error("could not update task");
   return r.json();
 }
@@ -198,7 +214,9 @@ export type JournalInput = {
 
 export type JournalQuery = { q?: string; limit?: number; offset?: number };
 
-export async function listJournal(query: JournalQuery = {}): Promise<JournalEntry[]> {
+export async function listJournal(
+  query: JournalQuery = {},
+): Promise<JournalEntry[]> {
   const params = new URLSearchParams();
   if (query.q) params.set("q", query.q);
   if (query.limit !== undefined) params.set("limit", String(query.limit));
@@ -215,7 +233,10 @@ export async function updateJournalEntry(
   id: string,
   patch: Partial<JournalInput>,
 ): Promise<JournalEntry> {
-  const r = await req(`/api/journal/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  const r = await req(`/api/journal/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
   if (!r.ok) throw new Error("could not update the entry");
   return r.json();
 }
@@ -227,8 +248,13 @@ export async function restoreJournalEntry(id: string): Promise<JournalEntry> {
   return r.json();
 }
 
-export async function addJournalEntry(input: JournalInput): Promise<JournalEntry> {
-  const r = await req("/api/journal", { method: "POST", body: JSON.stringify(input) });
+export async function addJournalEntry(
+  input: JournalInput,
+): Promise<JournalEntry> {
+  const r = await req("/api/journal", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
   if (!r.ok) throw new Error("could not add entry");
   return r.json();
 }
@@ -297,7 +323,10 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function updateSettings(patch: SettingsUpdate): Promise<Settings> {
-  const r = await req("/api/settings", { method: "PATCH", body: JSON.stringify(patch) });
+  const r = await req("/api/settings", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
   if (!r.ok) {
     const detail = await r.json().catch(() => null);
     throw new Error(detail?.detail ?? "could not save settings");
@@ -355,12 +384,7 @@ export async function* streamChat(
 // --- memory / knowledge graph ---
 
 export type FactCategory =
-  | "preference"
-  | "health"
-  | "work"
-  | "finance"
-  | "relationship"
-  | "other";
+  "preference" | "health" | "work" | "finance" | "relationship" | "other";
 
 export type Fact = {
   id: string;
@@ -489,10 +513,16 @@ export async function updateFact(
 }
 
 /** Confirming is a toggle: one click in, one click out, so a misclick isn't permanent. */
-export async function setFactConfirmed(id: string, confirmed: boolean): Promise<Fact> {
+export async function setFactConfirmed(
+  id: string,
+  confirmed: boolean,
+): Promise<Fact> {
   const path = confirmed ? "confirm" : "unconfirm";
   const r = await req(`/api/memory/facts/${id}/${path}`, { method: "POST" });
-  if (!r.ok) throw new Error(confirmed ? "Could not confirm that fact" : "Could not undo that");
+  if (!r.ok)
+    throw new Error(
+      confirmed ? "Could not confirm that fact" : "Could not undo that",
+    );
   return r.json();
 }
 
@@ -506,7 +536,9 @@ export async function forgetFact(id: string): Promise<void> {
  * A warning with no way to dismiss it becomes permanent furniture. Merging is the other
  * answer, and that is just forgetting the one you don't want. */
 export async function notDuplicate(id: string): Promise<Fact> {
-  const r = await req(`/api/memory/facts/${id}/not-duplicate`, { method: "POST" });
+  const r = await req(`/api/memory/facts/${id}/not-duplicate`, {
+    method: "POST",
+  });
   if (!r.ok) throw new Error("Could not clear that flag");
   return r.json();
 }
@@ -537,7 +569,12 @@ export type InsightsSummary = {
 
 export type TurnKind = "chat" | "embed" | "memory_extract" | "job";
 
-export type SeriesPoint = { day: string; kind: TurnKind; calls: number; cost_usd: string };
+export type SeriesPoint = {
+  day: string;
+  kind: TurnKind;
+  calls: number;
+  cost_usd: string;
+};
 
 export type ModelUsage = {
   provider: string | null;
@@ -668,10 +705,166 @@ export type LearnConstants = {
   graph_max_distance: number;
   span_retention_days: number;
   turn_retention_days: number;
+  job_count: number;
+  job_tick_seconds: number;
+  job_catch_up_hours: number;
+  notification_retention_days: number;
+  daily_push_cap: number;
+  quiet_hours_start: number;
+  quiet_hours_end: number;
+  push_ttl_digest_s: number;
+  push_ttl_nudge_s: number;
+  push_payload_max_bytes: number;
 };
 
 export async function getLearnConstants(): Promise<LearnConstants> {
   const r = await req("/api/learn/constants");
   if (!r.ok) throw new Error("Could not load the current settings");
+  return r.json();
+}
+
+// --- notifications, jobs and briefings (migration 011) ---
+
+/** Something Acero decided to tell you.
+ *
+ * `pushed_at` being null is information, not a gap: it means the notification was recorded
+ * but never reached a device — quiet hours, the daily cap, no subscription, or a send that
+ * failed. The record exists either way, which is the whole point of storing before
+ * delivering. */
+export type NotificationRow = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  url: string | null;
+  tag: string | null;
+  created_at: string;
+  read_at: string | null;
+  pushed_at: string | null;
+};
+
+export async function listNotifications(): Promise<{
+  items: NotificationRow[];
+  unread: number;
+}> {
+  const r = await req("/api/notifications");
+  if (!r.ok) throw new Error("Could not load notifications");
+  return r.json();
+}
+
+export async function unreadCount(): Promise<number> {
+  const r = await req("/api/notifications/unread");
+  if (!r.ok) return 0;
+  return (await r.json()).unread ?? 0;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await req(`/api/notifications/${id}/read`, { method: "POST" });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await req("/api/notifications/read-all", { method: "POST" });
+}
+
+/** What this server can do about push, and what this account has registered.
+ *
+ * `public_key` is a VAPID *public* key — public by design, and required by the browser to
+ * subscribe. The private half never leaves the server. */
+export type PushStatus = {
+  configured: boolean;
+  public_key: string;
+  devices: number;
+  quiet_hours_start: number | null;
+  quiet_hours_end: number | null;
+  daily_push_cap: number | null;
+};
+
+export async function getPushStatus(): Promise<PushStatus> {
+  const r = await req("/api/notifications/push");
+  if (!r.ok) throw new Error("Could not load notification settings");
+  return r.json();
+}
+
+export async function subscribePush(sub: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}): Promise<void> {
+  const r = await req("/api/notifications/push", {
+    method: "POST",
+    body: JSON.stringify(sub),
+  });
+  if (!r.ok) throw new Error("Could not register this device");
+}
+
+export async function unsubscribePush(endpoint: string): Promise<void> {
+  await req(
+    `/api/notifications/push?endpoint=${encodeURIComponent(endpoint)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+/** Provoke a notification on demand.
+ *
+ * Returns a reason rather than throwing, because every way this can fail is something the
+ * user can act on: no keys on the server, no device subscribed, or a device that refused. */
+export async function sendTestNotification(): Promise<{
+  ok: boolean;
+  reason?: string;
+}> {
+  const r = await req("/api/notifications/push/test", { method: "POST" });
+  if (!r.ok) return { ok: false, reason: "The request failed." };
+  return r.json();
+}
+
+/** One thing Acero does on a schedule. `schedule` is the cron expression (the truth);
+ *  `when` is the same thing phrased for a person, rendered server-side so there is one
+ *  implementation rather than a second one here that can drift. */
+export type JobRow = {
+  name: string;
+  description: string;
+  schedule: string;
+  when: string;
+  uses_ai: boolean;
+  default_on: boolean;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_status: string | null;
+};
+
+export async function listJobs(): Promise<JobRow[]> {
+  const r = await req("/api/jobs");
+  if (!r.ok) throw new Error("Could not load scheduled work");
+  return r.json();
+}
+
+export async function setJobEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<JobRow> {
+  const r = await req(`/api/jobs/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+  if (!r.ok) throw new Error("Could not change that setting");
+  return r.json();
+}
+
+/** A briefing Acero wrote about a day. Read-only: editing one would make it a note the
+ *  user wrote, which is what the journal is already for. */
+export type Briefing = {
+  id: string;
+  kind: string;
+  content: string;
+  period_start: string;
+  period_end: string;
+  created_at: string;
+};
+
+export async function listBriefings(): Promise<Briefing[]> {
+  const r = await req("/api/journal/briefings");
+  if (!r.ok) throw new Error("Could not load briefings");
   return r.json();
 }

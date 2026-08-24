@@ -115,7 +115,9 @@ GOOGLE_CLOUD_PROJECT=<your project id>
 OPENAI_API_KEY=<optional; leave blank and OpenAI isn't offered in Settings>
 MODEL_CHAT=gemini-3.5-flash
 MODEL_HEAVY=gemini-3.1-pro-preview
-TELEGRAM_BOT_TOKEN=<your bot token, optional>
+VAPID_PUBLIC_KEY=<from `uv run python -m app.scripts.generate_vapid`>
+VAPID_PRIVATE_KEY=<the private half — never leaves the server>
+VAPID_SUBJECT=mailto:you@example.com
 
 # Embeddings: pick the region nearest THIS SERVER, not nearest you.
 # The Oregon VM → us-central1. (The `global` endpoint measured ~12 s per call.)
@@ -155,7 +157,7 @@ free -h                                       # confirm memory headroom
 4. Deploy → note the `https://<project>.vercel.app` URL.
 5. **Back on the VM**: set `FRONTEND_ORIGIN=https://<project>.vercel.app` in `.env`,
    then `docker compose -f docker-compose.prod.yml up -d` to restart the api.
-6. Open the Vercel URL, log in, and try it from your phone. If Telegram is
+6. Open the Vercel URL, log in, and try it from your phone. If notifications are
    configured, the bot works too (its poller runs in the api container).
 
 **Done** — you're live. 🎉

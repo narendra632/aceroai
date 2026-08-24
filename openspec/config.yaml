@@ -23,7 +23,11 @@ context: |
 
 rules:
   tasks:
-    - End every task list with a final section containing this item, checked like
+    # Quoted deliberately. A plain YAML scalar may not contain ": " — an unquoted
+    # version of this rule made the WHOLE file unparseable, and OpenSpec then ignored
+    # every rule and the project context in silence for six changes.
+    - >-
+      End every task list with a final section containing this item, checked like
       tests are: "docs and diagrams reflect what was built". If the change truly
       alters nothing documented, answer it explicitly rather than dropping it —
       the difference between "checked" and "forgotten" must stay visible.
