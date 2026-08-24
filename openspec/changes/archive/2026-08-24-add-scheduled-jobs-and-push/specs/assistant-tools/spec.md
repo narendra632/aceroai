@@ -23,9 +23,10 @@ NOT carry the ability to take actions.
 - **THEN** the backend executes the tool, feeds the result back to the model, and the
   model's final text reply reflects that result
 
-#### Scenario: Behavior belongs to the handler, not the caller
+#### Scenario: Same behavior on every channel
 
-- **WHEN** an actionable request reaches the shared message handler from any caller
+- **WHEN** an actionable request reaches the shared message handler, from any caller and on
+  any channel
 - **THEN** the assistant performs the same action through the same service layer
 
 #### Scenario: Scheduled work does not use tools
