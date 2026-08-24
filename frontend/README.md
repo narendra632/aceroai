@@ -163,6 +163,16 @@ the strategy chosen needs no generated precache manifest:
 Bumping `VERSION` in `sw.js` is the entire cache-invalidation story; `activate` deletes every
 older cache.
 
+⚠ **`vercel.json` exists to stop the CDN caching `sw.js` and the manifest.** A cached service
+worker can never be replaced by a deploy, so the app would be frozen at whichever version was
+installed first — including its push handler. The manifest is the same: cache it and the app's
+name, icons and shortcuts freeze.
+
+That file carries no comments explaining this, because **`vercel.json` cannot have any**.
+JSON has no comment syntax, and Vercel validates the file against a strict schema that
+rejects unknown keys — a `"//"` key, which some tools tolerate as a comment convention,
+fails the build with `should NOT have additional property '//'`. Hence this paragraph.
+
 **Subscribing needs a user gesture**, so `main.tsx` only *registers* the worker and the
 permission prompt lives behind a button in Settings. A refused permission is permanent from
 the app's side — the panel says so rather than offering a button that silently does nothing.
