@@ -22,6 +22,7 @@ off for three days wakes up and sends one summary, not three.
 import datetime as dt
 import logging
 import uuid
+from contextlib import contextmanager
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import GeneratedReview, JobRun, User
+from app.db.session import engine
 from app.jobs.registry import Job, JobResult, all_jobs
 from app.services import budget, job_prefs
 
@@ -168,6 +170,63 @@ def _lock_key(job_name: str) -> str:
     return f"acero:job:{job_name}"
 
 
+@contextmanager
+def _job_lock(job_name: str):
+    """Hold the advisory lock on a DEDICATED connection for the whole job.
+
+    ⚠ This used to take the lock on the job's own `Session`, and that did not work. The bug
+    is worth recording because everything about it looked correct:
+
+    `pg_try_advisory_lock` is **session-level**, where "session" means one Postgres
+    connection. A SQLAlchemy `Session` is not pinned to one: `Session.commit()` returns the
+    connection to the pool, and the next statement checks out whichever connection is free.
+    `run_job` commits several times — `_apply_timeouts`, `_record`, `_deliver` — so by the
+    time the `finally` ran `pg_advisory_unlock`, it was usually executing on a **different
+    connection than the one holding the lock**.
+
+    Two consequences, and the second is the dangerous one:
+
+    1. **The lock leaked.** `pg_advisory_unlock` returned false and nothing noticed, so the
+       original connection went back into the pool still holding it. Observed in development
+       as idle pooled connections whose last statement was `ROLLBACK`, holding advisory
+       locks for jobs that had finished minutes earlier.
+    2. **It never actually excluded anything.** A concurrent run would check out a different
+       connection, and `pg_try_advisory_lock` on a connection that has never held the lock
+       succeeds. The mutual exclusion this was written to provide was not there — the
+       `UNIQUE (job_name, occurrence_key)` constraint was carrying the guarantee alone.
+
+    A dedicated connection fixes both: the lock is taken and released on the same physical
+    connection, and its lifetime is exactly the `with` block.
+
+    A transaction-scoped lock (`pg_try_advisory_xact_lock`) would be simpler and is not
+    usable here, because it releases at the first `COMMIT` and this job commits repeatedly.
+    """
+    conn = engine.connect()
+    key = {"k": _lock_key(job_name)}
+    try:
+        acquired = conn.execute(text("SELECT pg_try_advisory_lock(hashtext(:k))"), key).scalar()
+        if not acquired:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            released = conn.execute(text("SELECT pg_advisory_unlock(hashtext(:k))"), key).scalar()
+            if not released:
+                # Cannot happen now that the connection is pinned — kept because if it ever
+                # does, a connection must not go back to the pool still holding a lock.
+                log.warning(
+                    "advisory lock for %s was not released; discarding the connection", job_name
+                )
+                conn.invalidate()
+    except Exception:  # noqa: BLE001 - locking must not become a way for a job to fail
+        log.warning("advisory lock handling failed for %s", job_name, exc_info=True)
+        conn.invalidate()
+        raise
+    finally:
+        conn.close()
+
+
 def run_job(db: Session, job: Job, user: User, key: str, *, force: bool = False) -> str:
     """Run one job for one occurrence. Returns the recorded status.
 
@@ -185,13 +244,15 @@ def run_job(db: Session, job: Job, user: User, key: str, *, force: bool = False)
     # Redundant with the unique constraint above, and kept on purpose: it is what keeps
     # this correct if a second worker, a second container, or a hand-run `python -m
     # app.jobs.run` ever executes concurrently with the scheduler.
-    locked = db.execute(
-        text("SELECT pg_try_advisory_lock(hashtext(:k))"), {"k": _lock_key(job.name)}
-    ).scalar()
-    if not locked:
-        log.info("job %s is already running elsewhere; skipping this tick", job.name)
-        return "locked"
+    with _job_lock(job.name) as acquired:
+        if not acquired:
+            log.info("job %s is already running elsewhere; skipping this tick", job.name)
+            return "locked"
+        return _run_locked(db, job, user, key)
 
+
+def _run_locked(db: Session, job: Job, user: User, key: str) -> str:
+    """The job itself, with the advisory lock already held."""
     started = dt.datetime.now(dt.UTC)
     try:
         if job.uses_ai:
@@ -215,11 +276,6 @@ def run_job(db: Session, job: Job, user: User, key: str, *, force: bool = False)
         return "failed"
     finally:
         _reset_timeouts(db)
-        try:
-            db.execute(text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": _lock_key(job.name)})
-            db.commit()
-        except Exception:  # noqa: BLE001 - the lock dies with the connection anyway
-            db.rollback()
 
 
 def _deliver(db: Session, user: User, job: Job, result: JobResult) -> None:

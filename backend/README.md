@@ -188,9 +188,10 @@ and the conformance suite in `tests/test_providers.py` holds it to the contract.
 | `app/core/telemetry.py` | `Timeline` — per-turn stage timings and context description; `record()` persists a trace **after** the reply and guarantees a failure there can never reach it |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
 | `app/scripts/verify_llm.py` | **Legacy** smoke test against the Gemini *Developer* API — does not exercise `core/providers/` |
-| `app/jobs/` | Recurring work — `registry`, `runner`, `scheduler`, `run` (the CLI), and the six jobs |
+| `app/jobs/` | Recurring work — `registry`, `runner`, `scheduler`, `run` (the CLI), and the seven jobs |
 | `app/core/push.py` | Web-push encryption and VAPID signing; importable with no keys set |
-| `app/services/notifications.py` | Store-then-deliver, quiet hours, the daily cap |
+| `app/services/notifications.py` | Store-then-deliver, quiet hours, repetition suppression, removal |
+| `app/services/vitals.py` | Disk, memory, database size, scheduler heartbeat — `None` when a reading cannot be taken |
 | `app/services/job_prefs.py` | Per-job on/off (sparse table) and the human-readable schedule |
 | `app/scripts/generate_vapid.py` | One-time key generation. Prints; writes nothing |
 | `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet. Retention currently sweeps opportunistically from `telemetry.record` instead — see the TODO in `services/retention.py` |

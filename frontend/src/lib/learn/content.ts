@@ -483,7 +483,7 @@ export const COST_FLOW: Diagram = {
       title: "Roll up the day",
       what: "Before old detail is deleted, each day's totals are summed into a permanent row.",
       how: [
-        "Runs once a day, on the first call of the day — no scheduler needed yet",
+        "Runs at 03:15 as part of the nightly sweep, on the scheduler",
         "The boundary is taken from the data, so there can be no gap and no double count",
         "Totals survive; the per-turn detail behind them does not",
       ],
@@ -896,6 +896,40 @@ export const CONCEPTS: Concept[] = [
     concepts: ["one-brain"],
   },
   {
+    id: "absence-is-invisible",
+    group: "delivery",
+    title: "A system cannot notice its own silence",
+    what: "If the scheduler stops, nothing fails. No request errors, no log line appears, no job records a failure — the work simply stops happening.",
+    how: [
+      "Every other fault produces something: an exception, a 500, a failed row",
+      "An absence produces nothing at all, which is why it is the hardest kind to catch",
+      "So the scheduler stamps the time on every tick, and Insights shows how long ago",
+      "Read beside uptime, because 'just restarted' and 'stopped' are different answers",
+      "Deliberately NOT the newest job run: nothing runs between 21:00 and 03:15, so that would cry wolf nightly",
+    ],
+    measured:
+      "A signal that is wrong every night is one nobody reads on the morning it is right.",
+    code: ["backend/app/services/vitals.py"],
+    reads: [{ label: "How notifications work", href: "docs/NOTIFICATIONS.md" }],
+  },
+  {
+    id: "unsaid",
+    group: "delivery",
+    title: "Deleting the record does not unsay it",
+    what: "Removing a notification changes what you see. It does not change what the system knows it has already done.",
+    how: [
+      "Two questions read old notifications: 'have I said this?' and 'how many have I sent today?'",
+      "Both deliberately still see the ones you deleted",
+      "Otherwise dismissing 'three tasks are overdue' would make the next hour treat it as news",
+      "Delete would quietly come to mean 'remind me again within the hour'",
+      "Everywhere else, a deleted row is hidden from every reader — these two are the exceptions",
+    ],
+    measured:
+      "The phone already buzzed. Throwing away the receipt does not un-buzz it.",
+    code: ["backend/app/services/notifications.py"],
+    concepts: ["store-then-deliver"],
+  },
+  {
     id: "web-push",
     group: "delivery",
     title: "Web push and VAPID",
@@ -1167,10 +1201,11 @@ export const PROACTIVE_FLOW: Diagram = {
     policy: {
       id: "policy",
       title: "Should it interrupt?",
-      what: "Quiet hours and a daily ceiling decide whether this becomes a buzz in your pocket or waits quietly in the app.",
+      what: "Quiet hours, and whether this is actually news, decide if it becomes a buzz in your pocket or waits quietly in the app.",
       how: [
         "Quiet hours default to {quiet_hours_start}:00 until {quiet_hours_end}:00: recorded, not delivered",
-        "At most {daily_push_cap} pushes a day. Beyond that they are still written down",
+        "A situation already reported stays quiet until it CHANGES — that is what limits volume",
+        "There is no daily ceiling: one reached in normal use just deletes what you wanted",
         "Notification fatigue is the most common way a feature like this dies",
         "Applied centrally, so no individual job can forget it",
       ],

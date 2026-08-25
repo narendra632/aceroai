@@ -96,8 +96,13 @@ def rollup(db: Session, *, through: dt.date | None = None) -> int:
     Insights page reads today from the live turns anyway.
 
     Idempotent by construction: the insert upserts on the day key, so re-running recomputes
-    the same numbers rather than adding to them. That matters because this runs
-    opportunistically and may fire twice for the same day.
+    the same numbers rather than adding to them.
+
+    That mattered originally because the sweep fired opportunistically off a delivered reply
+    and could run twice for the same day. It now runs once, from `retention_sweep` at 03:15
+    — but the property is still load-bearing: `catch_up=None` means a missed sweep runs
+    however late, so a VM that was off for two days rolls up the same day again on its
+    return. Idempotence is what makes catching up safe rather than destructive.
     """
     through = through or today_local()  # exclusive: today is not complete
     day = func.date(func.timezone(settings.app_timezone, Turn.started_at)).label("day")

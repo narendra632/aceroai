@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.schemas import JournalIn, JournalOut, JournalUpdate, ReviewOut
-from app.db.models import GeneratedReview, User
+from app.db.models import User
 from app.db.session import get_db
 from app.services import journal as svc
 
@@ -90,20 +90,32 @@ def list_briefings(
 ) -> list[ReviewOut]:
     """What Acero wrote about the user's days, newest first.
 
-    Read-only by design. A briefing is a record of what was said on a given morning or
-    evening; editing it would make it a note the user wrote, which is what the journal is
+    Read-only apart from removal. A briefing is a record of what was said on a given morning
+    or evening; editing it would make it a note the user wrote, which is what the journal is
     already for.
     """
-    from sqlalchemy import select
-
-    rows = (
-        db.execute(
-            select(GeneratedReview)
-            .where(GeneratedReview.user_id == user.id)
-            .order_by(GeneratedReview.period_start.desc(), GeneratedReview.created_at.desc())
-            .limit(limit)
-        )
-        .scalars()
-        .all()
-    )
+    rows = svc.list_briefings(db, user.id, limit=limit)
     return [ReviewOut.model_validate(r) for r in rows]
+
+
+@router.delete("/briefings/{briefing_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_briefing(
+    briefing_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Soft delete, undoable for the length of a toast.
+
+    Does NOT cause the briefing to be written again: `job_runs` records what has run, and
+    this table is only that job's output. See `services/journal.delete_briefing`.
+    """
+    svc.delete_briefing(db, user.id, briefing_id)
+
+
+@router.post("/briefings/{briefing_id}/restore", response_model=ReviewOut)
+def restore_briefing(
+    briefing_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReviewOut:
+    return ReviewOut.model_validate(svc.restore_briefing(db, user.id, briefing_id))

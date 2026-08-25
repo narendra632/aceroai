@@ -46,6 +46,7 @@
   --series-1: #c15f3c;  /* chat — the reply you waited for */
   --series-2: #2a78d6;  /* embed — recall */
   --series-3: #1baf7a;  /* memory_extract — learning */
+  --series-4: #7c5cd6;  /* job — scheduled work, spent while you were not here */
   --chart-grid: #ece7dc;
   --chart-axis: #d8d1c2;
 }
@@ -81,6 +82,7 @@
   --series-1: #d1704e;
   --series-2: #3987e5;
   --series-3: #199e70;
+  --series-4: #9179e8;
   --chart-grid: #34322c;
   --chart-axis: #45423a;
 }

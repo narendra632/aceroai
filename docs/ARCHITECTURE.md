@@ -148,18 +148,18 @@ the service worker even with the app closed. It has no access to the tool loop �
 | `app/api/auth.py` | `POST /api/auth/login` · `/logout` · `GET /api/auth/me` |
 | `app/api/chat.py` | `POST /api/chat` (SSE) · session list · history · delete session |
 | `app/api/tasks.py` | `/api/tasks` CRUD + `/{id}/complete` |
-| `app/api/journal.py` | `/api/journal` CRUD |
+| `app/api/journal.py` | `/api/journal` CRUD · `briefings` list/delete/restore |
 | `app/api/settings.py` | `GET/PATCH /api/settings` + `GET /api/settings/budget` |
 | `app/api/memory.py` | Facts list/search/detail/edit/confirm/forget/restore/not-duplicate · graph · stats |
 | `app/api/learn.py` | The tuning values the Learn section quotes. Read-only, derived from `settings`, allow-listed |
-| `app/api/insights.py` | `overview` · `turns` · `turns/{id}` — read-only |
+| `app/api/insights.py` | `overview` · `turns` · `turns/{id}` · `vitals` — read-only |
 | `app/api/schemas.py` | Pydantic request/response models |
-| `app/jobs/` | Recurring work: `registry` (what a job is), `runner` (what is due, exactly once), `scheduler` (the tick), plus the six jobs. See [`JOBS.md`](JOBS.md) |
+| `app/jobs/` | Recurring work: `registry` (what a job is), `runner` (what is due, exactly once), `scheduler` (the tick), plus the seven jobs. See [`JOBS.md`](JOBS.md) |
 | `app/core/push.py` | Encrypts and signs a web-push message. No key needed to import it |
-| `app/services/notifications.py` | Store-then-deliver, quiet hours, the daily cap |
-| `app/db/models.py` | The 10 ORM tables (typed `Mapped[]`) |
+| `app/services/notifications.py` | Store-then-deliver, quiet hours, repetition suppression, removal |
+| `app/services/vitals.py` | Disk, memory, database size, scheduler heartbeat. A reading it cannot take is `None`, never zero |
+| `app/db/models.py` | The 14 ORM tables (typed `Mapped[]`) |
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` |
-| `app/jobs/` | **Empty package.** APScheduler is a dependency; no job is implemented yet |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
 | `app/scripts/verify_llm.py` | Legacy smoke test against the **Gemini Developer API** (`LLM_BASE_URL`/`LLM_API_KEY`) — **not** the provider layer the app uses |
 | `alembic/versions/…001_core_tables.py` | `CREATE EXTENSION vector` + the 7 core tables |
@@ -686,6 +686,7 @@ erDiagram
         timestamptz period_start
         timestamptz period_end
         text_array delivered_to
+        timestamptz deleted_at "soft delete; deleting does NOT re-run the job"
     }
     turns {
         uuid id PK
@@ -743,6 +744,7 @@ erDiagram
         text tag "same tag replaces on the device"
         timestamptz read_at
         timestamptz pushed_at "null = never reached a device"
+        timestamptz deleted_at "soft delete; two readers ignore it on purpose"
     }
     push_subscriptions {
         uuid id PK

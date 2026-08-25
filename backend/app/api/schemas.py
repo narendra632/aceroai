@@ -416,7 +416,6 @@ class LearnConstants(BaseModel):
     job_tick_seconds: int
     job_catch_up_hours: int
     notification_retention_days: int
-    daily_push_cap: int
     quiet_hours_start: int
     quiet_hours_end: int
     push_ttl_digest_s: int
@@ -471,7 +470,55 @@ class PushStatusOut(BaseModel):
     devices: int
     quiet_hours_start: int | None
     quiet_hours_end: int | None
+    #: The user's ceiling on deliveries per day. **0, and the default, means no ceiling.**
+    #: Retained as an escape hatch for a looping job rather than as a product feature —
+    #: expected volume is governed by per-tag repetition suppression instead.
     daily_push_cap: int | None
+    #: How many notifications reached a device today. A readout, not a limit — and counted
+    #: from what was DELIVERED, so clearing the panel does not reset it.
+    pushed_today: int
+
+
+class ClearedOut(BaseModel):
+    """The ids a bulk removal actually removed.
+
+    Returned rather than a count, because the undo restores exactly this set. "Restore
+    everything read" would be the obvious inverse and is wrong: anything marked read between
+    the clear and the undo would be resurrected along with it.
+    """
+
+    ids: list[uuid.UUID]
+
+
+class CapacityOut(BaseModel):
+    used_bytes: int
+    total_bytes: int
+    percent: float
+
+
+class VitalsOut(BaseModel):
+    """What the machine is doing right now.
+
+    **Every measurement is optional, and that is the point.** `/proc` does not exist on
+    Windows, so on the development machine memory and load are genuinely absent. Making the
+    absence expressible in the type is what stops it being encoded as a zero — and "0%
+    memory pressure" is the most reassuring possible way to say "I have no idea".
+    """
+
+    disk: CapacityOut | None
+    memory: CapacityOut | None
+    load_1m: float | None
+    database_bytes: int | None
+    #: When the scheduler last completed a pass. **None means "not yet in this process"** —
+    #: true after a restart, and true for at most one tick interval. Read together with
+    #: `uptime_seconds`, which is what separates "just booted" from "the ticker has stopped".
+    last_tick: dt.datetime | None
+    uptime_seconds: float
+    #: So the client can judge staleness without hard-coding the server's schedule.
+    tick_interval_seconds: int
+    #: The threshold `disk_watch` notifies at, so the interface and the job cannot disagree
+    #: about what "getting full" means.
+    disk_warn_percent: int
 
 
 class JobOut(BaseModel):

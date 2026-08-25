@@ -133,8 +133,8 @@ This is the part worth reading twice, because five parties are involved and four
 else's.
 
 **Start with the test button.** Settings → Notifications → *Send a test*. It bypasses quiet
-hours and the daily cap on purpose — you asked for this one — and every refusal names the
-cause rather than failing silently.
+hours on purpose — you asked for this one — and every refusal names the cause rather than
+failing silently.
 
 Then, in order:
 
@@ -144,7 +144,8 @@ Then, in order:
 | "No device is subscribed yet" | Permission granted but never subscribed | Press *Turn on for this device* |
 | "Notifications are blocked for this site" | Permission was refused at some point | **The app cannot ask again.** Re-allow in the browser's site settings |
 | Nothing at all on iPhone | Not installed to the Home Screen | Share → Add to Home Screen |
-| Test works, real ones do not | Quiet hours, the daily cap, or the job is off | Check the bell — the row will be there with no send time. Check Settings → the job's toggle |
+| Test works, real ones do not | Quiet hours, repetition suppression, or the job is off | Check the bell — the row will be there with no send time. Check Settings → the job's toggle |
+| A nudge repeats after you dismiss it | It should not — see §8 | Dismissing does not re-arm the nudge behind it. If it does, `already_said` has been taught to filter deleted rows |
 | Worked yesterday, silent today | Subscription died | The next send gets a `410` and removes it. Re-subscribe |
 | Nothing after a deploy | A cached `sw.js` | It is served `no-cache` by `vercel.json`; hard-refresh, and check Application → Service Workers |
 
@@ -183,11 +184,42 @@ Three controls, all applied centrally so no individual job can forget them:
 |---|---|---|
 | Per-job toggle | from the registry | Off means the job does not run at all — not merely silenced |
 | Quiet hours | 22:00 – 07:00 | Row **is** written; the push is suppressed. It is in the bell in the morning |
-| Daily cap | 6 | Beyond it, rows are written and pushes dropped |
+| Repetition suppression | always on | A situation already reported stays quiet until it **changes** |
+| Daily ceiling | **0 — none** | Set it only as an escape hatch. See below |
 
 Quiet hours default to the server setting when unset. **Equal start and end means off** — a
 zero-length window is no window, and it is the only available encoding, because NULL already
 means "use the default". The Settings toggle writes `0/0`.
+
+### Why there is no daily ceiling
+
+There used to be one, defaulting to six. `task_nudge` alone can fire thirteen times a day,
+so it was **binding in ordinary use** — which means it was silently discarding notifications
+that were wanted, beginning with the most frequent one, the hourly overdue-task ping.
+
+A ceiling reached during normal operation is not a safety limit. It is an undocumented
+feature that stops telling you things after lunch.
+
+Volume is governed instead by **whether something is news** — see *Saying something once* in
+`JOBS.md`. That is the right control for expected volume.
+
+The setting is kept at `0` rather than deleted because it is the wrong control for
+*unexpected* volume, and that is a real failure mode: a job that loops, or one whose tag
+changes every run, is untouched by per-tag suppression. `DAILY_PUSH_CAP` is the only bound
+such a job would respect. It costs one falsy check and is the difference between a bad hour
+and a bad hour with no way to stop it.
+
+### What removal does and does not change
+
+Notifications can be removed — individually, or all the read ones at once — and restored
+from the undo toast. Two things removal deliberately leaves alone:
+
+- **The nudge behind it stays suppressed.** `already_said` asks what has been *said*, not
+  what is still on screen. Otherwise dismissing "3 tasks are overdue" would make the next
+  hourly run push it again.
+- **The day's delivered count is unchanged.** It counts *deliveries*, not surviving
+  receipts. The phone already buzzed; clearing the panel does not un-buzz it. Shown in
+  Settings as "N sent today".
 
 ---
 
@@ -210,3 +242,51 @@ Tests: `backend/tests/test_notifications.py` and `test_api_notifications.py`. Th
 **transport** rather than a fake sender — encryption and VAPID signing are real, and only the
 HTTP POST is replaced, so the two parts most likely to be subtly wrong are genuinely
 exercised in CI.
+
+---
+
+## 10. Reading the server's condition
+
+`GET /api/insights/vitals` — authenticated, never cached — reports disk, memory, database
+size, 1-minute load, process uptime, and when the scheduler last ticked. The Insights page
+polls it every 10 seconds, and **stops while the tab is hidden**: a forgotten background tab
+would otherwise poll the VM about 8,600 times a day to render a page nobody is looking at,
+generating load *by* the monitoring, *on* the machine being monitored.
+
+It is deliberately **not** part of `/health`. That endpoint is unauthenticated — Caddy probes
+it, and it is what proves the backend is alive from outside the network. It returns
+`{"status": "ok"}` and nothing else, and a test pins that.
+
+### ⚠ Memory and load are blank on Windows. This is not a bug.
+
+They come from `/proc/meminfo` and `/proc/loadavg`, which exist only on Linux. On a Windows
+development machine those two tiles are simply **absent**, and disk, database size and the
+scheduler heartbeat are all present as normal. On the VM everything appears.
+
+Absent rather than zero, deliberately: a zero is a wrong answer wearing the confidence of a
+right one, and "0% memory pressure" is the most reassuring possible way to say "I have no
+idea".
+
+Memory reads **`MemAvailable`, not `MemFree`** — on any box running Postgres, `MemFree` is
+alarming and meaningless, because the kernel has spent the rest on page cache and will
+reclaim it the moment anything needs it. `MemFree` would report 98% pressure on a perfectly
+healthy machine.
+
+### The scheduler heartbeat
+
+`last_tick` comes from the scheduler's own in-process timestamp, set every tick — **not** from
+the newest `job_runs` row.
+
+A `job_runs` row is written only when an occurrence actually fires, and the jobs cluster in
+waking hours: there are six hours between the 21:00 nudge and the 03:15 sweep in which a
+perfectly healthy scheduler writes nothing at all. Reading "newest job run" as a heartbeat
+would report a dead scheduler every single night, and a signal that cries wolf nightly is one
+nobody reads on the morning it is right.
+
+`null` means "this process has not ticked yet" — true after a restart, and true for at most
+one interval. It is read alongside uptime, which is what separates *just booted* from *the
+ticker has stopped*.
+
+This is the one failure the system could not otherwise report about itself: if the scheduler
+thread dies while the API keeps serving, no request fails, no log line appears, and no job
+records an error. Scheduled work simply stops happening.

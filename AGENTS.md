@@ -83,10 +83,8 @@ incremental change.
 - backend/app/api/      HTTP routes (auth, chat SSE, tasks, journal, settings,
                         memory, insights, learn). learn.py is read-only and serves an
                         ALLOW-LISTED set of tuning values — never settings.model_dump()
-- backend/app/jobs/     registry, runner, scheduler + the six scheduled jobs
-- backend/app/jobs/     empty package — no scheduled job built yet
-                        (retention currently sweeps from telemetry.record instead)
-- backend/app/db/       models.py (10 tables), session.py
+- backend/app/jobs/     registry, runner, scheduler + the seven scheduled jobs
+- backend/app/db/       models.py (14 tables), session.py
 - frontend/src/         Vite SPA — components/, hooks/, lib/api.ts
 - frontend/src/lib/learn/  the Learn section's content as typed data. Numbers are
                         written as {placeholders} and resolved from /api/learn/constants;
@@ -96,14 +94,15 @@ incremental change.
 
 ## Current status
 
-**Built and live:** web chat (SSE) · scheduled jobs + web push · cross-session memory
+**Built and live:** web chat (SSE) · scheduled jobs + web push + installable PWA ·
+server vital signs · cross-session memory
 (hybrid recall: pgvector/HNSW + Postgres full-text, fused by RRF; memory tools;
 one writer) · adaptive reasoning · tasks + journal with assistant tool-use ·
 multi-provider LLM + Settings · observability + monthly spend cap ·
 hosting with auto-deploy on push to `main`.
 
-**Not built yet:** anything in `app/jobs/` (no scheduled job), PWA/push, journal
-semantic search, database backups.
+**Not built yet:** journal semantic search, database backups, MCP, the Investments
+page.
 
 Status detail and what comes next live in **`docs/ROADMAP.md`** — the one place
 that owns it. Do not restate progress here; this file owns *conventions*.

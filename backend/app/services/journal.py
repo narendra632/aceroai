@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import JournalEntry
+from app.db.models import GeneratedReview, JournalEntry
 from app.services.errors import Invalid, NotFound
 
 LIST_LIMIT = 100
@@ -152,3 +152,63 @@ def restore_entry(db: Session, user_id: uuid.UUID, entry_id: uuid.UUID) -> Journ
     db.commit()
     db.refresh(entry)
     return entry
+
+
+# --- Acero's briefings ----------------------------------------------------------------
+#
+# A briefing is the same shape as a journal entry — dated, one per day, reflective — and
+# differs only in authorship. It lives here rather than in a router because the golden rule
+# holds regardless of who wrote the content: `services/` is where the query lives.
+#
+# Read-only apart from deletion. Editing a briefing would turn it into a note the user
+# wrote, which is exactly what the other tab is for.
+
+
+def list_briefings(db: Session, user_id: uuid.UUID, limit: int = 60) -> list[GeneratedReview]:
+    return list(
+        db.execute(
+            select(GeneratedReview)
+            .where(GeneratedReview.user_id == user_id, GeneratedReview.deleted_at.is_(None))
+            .order_by(GeneratedReview.period_start.desc(), GeneratedReview.created_at.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_briefing(
+    db: Session, user_id: uuid.UUID, briefing_id: uuid.UUID, *, include_deleted: bool = False
+) -> GeneratedReview:
+    row = db.get(GeneratedReview, briefing_id)
+    if row is None or row.user_id != user_id:
+        raise NotFound("briefing not found")
+    if row.deleted_at is not None and not include_deleted:
+        raise NotFound("briefing not found")
+    return row
+
+
+def delete_briefing(db: Session, user_id: uuid.UUID, briefing_id: uuid.UUID) -> None:
+    """Soft delete, undoable for the length of a toast.
+
+    ⚠ Deleting a briefing does NOT cause it to be written again. `job_runs` records what has
+    run, keyed on (job, occurrence); this table is only that job's OUTPUT. Removing the
+    output leaves the run record untouched, so the job does not re-fire and the next
+    occurrence is tomorrow's.
+
+    Worth stating because the opposite arrangement — briefings as the source of truth — would
+    have made deleting one cost money to replace it, which is not what anybody means by
+    "delete".
+    """
+    row = get_briefing(db, user_id, briefing_id)
+    row.deleted_at = dt.datetime.now(dt.UTC)
+    db.commit()
+
+
+def restore_briefing(db: Session, user_id: uuid.UUID, briefing_id: uuid.UUID) -> GeneratedReview:
+    """Undo. A no-op on a live row, so a double-tap on Undo cannot fail."""
+    row = get_briefing(db, user_id, briefing_id, include_deleted=True)
+    row.deleted_at = None
+    db.commit()
+    db.refresh(row)
+    return row

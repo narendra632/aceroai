@@ -60,6 +60,7 @@ Each job says how late it may still run.
 | `budget_watch` | 09:00 | 21:00 | A spend warning is useful all day |
 | `journal_nudge` | 20:30 | 22:30 | "Write about today", delivered tomorrow, is noise |
 | `retention_sweep` | 03:15 | **however late** | Sweeping late beats not sweeping |
+| `disk_watch` | every 6 h | +2 h | A full disk stops Postgres accepting writes |
 
 ⚠ **A trap, found by measurement.** The window must be *shorter than the gap between runs*.
 A daily job with a 24-hour window can never be missed — its occurrences are 24 hours apart,
@@ -81,7 +82,7 @@ happened" and "nothing was supposed to happen" never look the same afterwards.
 Three levels. Most jobs are at the first one.
 
 **Level 0 — no model at all.** `task_nudge`, `budget_watch`, `journal_nudge`,
-`retention_sweep`. *"Which tasks are overdue"* is a database query, not a question for a
+`retention_sweep`, `disk_watch`. *"Which tasks are overdue"* is a database query, not a question for a
 language model. Free, instant, and structurally incapable of inventing a task.
 
 **Level 1 — the job owns the facts, the model owns the voice.** The two summaries:
@@ -199,7 +200,7 @@ the command above, which requires shell access to the machine.
 | Rail | What it stops |
 |---|---|
 | `UNIQUE (job_name, occurrence_key)` | The same run happening twice |
-| `pg_try_advisory_lock` | Two processes doing the same work at once |
+| `pg_try_advisory_lock`, on a **dedicated connection** | Two processes doing the same work at once |
 | `lock_timeout = 3s` | Housekeeping blocking a request you are waiting on |
 | `statement_timeout = 60s` | One runaway query wedging the tick |
 | Everything caught and recorded | A failing job stopping the scheduler or reaching the app |
@@ -240,7 +241,7 @@ backend/app/jobs/
   runner.py        what is DUE, and running it exactly once
   scheduler.py     the ticker — APScheduler holds exactly one job
   run.py           python -m app.jobs.run
-  housekeeping.py  retention_sweep
+  housekeeping.py  retention_sweep, disk_watch
   brief.py         morning_brief, day_end_summary   (the only jobs that call a model)
   nudges.py        task_nudge, budget_watch, journal_nudge
 
@@ -250,3 +251,63 @@ backend/app/api/jobs.py              list and toggle
 
 Tests: `backend/tests/test_jobs.py` (the machinery) and `test_job_content.py` (what the six
 shipped jobs actually decide).
+
+---
+
+## Saying something once: tags, bands, and the lookback window
+
+The hard part of a recurring job is not noticing the problem. It is **not telling you
+twenty-eight times.**
+
+Every job that can notify carries a **tag** describing *the situation it is reporting*, and
+`already_said()` refuses to raise the same tag twice. What goes in the tag decides
+everything, and there are two shapes:
+
+**A tag that encodes a changing set.** `task_nudge` hashes the ids of the tasks that are
+currently overdue. Complete one and the hash changes, so the next nudge is genuinely new
+information; change nothing and it stays silent. This kind of tag **stops matching by
+itself**, so it wants an *unbounded* lookback — a time limit would only re-announce a
+situation that has not changed.
+
+**A tag that can recur.** `disk_watch` tags by the 5% band the reading falls into —
+`disk-80`, `disk-85`. Crossing 80% says so once; 81–84% is the same band and stays quiet;
+crossing 85% is worse and speaks again. Bands rather than exact percentages, so a disk
+hovering around a single number cannot chatter across it.
+
+But a band **can come back**. Free some space, drift up again next month, and an unbounded
+lookback would find the year-old row and stay silent forever — the alert would fire once in
+the lifetime of the installation. So `disk_watch` passes `since=24h`: **told once on
+crossing, reminded daily while still above.**
+
+Getting this backwards produces either an alert that never fires again, or one that fires
+every run. Both look like the code working.
+
+### Removing a notification does not make it unsaid
+
+`already_said` deliberately **does not filter deleted rows.** It asks what has been *said*,
+not what is still on screen. Were it filtered, dismissing "3 tasks are overdue" would erase
+the evidence that it was ever said — so the next hourly run would treat an unchanged
+situation as news and push it again. Delete would quietly mean *"remind me within the
+hour"*, on precisely the notification most likely to be dismissed.
+
+### Deleting a briefing does not cause it to be written again
+
+`job_runs` records what has run, keyed on `(job, occurrence)`. `generated_reviews` is only
+that job's **output**. Removing the output leaves the run record untouched, so nothing
+re-fires and nothing is spent composing a replacement.
+
+Worth stating because it looks like a bug the first time you notice it, and because the
+opposite arrangement — briefings as the source of truth — would have made deleting one cost
+money to replace.
+
+### What a job costs, and where you see it
+
+A job that calls a model is traced as `turns.kind = "job"`, so its cost appears on **Insights**
+beside your own messages — in the headline total, in the "Spend over time" chart as
+**Scheduled**, and in *Recent calls* where you can open one and see where its time went.
+
+That series was missing from the chart when scheduled jobs first shipped, which meant the
+chart quietly understated spend while the tile above it did not. A chart that disagrees with
+the number printed next to it is worse than no chart.
+
+Most jobs cost nothing at all — five of the seven never call a model.

@@ -9,7 +9,7 @@ module, not the individual job files.
     scheduler.py     the ticker (APScheduler holds exactly one job: tick)
     run.py           `python -m app.jobs.run` — trigger a job by hand
 
-    housekeeping.py  retention_sweep
+    housekeeping.py  retention_sweep, disk_watch
     brief.py         morning_brief, day_end_summary   (the only jobs that call a model)
     nudges.py        task_nudge, budget_watch, journal_nudge
 

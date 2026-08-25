@@ -384,3 +384,170 @@ def test_a_briefing_is_stored_and_readable_by_date(db, user, monkeypatch):
 
     note = db.execute(select(Notification).where(Notification.user_id == user.id)).scalar_one()
     assert note.kind == "day_end_summary"
+
+
+# --- disk_watch ----------------------------------------------------------------------------
+#
+# Disk is the only reading on this box whose exhaustion STOPS the system rather than slowing
+# it: Postgres refuses writes, there is no backup, and nothing warns first. So it earns a job
+# where memory and load do not.
+#
+# The design problem is not detecting a full disk. It is not saying so twenty-eight times.
+
+
+def _disk(monkeypatch, percent: float):
+    """Point the job's reader at a synthetic disk. It shares this function with the vitals
+    endpoint deliberately — one definition of "how full is the disk", not two that drift."""
+    from app.services import vitals
+
+    total = 10_000_000_000
+    monkeypatch.setattr(
+        vitals,
+        "disk",
+        lambda *a, **k: vitals.Capacity(used_bytes=int(total * percent / 100), total_bytes=total),
+    )
+
+
+def _run_disk_watch(db, user, key: str) -> str:
+    from app.jobs import registry, runner
+
+    from .conftest import TEST_PREFIX
+
+    return runner.run_job(db, registry.get("disk_watch"), user, f"{TEST_PREFIX}{key}", force=True)
+
+
+def test_disk_watch_is_silent_below_the_threshold(db, user, monkeypatch):
+    _disk(monkeypatch, 42)
+    assert _run_disk_watch(db, user, "disk-quiet") == "silent"
+    assert db.execute(select(Notification).where(Notification.user_id == user.id)).all() == []
+
+
+def test_disk_watch_speaks_once_on_crossing_the_threshold(db, user, monkeypatch):
+    _disk(monkeypatch, 82)
+    assert _run_disk_watch(db, user, "disk-cross") == "ok"
+
+    note = db.execute(select(Notification).where(Notification.user_id == user.id)).scalar_one()
+    assert note.kind == "disk"
+    assert "82%" in note.title
+    assert note.tag == "disk-80"
+
+
+def test_disk_watch_does_not_repeat_itself_within_the_same_band(db, user, monkeypatch):
+    """A disk sitting at 81% for a week must not produce twenty-eight notifications. The tag
+    is the 5% BAND, not the percentage, so a reading oscillating around a single number
+    cannot chatter either."""
+    _disk(monkeypatch, 82)
+    assert _run_disk_watch(db, user, "disk-1") == "ok"
+
+    _disk(monkeypatch, 84)  # same band
+    assert _run_disk_watch(db, user, "disk-2") == "silent"
+
+    rows = db.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
+    assert len(rows) == 1
+
+
+def test_disk_watch_speaks_again_when_it_crosses_into_a_worse_band(db, user, monkeypatch):
+    """Getting worse is new information, and must not be swallowed by the suppression that
+    stops it repeating."""
+    _disk(monkeypatch, 82)
+    _run_disk_watch(db, user, "disk-a")
+    _disk(monkeypatch, 87)
+    assert _run_disk_watch(db, user, "disk-b") == "ok"
+
+    tags = {
+        n.tag
+        for n in db.execute(select(Notification).where(Notification.user_id == user.id))
+        .scalars()
+        .all()
+    }
+    assert tags == {"disk-80", "disk-85"}
+
+
+def test_disk_watch_speaks_again_once_the_window_has_passed(db, user, monkeypatch):
+    """An unresolved condition is repeated daily, rather than reported once in the lifetime
+    of the installation. This is what the 24-hour window on `already_said` buys."""
+    import datetime as dt
+
+    _disk(monkeypatch, 82)
+    _run_disk_watch(db, user, "disk-old")
+    old = db.execute(select(Notification).where(Notification.user_id == user.id)).scalar_one()
+    old.created_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=30)
+    db.commit()
+
+    assert _run_disk_watch(db, user, "disk-new") == "ok"
+
+
+def test_an_unreadable_disk_is_not_reported_as_a_full_one(db, user, monkeypatch):
+    """⚠ The failure that would destroy the value of this notification.
+
+    Reporting exhaustion because a syscall failed teaches the user to ignore the one
+    notification that must be believed."""
+    from app.services import vitals
+
+    monkeypatch.setattr(vitals, "disk", lambda *a, **k: None)
+
+    assert _run_disk_watch(db, user, "disk-blind") == "silent"
+    assert db.execute(select(Notification).where(Notification.user_id == user.id)).all() == []
+
+
+# --- deleting a briefing ---------------------------------------------------------------
+
+
+def test_deleting_a_briefing_does_not_cause_it_to_be_written_again(db, user, monkeypatch):
+    """A property of the exactly-once design rather than something the delete path handles.
+
+    `job_runs` records what has run; `generated_reviews` is only that job's OUTPUT. Had it
+    been the other way round, deleting a briefing would have cost money to replace it.
+    """
+    from app.core import llm
+    from app.jobs import registry, runner
+    from app.services import journal as journal_svc
+
+    calls = []
+
+    async def fake_complete(messages, **kwargs):
+        calls.append(1)
+        return "A short account of the day."
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+    _task(db, user, "something open")
+
+    from .conftest import TEST_PREFIX
+
+    key = f"{TEST_PREFIX}nodup"
+    runner.run_job(db, registry.get("day_end_summary"), user, key, force=True)
+    briefing = journal_svc.list_briefings(db, user.id)[0]
+    assert len(calls) == 1
+
+    journal_svc.delete_briefing(db, user.id, briefing.id)
+    assert journal_svc.list_briefings(db, user.id) == []
+
+    # The same occurrence again: the run record is untouched, so nothing re-fires.
+    assert runner.run_job(db, registry.get("day_end_summary"), user, key) == "duplicate"
+    assert len(calls) == 1, "no model call — and therefore nothing spent"
+    assert journal_svc.list_briefings(db, user.id) == [], "and no replacement was written"
+
+
+def test_a_deleted_briefing_is_restorable_with_the_same_identity(db, user):
+    import datetime as dt
+
+    from app.db.models import GeneratedReview
+    from app.services import journal as journal_svc
+
+    row = GeneratedReview(
+        user_id=user.id,
+        kind="daily",
+        period_start=dt.datetime.now(dt.UTC),
+        period_end=dt.datetime.now(dt.UTC),
+        content="An account of a day.",
+        delivered_to=[],
+    )
+    db.add(row)
+    db.commit()
+
+    journal_svc.delete_briefing(db, user.id, row.id)
+    assert journal_svc.list_briefings(db, user.id) == []
+
+    restored = journal_svc.restore_briefing(db, user.id, row.id)
+    assert restored.id == row.id
+    assert [b.id for b in journal_svc.list_briefings(db, user.id)] == [row.id]

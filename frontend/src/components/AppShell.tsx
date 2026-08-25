@@ -6,6 +6,7 @@ import { useSmoothReveal } from "@/hooks/useSmoothReveal";
 import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
 import type { BudgetStatus, RecalledFact, Session } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import Composer, { type ComposerHandle } from "./Composer";
 import JournalView from "./JournalView";
 import InsightsView from "./InsightsView";
@@ -340,15 +341,39 @@ export default function AppShell({
   const streaming = busy
     ? { thinking, text: reveal.text, label: working ?? undefined }
     : null;
-  const TITLES: Record<View, string> = {
-    chat: "aceroai",
-    tasks: "Tasks",
-    journal: "Journal",
-    knowledge: "Knowledge",
-    insights: "Insights",
-    learn: "Learn",
-    settings: "Settings",
+  /* The shell owns the page title and subtitle on desktop; a view owns its content and
+     its own controls.
+     
+     Before this there were four treatments of the same idea: InsightsView and
+     KnowledgeView each drew their own bordered header, SettingsView drew an `<h1>`,
+     LearnView had its own, and the shell drew a full-width strip above all of them whose
+     only content was the notification bell pushed to the far right. Everything between the
+     sidebar and that bell was empty — on every screen, permanently. */
+  const TITLES: Record<View, { title: string; subtitle?: string }> = {
+    chat: { title: "aceroai" },
+    tasks: { title: "Tasks", subtitle: "What needs doing, and when." },
+    journal: {
+      title: "Journal",
+      subtitle: "What you wrote, and what Acero wrote back.",
+    },
+    knowledge: {
+      title: "Knowledge",
+      subtitle: "What Acero has learned about you, and how it connects.",
+    },
+    insights: {
+      title: "Insights",
+      subtitle: "What Acero costs, how fast it is, and what goes wrong.",
+    },
+    learn: {
+      title: "Learn",
+      subtitle: "How this application actually works, explained by itself.",
+    },
+    settings: {
+      title: "Settings",
+      subtitle: "Which AI answers you, and what Acero does on its own.",
+    },
   };
+  const page = TITLES[view];
 
   return (
     <div className="flex h-full">
@@ -377,17 +402,37 @@ export default function AppShell({
           >
             <Menu />
           </Button>
-          <span className="font-semibold tracking-tight">{TITLES[view]}</span>
+          <span className="font-semibold tracking-tight">{page.title}</span>
           <div className="ml-auto">
             <NotificationBell onNavigate={followNotification} />
           </div>
         </header>
 
-        {/* On desktop the sidebar carries the navigation, so this strip exists only to
-            give the bell somewhere to live. Kept to the bell's own height so it does not
-            steal space from the conversation. */}
-        <div className="hidden justify-end border-b border-border px-3 py-1.5 md:flex">
-          <NotificationBell onNavigate={followNotification} />
+        {/* The desktop page header. The sidebar carries navigation, so this strip carries
+            identity — which is what it was missing when it held only the bell.
+
+            Chat is the exception and gets the compact form: its title is the app's name
+            rather than a section, the conversation is the whole point of the screen, and a
+            subtitle there would be describing the product to someone already using it. */}
+        <div
+          className={cn(
+            "hidden items-center gap-3 border-b border-border px-4 md:flex sm:px-6",
+            view === "chat" ? "py-1.5" : "py-3",
+          )}
+        >
+          {view !== "chat" && (
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold leading-tight">{page.title}</h1>
+              {page.subtitle && (
+                <p className="truncate text-sm text-muted-foreground">
+                  {page.subtitle}
+                </p>
+              )}
+            </div>
+          )}
+          <div className="ml-auto shrink-0">
+            <NotificationBell onNavigate={followNotification} />
+          </div>
         </div>
 
         {view === "chat" ? (

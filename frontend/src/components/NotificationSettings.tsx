@@ -217,6 +217,14 @@ export default function NotificationSettings() {
               <span className="text-xs text-muted-foreground">
                 {status.devices} device{status.devices === 1 ? "" : "s"}{" "}
                 registered
+                {/* A readout, not a limit. There is no ceiling any more: volume is governed
+                    by whether something is NEWS — a repeated situation is suppressed by its
+                    tag — rather than by cutting you off after a fixed count, which used to
+                    discard the hourly overdue nudge first. Counted from what was DELIVERED,
+                    so clearing the panel does not reset it. */}
+                {status.pushed_today > 0 && (
+                  <> · {status.pushed_today} sent today</>
+                )}
               </span>
             )}
           </div>

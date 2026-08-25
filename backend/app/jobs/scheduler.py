@@ -14,6 +14,7 @@ The consequence is that `tick(db, user, now=...)` is a plain function of its arg
 the entire scheduling system can be tested without starting anything.
 """
 
+import datetime as dt
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -28,6 +29,30 @@ from app.jobs import runner
 log = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+
+#: When the ticker last completed a pass. Read by `services/vitals` to answer the one
+#: question no other part of the system can: **is scheduled work still being attempted?**
+#:
+#: Deliberately in memory rather than a row. `job_runs` cannot answer it — a row is written
+#: only when an occurrence actually fires, and the gap between the 21:00 nudge and the 03:15
+#: sweep is six hours of healthy silence. Reading "last job run" as a heartbeat would report
+#: a dead scheduler every single night.
+#:
+#: A heartbeat table would work and would cost a write every tick — roughly 105,000 rows a
+#: year whose entire purpose is to be overwritten. In-process costs nothing and catches the
+#: failure that actually matters: the APScheduler thread dying while uvicorn keeps serving
+#: requests, which produces no error anywhere. If the whole process dies instead, Docker
+#: restarts it and `uptime` says so.
+#:
+#: `None` after a restart is therefore correct information, not lost information: this
+#: process has not ticked yet. Valid because the API runs as a single uvicorn process — the
+#: same assumption the entire job design already rests on.
+_last_tick_at: dt.datetime | None = None
+
+
+def last_tick_at() -> dt.datetime | None:
+    """When the ticker last completed a pass, or None if it has not yet in this process."""
+    return _last_tick_at
 
 
 def _tick_sync() -> dict[str, str]:
@@ -48,6 +73,7 @@ def _tick_sync() -> dict[str, str]:
 async def tick_once() -> dict[str, str]:
     """Awaitable tick. Swallows everything — a scheduler that dies on one bad tick is worse
     than one that logs and tries again in five minutes."""
+    global _last_tick_at
     try:
         outcomes = await run_in_threadpool(_tick_sync)
         if outcomes:
@@ -56,6 +82,12 @@ async def tick_once() -> dict[str, str]:
     except Exception:  # noqa: BLE001 - the ticker must be unkillable
         log.warning("job tick failed; the next tick will retry", exc_info=True)
         return {}
+    finally:
+        # In `finally`, and deliberately: this records that the TICKER is alive, which is a
+        # different claim from "the work succeeded". A tick that raises every time still
+        # proves the timer is running; what failed is recorded against the job in
+        # `job_runs`. Conflating the two would make a broken job look like a dead scheduler.
+        _last_tick_at = dt.datetime.now(dt.UTC)
 
 
 def start() -> AsyncIOScheduler:

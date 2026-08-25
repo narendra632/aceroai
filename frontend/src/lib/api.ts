@@ -709,7 +709,6 @@ export type LearnConstants = {
   job_tick_seconds: number;
   job_catch_up_hours: number;
   notification_retention_days: number;
-  daily_push_cap: number;
   quiet_hours_start: number;
   quiet_hours_end: number;
   push_ttl_digest_s: number;
@@ -766,6 +765,42 @@ export async function markAllNotificationsRead(): Promise<void> {
   await req("/api/notifications/read-all", { method: "POST" });
 }
 
+/* Removal.
+ *
+ * Soft on the server and undoable for the length of a toast, exactly as tasks and journal
+ * entries are. What removal deliberately does NOT do is rewrite history: the nudge behind a
+ * dismissed notification stays suppressed, and the day's delivered count is unchanged. See
+ * docs/NOTIFICATIONS.md. */
+
+export async function deleteNotification(id: string): Promise<void> {
+  const r = await req(`/api/notifications/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("Could not remove that notification");
+}
+
+export async function restoreNotification(id: string): Promise<void> {
+  const r = await req(`/api/notifications/${id}/restore`, { method: "POST" });
+  if (!r.ok) throw new Error("Could not restore that notification");
+}
+
+/** Clear everything already read, and get back exactly which ids went.
+ *
+ * The ids are what makes the undo correct. Restoring "everything read" would also
+ * resurrect anything marked read between the clear and the undo — rows the user never
+ * deleted. */
+export async function clearReadNotifications(): Promise<string[]> {
+  const r = await req("/api/notifications/clear-read", { method: "POST" });
+  if (!r.ok) throw new Error("Could not clear those notifications");
+  return (await r.json()).ids ?? [];
+}
+
+export async function restoreNotifications(ids: string[]): Promise<void> {
+  const r = await req("/api/notifications/restore", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+  if (!r.ok) throw new Error("Could not restore those notifications");
+}
+
 /** What this server can do about push, and what this account has registered.
  *
  * `public_key` is a VAPID *public* key — public by design, and required by the browser to
@@ -776,7 +811,12 @@ export type PushStatus = {
   devices: number;
   quiet_hours_start: number | null;
   quiet_hours_end: number | null;
+  /** 0 (and the default) means no ceiling. Kept as an escape hatch for a looping job,
+   *  not as a product feature — volume is governed by repetition suppression instead. */
   daily_push_cap: number | null;
+  /** How many reached a device today. A readout, not a limit — and counted from what was
+   *  DELIVERED, so clearing the panel does not reset it. */
+  pushed_today: number;
 };
 
 export async function getPushStatus(): Promise<PushStatus> {
@@ -866,5 +906,54 @@ export type Briefing = {
 export async function listBriefings(): Promise<Briefing[]> {
   const r = await req("/api/journal/briefings");
   if (!r.ok) throw new Error("Could not load briefings");
+  return r.json();
+}
+
+export async function deleteBriefing(id: string): Promise<void> {
+  const r = await req(`/api/journal/briefings/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("Could not remove that briefing");
+}
+
+/** Undo. Note that deleting a briefing never causes it to be written again — `job_runs`
+ *  records what has run, and the briefing is only that job's output. */
+export async function restoreBriefing(id: string): Promise<void> {
+  const r = await req(`/api/journal/briefings/${id}/restore`, {
+    method: "POST",
+  });
+  if (!r.ok) throw new Error("Could not restore that briefing");
+}
+
+// --- server vital signs (migration 012) ---
+
+export type Capacity = {
+  used_bytes: number;
+  total_bytes: number;
+  percent: number;
+};
+
+/** What the machine is doing right now.
+ *
+ * Every measurement is nullable, and that is deliberate rather than defensive. `/proc` does
+ * not exist on Windows, so on a development machine `memory` and `load_1m` are genuinely
+ * absent — and the interface omits them rather than drawing a zero, because a zero is a
+ * wrong answer wearing the same confidence as a right one.
+ *
+ * `last_tick` null means "the server process has not ticked yet", which is true for up to
+ * one interval after a restart. Read it together with `uptime_seconds`: that pair is what
+ * separates "just booted" from "the scheduler has stopped". */
+export type Vitals = {
+  disk: Capacity | null;
+  memory: Capacity | null;
+  load_1m: number | null;
+  database_bytes: number | null;
+  last_tick: string | null;
+  uptime_seconds: number;
+  tick_interval_seconds: number;
+  disk_warn_percent: number;
+};
+
+export async function getVitals(): Promise<Vitals> {
+  const r = await req("/api/insights/vitals");
+  if (!r.ok) throw new Error("Could not read the server's condition");
   return r.json();
 }

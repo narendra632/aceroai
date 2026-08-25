@@ -286,8 +286,10 @@ export default function LearnView() {
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl px-4 pb-16 md:px-6">
+        {/* The shell's header names this screen, so there is no <h1> here. What stays is
+            the part that is genuinely about the content: how to read it, and whether the
+            numbers in it are live. */}
         <header className="space-y-2 pt-8 pb-5">
-          <h1 className="text-2xl font-semibold">How this works</h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
             Everything Acero does, explained by the app itself. Click any box or
             card to open it. The numbers come from the running system, so they

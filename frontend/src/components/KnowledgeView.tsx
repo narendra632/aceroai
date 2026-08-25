@@ -234,14 +234,11 @@ export default function KnowledgeView({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="border-b border-border px-4 py-3 sm:px-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-semibold">Knowledge</h1>
-            <p className="text-sm text-muted-foreground">
-              What Acero has learned about you — and everything it uses in conversation.
-            </p>
-          </div>
+      {/* No page title here: the shell's header owns it, so a screen is named once.
+          What remains is this view's own control, which belongs with the content it
+          governs rather than in a header shared with every other screen. */}
+      <header className="border-b border-border px-4 py-2.5 sm:px-6">
+        <div className="flex items-center justify-end gap-3">
           <div className="flex shrink-0 rounded-lg border border-border p-0.5">
             {(
               [

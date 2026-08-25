@@ -192,6 +192,10 @@ class GeneratedReview(Base):
     content: Mapped[str] = mapped_column(sa.Text)
     delivered_to: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), default=list)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+    # Soft delete (migration 012). Deleting a briefing does NOT cause it to be written again:
+    # `job_runs` records what has run, and this table is only its output. Were it the other
+    # way round, deleting a briefing would make Acero pay to compose a replacement.
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
 
 
 class Turn(Base):
@@ -357,6 +361,18 @@ class Notification(Base):
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
     read_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
     pushed_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # ⚠ Soft delete (migration 012), with an exception found nowhere else in this file.
+    #
+    # Readers that LIST rows filter `deleted_at IS NULL`, as everywhere. But two readers ask
+    # what has already HAPPENED, and they must not:
+    #
+    #   `already_said()` — filter it and dismissing a nudge makes the next run re-push it,
+    #                      because the evidence that it was said is what the filter hides.
+    #   `pushed_today()` — a count of deliveries is a count of deliveries, not of surviving
+    #                      receipts.
+    #
+    # Making this file consistent with itself would break both. See services/notifications.py.
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
 
 
 class PushSubscription(Base):

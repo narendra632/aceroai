@@ -3,9 +3,18 @@
 The push tests use a fake **transport**, not a fake sender. Encryption and VAPID signing
 are real — only the HTTP POST is replaced — because those are the two parts most likely to
 be subtly wrong and the two parts a naive mock would hide completely.
+
+⚠ Every query here is scoped to the test user, including the ones where it looks redundant.
+The `push_subscriptions` assertions were originally unscoped — `select(PushSubscription)`
+with no `WHERE` — and passed for as long as the development database happened to contain no
+real subscriptions. The moment a real browser was registered locally in order to test push,
+six of them began failing on that machine while CI stayed green, because they were counting
+somebody's actual phone. A test that asserts about rows it did not create is asserting about
+the developer's database, not about the code.
 """
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -74,7 +83,9 @@ def test_a_notification_survives_a_failing_push(db, user, loud, fake_push, monke
 
     assert row.pushed_at is None, "delivery failed"
     assert db.execute(select(Notification).where(Notification.id == row.id)).scalar_one()
-    sub = db.execute(select(PushSubscription)).scalar_one()
+    sub = db.execute(
+        select(PushSubscription).where(PushSubscription.user_id == user.id)
+    ).scalar_one()
     assert sub.last_error_at is not None
     assert sub.last_ok_at is None
 
@@ -87,7 +98,9 @@ def test_a_failing_push_is_recorded_against_the_device_not_the_work(db, user, lo
     # `raise_notification` must not raise, whatever the push service does.
     notifications.raise_notification(db, user, spec())
 
-    sub = db.execute(select(PushSubscription)).scalar_one()
+    sub = db.execute(
+        select(PushSubscription).where(PushSubscription.user_id == user.id)
+    ).scalar_one()
     assert "503" in (sub.last_error or "")
 
 
@@ -161,7 +174,12 @@ def test_a_gone_subscription_is_deleted_not_retried(db, user, loud, fake_push, s
 
     notifications.raise_notification(db, user, spec())
 
-    assert db.execute(select(PushSubscription)).scalars().all() == []
+    assert (
+        db.execute(select(PushSubscription).where(PushSubscription.user_id == user.id))
+        .scalars()
+        .all()
+        == []
+    )
 
 
 def test_a_transient_failure_keeps_the_subscription(db, user, loud, fake_push):
@@ -170,7 +188,14 @@ def test_a_transient_failure_keeps_the_subscription(db, user, loud, fake_push):
 
     notifications.raise_notification(db, user, spec())
 
-    assert len(db.execute(select(PushSubscription)).scalars().all()) == 1
+    assert (
+        len(
+            db.execute(select(PushSubscription).where(PushSubscription.user_id == user.id))
+            .scalars()
+            .all()
+        )
+        == 1
+    )
 
 
 def test_resubscribing_the_same_browser_updates_rather_than_duplicates(db, user):
@@ -178,7 +203,11 @@ def test_resubscribing_the_same_browser_updates_rather_than_duplicates(db, user)
     notifications.subscribe(db, user.id, sub["endpoint"], sub["p256dh"], sub["auth"], "first")
     notifications.subscribe(db, user.id, sub["endpoint"], "NEWKEY", "NEWAUTH", "second")
 
-    rows = db.execute(select(PushSubscription)).scalars().all()
+    rows = (
+        db.execute(select(PushSubscription).where(PushSubscription.user_id == user.id))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].p256dh == "NEWKEY"
     assert rows[0].user_agent == "second"
@@ -189,8 +218,18 @@ def test_resubscribing_the_same_browser_updates_rather_than_duplicates(db, user)
 
 def test_quiet_hours_suppress_the_push_but_never_the_record(db, user, fake_push, monkeypatch):
     _subscribe(db, user)
-    user.quiet_hours_start = 0
-    user.quiet_hours_end = 23  # effectively always quiet, whatever time the suite runs
+    # A one-hour window containing the current hour, derived rather than hard-coded.
+    #
+    # This used to be 0..23 with the comment "effectively always quiet, whatever time the
+    # suite runs". It was not: the window is half-open, so hour 23 falls OUTSIDE it and the
+    # test failed for exactly one hour a day. A test that is wrong for 1/24th of the clock
+    # is worse than one that is always wrong, because it looks like flakiness in the code.
+    #
+    # Deriving it also exercises the midnight wrap for free once a day, at 23:00, since the
+    # window then becomes 23..0 and takes the other branch of `in_quiet_hours`.
+    hour = dt.datetime.now(ZoneInfo(settings.app_timezone)).hour
+    user.quiet_hours_start = hour
+    user.quiet_hours_end = (hour + 1) % 24
     db.commit()
 
     row = notifications.raise_notification(db, user, spec())
@@ -286,3 +325,172 @@ def test_quiet_hours_can_actually_be_turned_off(db, user):
 
     user.quiet_hours_start = user.quiet_hours_end = 0
     assert notifications.quiet_hours_enabled(user) is False
+
+
+# --- removal, and the two things it must NOT change ----------------------------------------
+#
+# Everywhere else, adding soft delete means "hide deleted rows from every query". There are
+# exactly two exceptions, and both are here because getting either wrong is invisible until
+# it has been annoying you for a week.
+
+
+def test_a_removed_notification_is_invisible_to_every_reader(db, user):
+    row = notifications.raise_notification(db, user, spec(title="Gone"))
+    assert notifications.unread_count(db, user.id) == 1
+
+    notifications.delete_notification(db, user.id, row.id)
+
+    assert [n.id for n in notifications.list_for_user(db, user.id)] == []
+    assert notifications.unread_count(db, user.id) == 0, (
+        "a removed unread must not keep the badge lit"
+    )
+    assert notifications.mark_read(db, user.id, row.id) is None, "gone means gone"
+
+
+def test_a_removed_notification_comes_back_with_the_same_identity(db, user):
+    row = notifications.raise_notification(db, user, spec(title="Back"))
+    notifications.delete_notification(db, user.id, row.id)
+
+    restored = notifications.restore_notification(db, user.id, row.id)
+
+    assert restored is not None and restored.id == row.id
+    assert restored.title == "Back"
+    assert [n.id for n in notifications.list_for_user(db, user.id)] == [row.id]
+
+
+def test_removing_a_notification_does_not_make_the_nudge_repeat(db, user):
+    """⚠ THE invariant. `already_said` asks what has been SAID, not what is still on screen.
+
+    Filter deleted rows out of it and dismissing "3 tasks are overdue" erases the evidence
+    that it was ever said — so the next hourly run treats an unchanged situation as news and
+    pushes it again. Delete would silently acquire the meaning "remind me within the hour",
+    on precisely the notification most likely to be dismissed.
+    """
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue", tag="overdue-abc"))
+    assert notifications.already_said(db, user.id, "task_overdue", "overdue-abc")
+
+    notifications.delete_notification(db, user.id, row.id)
+
+    assert notifications.already_said(db, user.id, "task_overdue", "overdue-abc"), (
+        "dismissing a notification must not re-arm the nudge behind it"
+    )
+
+
+def test_removing_a_delivered_notification_does_not_reduce_the_days_count(
+    db, user, loud, fake_push
+):
+    """The second exception. A count of deliveries is a count of DELIVERIES, not of
+    surviving receipts — the phone already buzzed."""
+    _subscribe(db, user)
+    row = notifications.raise_notification(db, user, spec())
+    assert row.pushed_at is not None
+    assert notifications.pushed_today(db, user.id) == 1
+
+    notifications.delete_notification(db, user.id, row.id)
+
+    assert notifications.pushed_today(db, user.id) == 1
+
+
+def test_a_notification_that_never_reached_a_device_never_counted(db, user):
+    """Recorded but undelivered contributes nothing, before or after removal — so the two
+    exceptions cannot be confused with "count everything ever written"."""
+    row = notifications.raise_notification(db, user, spec())
+    assert row.pushed_at is None
+    assert notifications.pushed_today(db, user.id) == 0
+
+    notifications.delete_notification(db, user.id, row.id)
+    assert notifications.pushed_today(db, user.id) == 0
+
+
+def test_clear_read_removes_only_read_rows_and_reports_exactly_which(db, user):
+    read_one = notifications.raise_notification(db, user, spec(title="read one"))
+    read_two = notifications.raise_notification(db, user, spec(title="read two"))
+    unread = notifications.raise_notification(db, user, spec(title="still unread"))
+    notifications.mark_read(db, user.id, read_one.id)
+    notifications.mark_read(db, user.id, read_two.id)
+
+    cleared = notifications.clear_read(db, user.id)
+
+    assert set(cleared) == {read_one.id, read_two.id}
+    assert [n.id for n in notifications.list_for_user(db, user.id)] == [unread.id]
+
+
+def test_undo_restores_exactly_what_was_cleared_and_nothing_else(db, user):
+    """Why `clear_read` returns ids rather than a count.
+
+    "Restore everything read" is the obvious inverse and is wrong: anything marked read
+    between the clear and the undo would be resurrected too — rows the user never deleted.
+    """
+    old = notifications.raise_notification(db, user, spec(title="cleared"))
+    notifications.mark_read(db, user.id, old.id)
+    cleared = notifications.clear_read(db, user.id)
+
+    # The user reads something else before pressing undo.
+    later = notifications.raise_notification(db, user, spec(title="read in the meantime"))
+    notifications.mark_read(db, user.id, later.id)
+
+    notifications.restore_notifications(db, user.id, cleared)
+
+    live = {n.id for n in notifications.list_for_user(db, user.id)}
+    assert live == {old.id, later.id}
+    assert later.deleted_at is None, "it was never deleted, so undo must not have touched it"
+
+
+def test_with_the_default_settings_nothing_is_ever_withheld_for_volume(db, user, loud, fake_push):
+    """Pins the removal of the ceiling, so it cannot come back by accident.
+
+    It used to default to 6 while `task_nudge` alone can fire thirteen times a day, which
+    meant it was discarding notifications that were wanted — starting with the hourly
+    overdue ping, the one most explicitly asked for.
+    """
+    _subscribe(db, user)
+    for i in range(12):
+        row = notifications.raise_notification(db, user, spec(title=f"number {i}"))
+        assert row.pushed_at is not None, f"notification {i} was withheld"
+    assert notifications.pushed_today(db, user.id) == 12
+
+
+def test_a_ceiling_still_works_when_one_is_deliberately_set(db, user, loud, fake_push):
+    """The mechanism is retained rather than deleted: per-tag suppression is no defence at
+    all against a job that loops, and this is the only bound such a job would respect."""
+    _subscribe(db, user)
+    user.daily_push_cap = 2
+    db.commit()
+
+    delivered = [
+        notifications.raise_notification(db, user, spec(title=f"n{i}")).pushed_at for i in range(4)
+    ]
+
+    assert sum(1 for d in delivered if d is not None) == 2
+    assert delivered[2] is None and delivered[3] is None
+
+
+# --- already_said and its time bound -------------------------------------------------------
+
+
+def test_already_said_without_a_window_looks_back_forever(db, user):
+    """Correct for a tag that encodes a CHANGING SET — the overdue-task fingerprint stops
+    matching by itself the moment the situation changes, so a bound would only re-announce
+    something unchanged."""
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue", tag="t1"))
+    row.created_at = dt.datetime.now(dt.UTC) - dt.timedelta(days=400)
+    db.commit()
+
+    assert notifications.already_said(db, user.id, "task_overdue", "t1")
+
+
+def test_already_said_with_a_window_ignores_anything_older(db, user):
+    """Required for a tag that can RECUR — a disk band. Without the bound, crossing 80%
+    once would be reported once in the lifetime of the installation: free some space, drift
+    back up a month later, and a year-old row silences it forever."""
+    row = notifications.raise_notification(db, user, spec(kind="disk", tag="disk-80"))
+    row.created_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=30)
+    db.commit()
+
+    assert not notifications.already_said(
+        db, user.id, "disk", "disk-80", since=dt.timedelta(hours=24)
+    )
+    assert notifications.already_said(db, user.id, "disk", "disk-80"), (
+        "without the window it is still found — both halves must hold, or the parameter "
+        "could be silently doing nothing"
+    )

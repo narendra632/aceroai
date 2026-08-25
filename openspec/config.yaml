@@ -9,7 +9,9 @@ context: |
 
   Golden rules that shape most proposals:
   - One brain: all conversational logic goes through core/handler.handle_message.
-    Channels (web SSE, Telegram) are thin adapters with no chat logic.
+    Channels are thin adapters with no chat logic. Web SSE is the only live channel;
+    Telegram was retired in migration 011, though chat_sessions.channel still permits
+    'telegram' so past conversations keep saying where they actually happened.
   - services/ is the single source of truth for both the REST API and the
     assistant's tools — never implement a rule in only one of them.
   - Derived values are computed, never stored. Timestamps are timestamptz.

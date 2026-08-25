@@ -12,11 +12,18 @@ attention to a row that already exists.
 
 Two consequences follow, and both are deliberate:
 
-- **A suppressed notification is still written.** Quiet hours and the daily cap stop the
-  interruption, not the record. It is waiting in the app in the morning.
+- **A suppressed notification is still written.** Quiet hours stop the interruption, not the
+  record. It is waiting in the app in the morning.
 - **A failed push is not failed work.** The job that raised it is `ok`; the failure is
   recorded against the subscription. Conflating them would make a phone left in a drawer
   look like broken software.
+
+A third rule was added when notifications became deletable (migration 012):
+
+- **Removing the record of something said does not make it unsaid.** Every reader here that
+  LISTS notifications filters `deleted_at`; the two that ask what has already HAPPENED —
+  `pushed_today` and `already_said` — deliberately do not. Making them
+  consistent with the rest would turn dismissing a nudge into a request to be nudged again.
 """
 
 import datetime as dt
@@ -83,7 +90,22 @@ def in_quiet_hours(user: User, when: dt.datetime | None = None) -> bool:
     return hour >= start or hour < end
 
 
-def _pushed_today(db: Session, user_id: uuid.UUID) -> int:
+def pushed_today(db: Session, user_id: uuid.UUID) -> int:
+    """How many notifications reached a device today.
+
+    ⚠ **Deliberately does not filter `deleted_at`**, unlike every reader that lists rows.
+
+    This counts *deliveries*, not surviving records. The phone already buzzed; removing the
+    note about it does not un-buzz it, so a count that dropped when the user tidied their
+    panel would simply be a wrong answer to "how many times has this interrupted me today".
+
+    It is also what a deliberately-set ceiling is measured against (`_cap`), which makes the
+    distinction load-bearing rather than cosmetic: were this filtered, clearing the panel
+    would silently re-arm delivery, and the tidier the user kept their notifications the more
+    they would be interrupted.
+
+    Public rather than underscored because Settings now displays it.
+    """
     midnight = dt.datetime.now(_tz()).replace(hour=0, minute=0, second=0, microsecond=0)
     return (
         db.execute(
@@ -100,6 +122,22 @@ def _pushed_today(db: Session, user_id: uuid.UUID) -> int:
 
 
 def _cap(user: User) -> int:
+    """The ceiling on deliveries per day. **Zero means no ceiling, and is the default.**
+
+    The ceiling used to default to 6 while `task_nudge` alone can fire thirteen times a day,
+    so it was binding in ordinary use — which means it was silently discarding notifications
+    the user wanted, starting with the most frequent ones. A limit reached during normal
+    operation is not a safety limit; it is an undocumented feature that stops telling you
+    things after lunch.
+
+    Volume is governed by whether something is *news* — the per-tag suppression in
+    `jobs/nudges.py` — which is the right control for expected volume.
+
+    The mechanism is kept rather than deleted because it is the wrong control for *unexpected*
+    volume, and that is a real failure mode: a job that loops, or one whose tag changes every
+    run, is not touched by per-tag suppression at all. A setting that is zero costs one falsy
+    check and is the difference between a bad hour and a bad hour with no way to stop it.
+    """
     return user.daily_push_cap if user.daily_push_cap is not None else settings.daily_push_cap
 
 
@@ -151,7 +189,7 @@ def _suppression_reason(
     if in_quiet_hours(user):
         return "quiet hours"
     cap = _cap(user)
-    if cap and _pushed_today(db, user.id) >= cap:
+    if cap and pushed_today(db, user.id) >= cap:
         return f"daily push cap of {cap} reached"
     return None
 
@@ -209,11 +247,21 @@ def deliver(db: Session, user: User, spec: NotificationSpec) -> bool:
 # --- reading ------------------------------------------------------------------------
 
 
+def _live(user_id: uuid.UUID):
+    """The filter every reader that LISTS notifications applies.
+
+    Bound to a name rather than repeated, so that the two readers which deliberately do NOT
+    apply it — `pushed_today` and `already_said` — stand out as exceptions rather than
+    looking like places somebody forgot.
+    """
+    return (Notification.user_id == user_id, Notification.deleted_at.is_(None))
+
+
 def list_for_user(db: Session, user_id: uuid.UUID, limit: int = 50) -> list[Notification]:
     return list(
         db.execute(
             select(Notification)
-            .where(Notification.user_id == user_id)
+            .where(*_live(user_id))
             .order_by(Notification.created_at.desc())
             .limit(limit)
         )
@@ -227,18 +275,22 @@ def unread_count(db: Session, user_id: uuid.UUID) -> int:
         db.execute(
             select(func.count())
             .select_from(Notification)
-            .where(Notification.user_id == user_id, Notification.read_at.is_(None))
+            .where(*_live(user_id), Notification.read_at.is_(None))
         ).scalar_one()
         or 0
     )
 
 
-def mark_read(db: Session, user_id: uuid.UUID, notification_id: uuid.UUID) -> Notification | None:
-    row = db.execute(
-        select(Notification).where(
-            Notification.id == notification_id, Notification.user_id == user_id
-        )
+def _get(db: Session, user_id: uuid.UUID, notification_id: uuid.UUID) -> Notification | None:
+    """Fetch a LIVE notification. A deleted one is indistinguishable from one that never
+    existed, which is what makes 404 the honest answer to both."""
+    return db.execute(
+        select(Notification).where(*_live(user_id), Notification.id == notification_id)
     ).scalar_one_or_none()
+
+
+def mark_read(db: Session, user_id: uuid.UUID, notification_id: uuid.UUID) -> Notification | None:
+    row = _get(db, user_id, notification_id)
     if row is None:
         return None
     if row.read_at is None:
@@ -249,17 +301,123 @@ def mark_read(db: Session, user_id: uuid.UUID, notification_id: uuid.UUID) -> No
 
 def mark_all_read(db: Session, user_id: uuid.UUID) -> int:
     rows = (
-        db.execute(
-            select(Notification).where(
-                Notification.user_id == user_id, Notification.read_at.is_(None)
-            )
-        )
+        db.execute(select(Notification).where(*_live(user_id), Notification.read_at.is_(None)))
         .scalars()
         .all()
     )
     now = dt.datetime.now(dt.UTC)
     for row in rows:
         row.read_at = now
+    db.commit()
+    return len(rows)
+
+
+def already_said(
+    db: Session, user_id, kind: str, tag: str, since: dt.timedelta | None = None
+) -> bool:
+    """Whether this exact thing has already been raised.
+
+    The `tag` carries the state being reported — for overdue tasks, a hash of which tasks
+    they are. Same tag means the situation has not changed, so saying it again would be
+    repetition rather than news.
+
+    ⚠ **Deliberately does not filter `deleted_at`** (migration 012 made notifications
+    deletable). This asks what has already been SAID, not what is still on screen. Filter
+    deleted rows here and dismissing "3 tasks are overdue" would erase the evidence that it
+    was ever said, so the next hourly run would treat it as news and push it again — delete
+    would silently acquire the meaning "remind me within the hour", on precisely the
+    notification most likely to be dismissed.
+
+    `since` bounds how far back the lookback reaches, and which behaviour is correct depends
+    entirely on the shape of the tag:
+
+    - A tag that encodes a CHANGING SET — the overdue-task fingerprint — wants no bound. It
+      stops matching by itself the moment the situation changes, so an unbounded lookback is
+      exactly right and a bounded one would re-announce an unchanged situation.
+    - A tag that can RECUR — a disk-usage band — needs one. Without it, crossing 80% once
+      would be reported once in the lifetime of the installation: clear some space, drift
+      back up a month later, and the ancient row silences it forever.
+
+    Getting this backwards produces either an alert that never fires again or one that fires
+    every run, and both look like the code working.
+    """
+    stmt = select(Notification.id).where(
+        Notification.user_id == user_id,
+        Notification.kind == kind,
+        Notification.tag == tag,
+    )
+    if since is not None:
+        stmt = stmt.where(Notification.created_at >= dt.datetime.now(dt.UTC) - since)
+    return db.execute(stmt.limit(1)).first() is not None
+
+
+# --- removal ------------------------------------------------------------------------
+#
+# Soft, and reversible for the length of an undo toast — the same treatment tasks, journal
+# entries and conversations have had since migration 004.
+#
+# What removal does NOT do is rewrite history. See `pushed_today` and `already_said`.
+
+
+def delete_notification(
+    db: Session, user_id: uuid.UUID, notification_id: uuid.UUID
+) -> Notification | None:
+    row = _get(db, user_id, notification_id)
+    if row is None:
+        return None
+    row.deleted_at = dt.datetime.now(dt.UTC)
+    db.commit()
+    return row
+
+
+def restore_notification(
+    db: Session, user_id: uuid.UUID, notification_id: uuid.UUID
+) -> Notification | None:
+    """Undo. Deliberately does not use `_get`, which only sees live rows."""
+    row = db.execute(
+        select(Notification).where(
+            Notification.user_id == user_id, Notification.id == notification_id
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    row.deleted_at = None
+    db.commit()
+    return row
+
+
+def clear_read(db: Session, user_id: uuid.UUID) -> list[uuid.UUID]:
+    """Remove everything already read, and return exactly which ids were removed.
+
+    Returning the ids is what makes undo correct rather than approximately correct. "Restore
+    everything read" would be the obvious inverse and is wrong: anything marked read between
+    the clear and the undo would be restored along with it, resurrecting rows the user never
+    deleted.
+    """
+    rows = (
+        db.execute(select(Notification).where(*_live(user_id), Notification.read_at.is_not(None)))
+        .scalars()
+        .all()
+    )
+    now = dt.datetime.now(dt.UTC)
+    for row in rows:
+        row.deleted_at = now
+    db.commit()
+    return [row.id for row in rows]
+
+
+def restore_notifications(db: Session, user_id: uuid.UUID, ids: list[uuid.UUID]) -> int:
+    if not ids:
+        return 0
+    rows = (
+        db.execute(
+            select(Notification).where(Notification.user_id == user_id, Notification.id.in_(ids))
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        row.deleted_at = None
     db.commit()
     return len(rows)
 

@@ -84,7 +84,6 @@ def get_constants(user: User = Depends(get_current_user)) -> LearnConstants:
         job_tick_seconds=settings.job_tick_seconds,
         job_catch_up_hours=settings.job_catch_up_hours,
         notification_retention_days=settings.notification_retention_days,
-        daily_push_cap=settings.daily_push_cap,
         quiet_hours_start=settings.quiet_hours_start,
         quiet_hours_end=settings.quiet_hours_end,
         push_ttl_digest_s=settings.push_ttl_digest_s,

@@ -367,6 +367,37 @@ function EntriesPane() {
 function BriefingsPane() {
   const load = useCallback(() => api.listBriefings(), []);
   const list = useOptimisticList<Briefing>(load, []);
+  const toast = useToast();
+
+  /* Deleting a briefing does NOT cause Acero to write it again.
+   *
+   * `job_runs` records what has run, keyed on (job, occurrence); this list is only that
+   * job's OUTPUT. Removing the output leaves the run record untouched, so nothing re-fires
+   * and nothing is spent composing a replacement — which is what "delete" ought to mean,
+   * and is a property of the exactly-once design rather than something handled here. */
+  function remove(b: Briefing) {
+    void (async () => {
+      const ok = await list.mutate({
+        optimistic: (items) => items.filter((x) => x.id !== b.id),
+        request: () => api.deleteBriefing(b.id),
+        errorMessage: "Could not delete the briefing",
+      });
+      if (ok) {
+        toast.undo("Briefing deleted", async () => {
+          await list.mutate({
+            optimistic: (items) =>
+              [b, ...items].sort(
+                (x, y) =>
+                  new Date(y.period_start).getTime() -
+                  new Date(x.period_start).getTime(),
+              ),
+            request: () => api.restoreBriefing(b.id),
+            errorMessage: "Could not restore the briefing",
+          });
+        });
+      }
+    })();
+  }
 
   const KIND_LABEL: Record<string, string> = {
     morning: "Morning brief",
@@ -389,7 +420,7 @@ function BriefingsPane() {
   return (
     <ul className="space-y-3">
       {list.items.map((b) => (
-        <li key={b.id} className="rounded-xl border border-border bg-card p-3">
+        <li key={b.id} className="group rounded-xl border border-border bg-card p-3">
           <div className="mb-1.5 flex items-center gap-2">
             <Sparkles className="size-3.5 text-primary" />
             <span className="text-xs font-medium">
@@ -402,6 +433,15 @@ function BriefingsPane() {
                 day: "numeric",
               })}
             </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => remove(b)}
+              aria-label={`Delete ${KIND_LABEL[b.kind] ?? b.kind}`}
+              className="-my-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-60"
+            >
+              <Trash2 />
+            </Button>
           </div>
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
             {b.content}

@@ -301,3 +301,91 @@ def test_briefings_are_scoped_to_the_user(auth_client, db, user):
     db.commit()
 
     assert auth_client.get("/api/journal/briefings").json() == []
+
+
+# --- removal over the API ------------------------------------------------------------------
+
+
+def test_removing_one_notification(auth_client, db, user):
+    row = _raise(db, user, title="Dismiss me")
+
+    response = auth_client.request("DELETE", f"/api/notifications/{row.id}")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(row.id)
+    assert auth_client.get("/api/notifications").json()["items"] == []
+    assert auth_client.get("/api/notifications/unread").json()["unread"] == 0
+
+
+def test_a_removed_notification_can_be_restored(auth_client, db, user):
+    row = _raise(db, user, title="Undo me")
+    auth_client.request("DELETE", f"/api/notifications/{row.id}")
+
+    assert auth_client.post(f"/api/notifications/{row.id}/restore").status_code == 200
+
+    items = auth_client.get("/api/notifications").json()["items"]
+    assert [i["id"] for i in items] == [str(row.id)]
+
+
+def test_clear_read_returns_the_ids_it_removed(auth_client, db, user):
+    read_row = _raise(db, user, title="read")
+    unread_row = _raise(db, user, title="unread")
+    auth_client.post(f"/api/notifications/{read_row.id}/read")
+
+    body = auth_client.post("/api/notifications/clear-read").json()
+
+    assert body["ids"] == [str(read_row.id)]
+    items = auth_client.get("/api/notifications").json()["items"]
+    assert [i["id"] for i in items] == [str(unread_row.id)]
+
+    assert auth_client.post("/api/notifications/restore", json=body).json() == {"restored": 1}
+    assert len(auth_client.get("/api/notifications").json()["items"]) == 2
+
+
+def test_another_users_notification_cannot_be_removed(auth_client, db, user):
+    from app.core.security import hash_password
+    from app.db.models import User
+
+    from .conftest import OTHER_EMAIL
+
+    other = User(email=OTHER_EMAIL, password_hash=hash_password("x"))
+    db.add(other)
+    db.commit()
+    theirs = _raise(db, other)
+
+    assert auth_client.request("DELETE", f"/api/notifications/{theirs.id}").status_code == 404
+    assert auth_client.post(f"/api/notifications/{theirs.id}/restore").status_code == 404
+    assert db.get(Notification, theirs.id).deleted_at is None
+
+
+def test_removing_something_that_does_not_exist_is_a_404(auth_client):
+    import uuid
+
+    assert auth_client.request("DELETE", f"/api/notifications/{uuid.uuid4()}").status_code == 404
+
+
+def test_unsubscribing_still_works_after_delete_was_added(auth_client, db, user):
+    """⚠ A route-ordering regression, pinned because it would be silent.
+
+    FastAPI matches paths in registration order. `DELETE /{notification_id}` declared above
+    `DELETE /push` would swallow the unsubscribe call and reject "push" as a malformed UUID.
+    Nothing would look broken except that turning notifications off on a device stops
+    working — and only on a device.
+    """
+    sub = make_subscription()
+    notifications.subscribe(db, user.id, sub["endpoint"], sub["p256dh"], sub["auth"], "pytest")
+
+    from urllib.parse import quote
+
+    response = auth_client.request(
+        "DELETE", f"/api/notifications/push?endpoint={quote(sub['endpoint'], safe='')}"
+    )
+
+    assert response.status_code == 200, "the delete route must not shadow /push"
+    assert response.json()["devices"] == 0
+
+
+def test_push_status_reports_todays_count_and_no_ceiling(auth_client, db, user):
+    body = auth_client.get("/api/notifications/push").json()
+    assert body["pushed_today"] == 0
+    assert body["daily_push_cap"] is None, "unset means the server default, which is no ceiling"

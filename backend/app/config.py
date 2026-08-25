@@ -167,12 +167,26 @@ class Settings(BaseSettings):
     # WRITTEN — only the push is suppressed, so it is waiting in the app in the morning.
     quiet_hours_start: int = 22
     quiet_hours_end: int = 7
-    # Notification fatigue is the most common way a feature like this dies. Beyond the cap
-    # notifications are still recorded; they just stop interrupting.
-    daily_push_cap: int = 6
+    # Ceiling on pushes per day. **0 means no ceiling, and is the default.**
+    #
+    # It used to default to 6, which was binding in ordinary use — `task_nudge` alone can
+    # fire thirteen times a day — so it was quietly discarding notifications that were
+    # wanted, beginning with the hourly overdue-task ping. Notification fatigue is real, but
+    # per-tag suppression is what addresses it: the question is whether something is NEWS,
+    # not how many times it has been said.
+    #
+    # Retained at zero rather than removed, because it is the only bound on volume that a
+    # LOOPING job would respect. Set it if that day ever comes.
+    daily_push_cap: int = 0
     # The notification history is a third table that only grows, so it is bounded by the
-    # same nightly sweep that bounds traces.
+    # same nightly sweep that bounds traces. Soft-deleted rows age out on this same cutoff —
+    # there is deliberately no second, shorter clock for them.
     notification_retention_days: int = 90
+    # How full the disk may get before `disk_watch` says something, and the width of the
+    # bands it reports in. Bands rather than exact percentages so a disk hovering around a
+    # single number cannot chatter.
+    disk_warn_percent: int = 80
+    disk_band_percent: int = 5
 
     # --- trace retention (migration 008) ---
     # Observability must not consume the storage the application depends on. Spans are

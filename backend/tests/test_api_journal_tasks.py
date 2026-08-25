@@ -52,3 +52,50 @@ def test_domain_errors_map_to_http(auth_client):
     assert auth_client.post("/api/tasks", json={"title": "   "}).status_code == 400
     # mood out of range is caught by the schema -> 422
     assert auth_client.post("/api/journal", json={"content": "x", "mood": 9}).status_code == 422
+
+
+# --- briefings can be removed (migration 012) ------------------------------------------
+
+
+def _briefing(db, user, content="An account of a day."):
+    import datetime as dt
+
+    from app.db.models import GeneratedReview
+
+    row = GeneratedReview(
+        user_id=user.id,
+        kind="daily",
+        period_start=dt.datetime.now(dt.UTC),
+        period_end=dt.datetime.now(dt.UTC),
+        content=content,
+        delivered_to=[],
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def test_a_briefing_can_be_removed_and_restored(auth_client, db, user):
+    row = _briefing(db, user)
+    assert len(auth_client.get("/api/journal/briefings").json()) == 1
+
+    assert auth_client.request("DELETE", f"/api/journal/briefings/{row.id}").status_code == 204
+    assert auth_client.get("/api/journal/briefings").json() == []
+
+    assert auth_client.post(f"/api/journal/briefings/{row.id}/restore").status_code == 200
+    assert len(auth_client.get("/api/journal/briefings").json()) == 1
+
+
+def test_another_users_briefing_cannot_be_removed(auth_client, db, user):
+    from app.core.security import hash_password
+    from app.db.models import User
+
+    from .conftest import OTHER_EMAIL
+
+    other = User(email=OTHER_EMAIL, password_hash=hash_password("x"))
+    db.add(other)
+    db.commit()
+    theirs = _briefing(db, other, content="Not yours.")
+
+    assert auth_client.request("DELETE", f"/api/journal/briefings/{theirs.id}").status_code == 404

@@ -362,12 +362,10 @@ export default function SettingsView() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-2xl px-4 py-6">
-        <h1 className="mb-1 hidden text-xl font-semibold tracking-tight md:block">
-          Settings
-        </h1>
+        {/* No <h1>: the shell's header names this screen. */}
         <p className="mb-5 text-sm text-muted-foreground">
-          Choose which AI answers you. This applies everywhere — web and
-          Telegram.
+          Choose which AI answers you. This applies everywhere Acero replies —
+          your conversations and the summaries it writes on its own.
         </p>
 
         {/* What is ACTUALLY answering right now — saved state, not the pending picker. */}

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.schemas import (
+    ClearedOut,
     NotificationList,
     NotificationOut,
     PushStatusOut,
@@ -80,6 +81,7 @@ def push_status(
         quiet_hours_start=user.quiet_hours_start,
         quiet_hours_end=user.quiet_hours_end,
         daily_push_cap=user.daily_push_cap,
+        pushed_today=notifications.pushed_today(db, user.id),
     )
 
 
@@ -141,3 +143,60 @@ def send_test(user: User = Depends(get_current_user), db: Session = Depends(get_
     if row.pushed_at is None:
         return {"ok": False, "reason": "The push was recorded but no device accepted it."}
     return {"ok": True}
+
+
+# --- removal ---------------------------------------------------------------------------
+#
+# Soft, and undoable for the length of a toast — the same treatment tasks and journal entries
+# have had since migration 004. There is no trash view: the undo window is the whole recovery
+# story, which is why `clear-read` returns the ids it removed.
+#
+# ⚠ **This block must stay BELOW the push routes.** FastAPI matches paths in registration
+# order, so a `DELETE /{notification_id}` registered above `DELETE /push` would swallow the
+# unsubscribe call and reject it as a malformed UUID. Nothing would look broken except that
+# turning notifications off on a device stops working.
+
+
+@router.delete("/{notification_id}", response_model=NotificationOut)
+def delete_notification(
+    notification_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> NotificationOut:
+    row = notifications.delete_notification(db, user.id, notification_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return NotificationOut.model_validate(row)
+
+
+@router.post("/{notification_id}/restore", response_model=NotificationOut)
+def restore_notification(
+    notification_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> NotificationOut:
+    row = notifications.restore_notification(db, user.id, notification_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return NotificationOut.model_validate(row)
+
+
+@router.post("/clear-read", response_model=ClearedOut)
+def clear_read(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> ClearedOut:
+    """Remove everything already read, and say exactly which ids went.
+
+    Returning the ids is what makes the undo correct rather than approximately correct.
+    "Restore everything read" is the obvious inverse and is wrong: anything marked read
+    between the clear and the undo would come back too, resurrecting rows the user never
+    deleted.
+    """
+    return ClearedOut(ids=notifications.clear_read(db, user.id))
+
+
+@router.post("/restore", response_model=dict)
+def restore_many(
+    body: ClearedOut,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return {"restored": notifications.restore_notifications(db, user.id, body.ids)}

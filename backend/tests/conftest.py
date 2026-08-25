@@ -190,6 +190,41 @@ def jobs_registry():
         registry._REGISTRY.update(saved)
 
 
+@pytest.fixture(autouse=True)
+def _no_vapid_by_default(monkeypatch):
+    """Every test starts with push UNCONFIGURED, whatever is in the developer's `.env`.
+
+    Without this the suite's result depends on the machine it runs on. Eight tests assert
+    the unconfigured behaviour — "a notification is recorded even though delivery is
+    impossible" — and they passed only because CI has no keys and a fresh checkout has no
+    keys. The moment real VAPID keys were added to a local `.env` in order to test push on a
+    phone, those eight began failing on that machine alone, while CI stayed green.
+
+    A suite whose answer depends on an untracked file is not a suite anybody can trust: it
+    reports a fault that is not in the code, and it would just as happily hide one that is.
+
+    `fake_push` sets its own generated keys on top of this, so tests that need push
+    configured are unaffected.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "vapid_public_key", "")
+    monkeypatch.setattr(settings, "vapid_private_key", "")
+
+
+@pytest.fixture(autouse=True)
+def _no_push_ceiling(monkeypatch):
+    """And with no delivery ceiling, which is now the default.
+
+    Pinned explicitly rather than inherited so that a test asserting ceiling behaviour has
+    to SET one — a test that passes only because of a default is a test that silently
+    changes meaning when the default does.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "daily_push_cap", 0)
+
+
 @pytest.fixture
 def fake_push(monkeypatch):
     """A push transport that records what would have been sent.

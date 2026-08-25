@@ -122,6 +122,32 @@
   by hand and must be maintained by hand; the tests catch broken references, not missing
   ones. A change to the system updates the Learn content in the same commit, or not at all.
 
+- **What Acero said, what it runs on, and a strip of wasted space** — notifications and
+  briefings became removable, the notification panel stopped claiming you had none while it
+  was still loading, the daily push ceiling was removed, and the Insights page gained live
+  server vital signs plus a `disk_watch` job.
+
+  Three of the four things asked for turned out to be **defects rather than missing
+  features**, two of them breaking `ui-standards` requirements that had been archived for
+  releases. The notification bell was hand-written instead of going through
+  `useOptimisticList`, and so re-implemented none of the invariants that hook enforces.
+
+  Getting the existing suite green first surfaced three more, none of them planned:
+
+  - **The job advisory lock had never worked.** `pg_try_advisory_lock` is scoped to a
+    Postgres *connection*, and a SQLAlchemy `Session` is not pinned to one — `commit()`
+    returns it to the pool. `run_job` commits several times, so the unlock ran on a
+    different connection than the one holding the lock. The lock leaked onto pooled
+    connections, and could both block work that should run and fail to block work that
+    should not. `UNIQUE (job_name, occurrence_key)` had been carrying the guarantee alone.
+  - **The test suite depended on the developer's `.env`** — eight tests asserted the
+    unconfigured-push behaviour and passed only because CI has no VAPID keys.
+  - **Six tests asserted on rows they did not create**, counting a real browser
+    subscription registered during local testing.
+
+  The connecting thread: a suite that is green in CI and red on one machine is not reporting
+  a fault in the code, and would just as happily hide one.
+
 - **Acero speaks first, and Telegram is retired** — the assistant had never once started a
   conversation. Everything it knew about your day sat in Postgres waiting for you to think to
   ask. `app/jobs/` had been an empty package since Phase 0 and `apscheduler` an unused
@@ -224,18 +250,16 @@ tells you in the interface when one fires.
   signal rather than noise. The option is `pg_search`/ParadeDB, which costs a new
   dependency and a different Postgres image — priced deliberately, not deferred vaguely.
 
-- **One unverified check on the interface: the keyboard pass.** The 375 px pass is now
+- **One unverified check on the interface: the keyboard pass.** The 375 px pass is
   **done** — the app was installed from Chrome on a Pixel on 2026-08-24 and used there, which
   exercised the Learn section, the notification bell and the Journal tabs at phone width.
-  What has still never been exercised is **keyboard-only navigation**: every control is a real
-  button, the tablists have roving `tabIndex` and arrow keys, and the switches are Radix — but
-  nobody has tabbed through any of it. This is a ten-minute check, listed so it is not
-  silently assumed done. It was built for a 375 px screen (the
-  diagram grid collapses to one column, the panel becomes a Sheet, targets are 44 px) and
-  for keyboard use (every control is a real button, the tablist has roving `tabIndex` and
-  arrow keys). Neither was actually exercised. **Trigger: next time the app is opened on a
-  phone**, or the next keyboard pass over any screen — this is a ten-minute check, not a
-  project, and it is listed only so it is not silently assumed done.
+
+  What has still never been exercised is **keyboard-only navigation**. Everything is built
+  for it — every control is a real button, the tablists have roving `tabIndex` and arrow
+  keys, the switches are Radix, and the notification row's dismiss button carries its own
+  label — but built-for and verified are different things, and nobody has tabbed through
+  any of it. **Trigger: the next keyboard pass over any screen.** A ten-minute check, listed
+  only so it is not silently assumed done.
 
 - **Barnes-Hut quadtree for the graph layout.** The force simulation compares every fact
   with every other one — O(n²). Measured per frame (desktop, physics only, drawing not

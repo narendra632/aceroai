@@ -20,37 +20,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import JournalEntry, Notification, Task, User
+from app.db.models import JournalEntry, Task, User
 from app.jobs.registry import JobResult, job
 from app.jobs.registry import Notification as NotificationSpec
-from app.services import budget, insights
+from app.services import budget, insights, notifications
 
 log = logging.getLogger(__name__)
 
 
 def _tz() -> ZoneInfo:
     return ZoneInfo(settings.app_timezone)
-
-
-def _already_said(db: Session, user_id, kind: str, tag: str) -> bool:
-    """Whether this exact thing has already been raised.
-
-    The `tag` carries the state being reported — for overdue tasks, a hash of which tasks
-    they are. Same tag means the situation has not changed, so saying it again would be
-    repetition rather than news.
-    """
-    return (
-        db.execute(
-            select(Notification.id)
-            .where(
-                Notification.user_id == user_id,
-                Notification.kind == kind,
-                Notification.tag == tag,
-            )
-            .limit(1)
-        ).first()
-        is not None
-    )
 
 
 # --- overdue tasks ------------------------------------------------------------------
@@ -94,7 +73,7 @@ def task_nudge(db: Session, user: User) -> JobResult:
     # so the next nudge is genuinely new information.
     fingerprint = hashlib.sha256(",".join(str(t.id) for t in overdue).encode()).hexdigest()[:16]
     tag = f"overdue-{fingerprint}"
-    if _already_said(db, user.id, "task_overdue", tag):
+    if notifications.already_said(db, user.id, "task_overdue", tag):
         return JobResult(silent=True, detail={"overdue": len(overdue), "already_told": True})
 
     if len(overdue) == 1:
@@ -139,7 +118,7 @@ def budget_watch(db: Session, user: User) -> JobResult:
     reached = "limit" if ratio >= 1.0 else "warn"
     # Scoped to the month, so crossing 80% tells you once in August and again in September.
     tag = f"budget-{reached}-{dt.datetime.now(_tz()):%Y-%m}"
-    if _already_said(db, user.id, "budget", tag):
+    if notifications.already_said(db, user.id, "budget", tag):
         return JobResult(silent=True, detail={"ratio": round(ratio, 3), "already_told": True})
 
     if reached == "limit":
@@ -191,7 +170,7 @@ def journal_nudge(db: Session, user: User) -> JobResult:
         return JobResult(silent=True, detail={"entries": written})
 
     tag = f"journal-{today.isoformat()}"
-    if _already_said(db, user.id, "journal_empty", tag):
+    if notifications.already_said(db, user.id, "journal_empty", tag):
         return JobResult(silent=True, detail={"already_told": True})
 
     return JobResult(
