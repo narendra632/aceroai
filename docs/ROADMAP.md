@@ -250,6 +250,15 @@ tells you in the interface when one fires.
   signal rather than noise. The option is `pg_search`/ParadeDB, which costs a new
   dependency and a different Postgres image — priced deliberately, not deferred vaguely.
 
+- **A forced job re-run spends money but leaves no record.** `run_job(..., force=True)`
+  bypasses the already-ran check and executes — including the model call — but its
+  `_record` then hits `UNIQUE (job_name, occurrence_key)`, and that `IntegrityError` is
+  deliberately swallowed. So the run is invisible in `job_runs` while its cost is fully
+  visible on Insights. Found by reconciling four `job` turns against three run rows.
+  Harmless in normal operation, since nothing forces a run on its own. **Trigger: the next
+  time a job is re-run by hand.** The fix is a distinct occurrence key for forced runs, so
+  they record as themselves rather than colliding with the scheduled occurrence.
+
 - **One unverified check on the interface: the keyboard pass.** The 375 px pass is
   **done** — the app was installed from Chrome on a Pixel on 2026-08-24 and used there, which
   exercised the Learn section, the notification bell and the Journal tabs at phone width.

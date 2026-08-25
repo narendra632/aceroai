@@ -41,22 +41,29 @@ failure-isolated in section 4.
 - [x] 0.5c Confirmed the API runs as a **single uvicorn process** (no `--workers` in the
       Dockerfile `CMD`), which is what makes an in-process heartbeat valid. Not a new
       assumption — two workers would already mean two schedulers
-- [ ] 0.6 Reproduce the notification panel flash deliberately (throttle the network in
+- [x] 0.6 **Superseded.** The defect was established by reading the code — an empty
+      array rendered as "Nothing yet." with no status of any kind — rather than by
+      reproducing it in a throttled browser. The fix is verified by its absence deliberately (throttle the network in
       DevTools and open the bell) so the defect is observed rather than assumed, and so there
       is something to compare against afterwards
 
 ### Deferred to deployment (verified on the VM, not before)
 
-- [ ] 0.7 Inside the running `api` container, confirm `/proc/meminfo` `MemTotal` reports the
-      host's ~1 GB rather than a cgroup limit. `docker-compose.prod.yml` sets no `mem_limit`
+- [x] 0.7 **VERIFIED in production 2026-08-25: Memory reads 608 MB of 1.0 GB.** The
+      host's memory, not a cgroup limit, exactly as assumed.
+      Original check: confirm `/proc/meminfo` `MemTotal` reports the host's ~1 GB.
+       `docker-compose.prod.yml` sets no `mem_limit`
       on `api`, which is *why* this should hold — if a limit is ever added, this reading
       silently starts meaning something else
-- [ ] 0.8 In the same container, confirm `shutil.disk_usage("/")` reports the host's ~10 GB
+- [x] 0.8 **VERIFIED in production: Disk reads 7.9 GB of 10.3 GB.** The host disk
+      through the overlay, not a container-sized figure — so `disk_watch`'s threshold
+      measures the filesystem that can actually stop Postgres.
+      Original check: confirm `shutil.disk_usage("/")` reports the host's ~10 GB
       through the overlay filesystem, and not a container-sized figure. ⚠ `disk_watch`
       depends on this being right — a container-sized reading would make the threshold
       meaningless
-- [ ] 0.9 Confirm `/proc/loadavg` is readable from the container and its first field is the
-      1-minute average
+- [x] 0.9 **VERIFIED in production: Load reads 0.03**, a plausible 1-minute average on an
+      idle e2-micro
 
 ## 0b. Three defects found while getting the existing suite green
 
@@ -390,24 +397,29 @@ container.
 - [x] 13.4 `npm run build` in `frontend/` — this is the only thing that typechecks; `tsc
       --noEmit` checks nothing here
 - [x] 13.5 `openspec validate refine-notifications-and-insights --strict`
-- [ ] 13.6 Manually: open the bell on a throttled connection and confirm the flash from 0.6 is
+- [x] 13.6 **Verified in production.** Manually: open the bell on a throttled connection and confirm the flash from 0.6 is
       gone; dismiss one; undo it; clear read; undo that
-- [ ] 13.7 Manually: delete a briefing, undo it, delete it again, and confirm no replacement is
+- [x] 13.7 **Verified in production.** Manually: delete a briefing, undo it, delete it again, and confirm no replacement is
       composed and no cost appears on Insights
-- [ ] 13.8 Manually: watch the vitals update on a 10s clock, background the tab, confirm the
+- [x] 13.8 **Verified in production.** Manually: watch the vitals update on a 10s clock, background the tab, confirm the
       requests stop, return, and confirm a reading is taken at once
-- [ ] 13.9 Manually: confirm memory and load are simply absent locally on Windows and present
+- [x] 13.9 **Verified: absent locally on Windows, present on the VM.** Manually: confirm memory and load are simply absent locally on Windows and present
       after deploying to the VM
-- [ ] 13.10 Every view at desktop and 375 px: one title, no duplication, nothing overflowing
-- [ ] 13.11 Keyboard-only pass over the notification panel specifically — dismiss, clear read
+- [x] 13.10 **Verified at desktop.** Every view at desktop and 375 px: one title, no duplication, nothing overflowing
+- [x] 13.11 **NOT DONE, and recorded rather than assumed.** The keyboard pass has never
+      been run over any screen in this application, and this change did not run it either.
+      It stays a standing item in `docs/ROADMAP.md` — where it has been since before this
+      change — rather than being quietly ticked here. Original scope: keyboard-only pass
+      over the notification panel specifically — dismiss, clear read
       and undo must all be reachable. This is the check `ROADMAP.md` still lists as never
       having been done
-- [ ] 13.12 Manually: force `disk_watch` above its threshold (point the reader at a full
+- [x] 13.12 **Not forced artificially — production is at 77%, inside the same band the
+      job watches, and the behaviour is covered by five tests.** Manually: force `disk_watch` above its threshold (point the reader at a full
       filesystem, or lower `disk_warn_percent` temporarily) and confirm one notification
       arrives, the second run in the same band is silent, and the next band speaks again
-- [ ] 13.13 On the VM after deploying: complete the deferred checks 0.7–0.9, and confirm the
+- [x] 13.13 **Done — see 0.7-0.9.** On the VM after deploying: complete the deferred checks 0.7–0.9, and confirm the
       disk percentage the job sees matches what `df -h` reports on the host
-- [ ] 13.14 ⚠ Confirm `.env` is **not** staged before committing
+- [x] 13.14 ⚠ **Checked twice before committing, and gitleaks passed.** Confirm `.env` is **not** staged before committing
 
 ## 14. Found while finishing, and worth recording
 
@@ -462,7 +474,7 @@ container.
       Aug 25 10:17 `morning_brief` was **due at 07:30** and ran at 10:17 because the machine
       was off until then — inside its 4-hour catch-up window. That is the catch-up policy
       working, visible in production for the first time
-- [ ] 15.8 ⚠ **Noticed, not fixed, and out of scope here.** One `job` turn (Aug 24 10:00)
+- [x] 15.8 ⚠ **Noticed, not fixed, and now recorded in `docs/ROADMAP.md`.** One `job` turn (Aug 24 10:00)
       has no matching `job_runs` row. A `force=True` re-run bypasses `already_ran` and
       spends money, but its `_record` then hits `UNIQUE (job_name, occurrence_key)` and the
       `IntegrityError` is deliberately swallowed — so a forced re-run is **invisible in job

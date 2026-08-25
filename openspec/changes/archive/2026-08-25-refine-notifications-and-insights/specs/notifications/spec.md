@@ -127,10 +127,14 @@ Suppressed notifications SHALL still be recorded and SHALL remain visible in the
 - **THEN** no notification is withheld from delivery on the grounds of how many were already
   delivered that day
 
-#### Scenario: A ceiling that has been set deliberately
+#### Scenario: A daily ceiling
 
-- **WHEN** the user has set a ceiling and that many notifications have been delivered that day
+- **WHEN** a ceiling has been deliberately set and that many notifications have been
+  delivered that day
 - **THEN** further notifications are recorded but not delivered
+
+The invariant is unchanged from when a ceiling was the default; what changed is that one
+now applies only if the user asks for it.
 
 #### Scenario: Repeated subject
 
