@@ -231,18 +231,187 @@ def test_one_overdue_task_reads_naturally(db, user):
     assert result.notify.body == "pay the rent"
 
 
-def test_the_same_overdue_set_is_not_raised_twice(db, user):
-    """A nudge that repeats every hour is worse than no nudge: you stop reading them, and
-    then the one that mattered goes unread too."""
+def test_a_task_still_overdue_is_reminded_against_the_same_record(db, user):
+    """⚠ This REPLACES a test asserting the opposite — that the same overdue set is never
+    raised twice.
+
+    That rule was written to prevent notification fatigue and produced the opposite failure:
+    a task raised once and then silent is a task the system has stopped helping with. The
+    reminder now repeats until the user acts, and ends the moment they do.
+
+    It repeats against ONE record rather than writing one per check, so the panel does not
+    fill with seven near-identical rows a day and bury everything else.
+    """
     _task(db, user, "overdue", due_at=dt.datetime.now(dt.UTC) - dt.timedelta(hours=1))
 
     first = nudges.task_nudge(db, user)
-    notifications.raise_notification(db, user, first.notify)
+    assert first.notify is not None
+    row = notifications.raise_notification(db, user, first.notify)
+
+    # The check runs hourly; interruptions are paced separately. Age the delivery past the
+    # pacing interval so this asserts the reminder itself, not the pacing.
+    row.pushed_at = dt.datetime.now(dt.UTC) - nudges.REMIND_EVERY
+    db.commit()
+
     second = nudges.task_nudge(db, user)
 
+    assert second.silent is False, "an unaddressed overdue task is still worth saying"
+    assert second.notify is None, "not a second record"
+    assert second.remind is not None and second.remind.record.id == row.id
+    assert second.detail["overdue"] == 1
+
+
+def test_the_check_runs_more_often_than_it_interrupts(db, user):
+    """⚠ How fast you FIND OUT and how often you are REMINDED are different numbers.
+
+    They were briefly the same one. Running the job every two hours meant the repetition
+    interval had silently become the detection delay too: a task falling due at 11:05 was not
+    overdue at the 11:00 check and went unmentioned until 13:03.
+
+    The job now checks hourly and paces the interruptions itself, so a check that finds
+    nothing new to say is silent rather than a buzz.
+    """
+    _task(db, user, "overdue", due_at=dt.datetime.now(dt.UTC) - dt.timedelta(minutes=5))
+
+    first = nudges.task_nudge(db, user)
+    row = notifications.raise_notification(db, user, first.notify)
+    row.pushed_at = dt.datetime.now(dt.UTC)
+    db.commit()
+
+    held = nudges.task_nudge(db, user)
+    assert held.silent is True, "an hourly check must not become an hourly buzz"
+    assert held.remind is None
+    assert held.detail["holding"] is True
+
+    # ...and once the interval has passed, it does interrupt again.
+    row.pushed_at = dt.datetime.now(dt.UTC) - nudges.REMIND_EVERY - dt.timedelta(seconds=1)
+    db.commit()
+    assert nudges.task_nudge(db, user).remind is not None
+
+
+def test_a_record_that_never_reached_a_device_is_always_due(db, user):
+    """Pacing measures time since the last INTERRUPTION. A record held back by quiet hours
+    has interrupted nobody, so there is nothing to pace and the next check tries again."""
+    _task(db, user, "overdue", due_at=dt.datetime.now(dt.UTC) - dt.timedelta(hours=1))
+    first = nudges.task_nudge(db, user)
+    row = notifications.raise_notification(db, user, first.notify)
+    assert row.pushed_at is None, "no subscription in this test, so it never got out"
+
+    again = nudges.task_nudge(db, user)
+    assert again.remind is not None and again.remind.record.id == row.id
+
+
+def test_renaming_an_overdue_task_updates_what_the_reminder_says(db, user):
+    """The reminder describes the situation as it reads NOW.
+
+    Re-sending the record without this would repeat the title the task had when the record
+    was first written — for the rest of the day. The tag pins WHICH situation this is; the
+    wording is a description of it, not a transcript of something said.
+    """
+    task = _task(db, user, "buy gifts", due_at=dt.datetime.now(dt.UTC) - dt.timedelta(hours=1))
+    first = nudges.task_nudge(db, user)
+    row = notifications.raise_notification(db, user, first.notify)
+    assert row.body == "buy gifts"
+    row.pushed_at = dt.datetime.now(dt.UTC) - nudges.REMIND_EVERY
+    db.commit()
+
+    task.title = "buy gifts for both sisters"
+    db.commit()
+
+    again = nudges.task_nudge(db, user)
+
+    assert again.remind is not None
+    assert again.remind.record.id == row.id, "the same record, not a new one"
+    assert again.remind.body == "buy gifts for both sisters"
+    assert again.remind.record.created_at == row.created_at, "still overdue since the same time"
+
+
+def test_the_last_check_is_before_the_day_end_summary(db, user):
+    """`day_end_summary` fires at 21:00 and already lists what is overdue. Two notifications
+    arriving together saying overlapping things is how a reminder starts reading as noise."""
+    from app.jobs.registry import get
+
+    nudge_hours = _fire_hours(get("task_nudge"))
+    assert max(nudge_hours) == 19
+    assert 21 not in nudge_hours
+    assert max(nudge_hours) < min(_fire_hours(get("day_end_summary")))
+
+
+def test_removing_the_reminder_does_not_stop_it(db, user):
+    """Deleting a notification is tidying a panel, not answering a task.
+
+    In production the single overdue notification ever raised was deleted, and — combined
+    with the unbounded suppression this replaces — that silenced the feature entirely.
+    """
+    _task(db, user, "overdue", due_at=dt.datetime.now(dt.UTC) - dt.timedelta(hours=1))
+    first = nudges.task_nudge(db, user)
+    row = notifications.raise_notification(db, user, first.notify)
+    notifications.delete_notification(db, user.id, row.id)
+
+    second = nudges.task_nudge(db, user)
+
+    assert second.notify is not None, "a fresh record, since the old one is gone"
+    assert second.remind is None
+
+
+def test_a_rescheduled_task_that_goes_overdue_again_is_news(db, user):
+    """⚠ THE production regression, end to end. Reconstructed exactly from the live data.
+
+    `task_nudge` raised one notification in the lifetime of the application, on 2026-08-24 at
+    19:04:53, for a single overdue task. That notification was never delivered — the browser
+    did not subscribe until 20:17:55, 73 minutes later — and was then removed from the panel.
+    The task was rescheduled; its new due time passed on 2026-08-26 at 10:00; and every run
+    after that returned `{"overdue": 1, "already_told": true}`.
+
+    The cause: the tag hashed task ids alone, so `{gifts}` -> `{}` -> `{gifts}` produced the
+    identical tag at both ends. The tag sampled the state and could not represent the
+    transition, and the lookback had no time bound, so the second episode was suppressed by
+    the first indefinitely.
+
+    Two independent fixes have to hold for this test to pass: the due time is part of the
+    fingerprint, so a reschedule is a different situation; and there is no suppression left
+    to be silenced by.
+    """
+    task = _task(db, user, "buy gifts", due_at=dt.datetime.now(dt.UTC) - dt.timedelta(hours=2))
+
+    first = nudges.task_nudge(db, user)
     assert first.notify is not None
-    assert second.silent is True
-    assert second.detail["already_told"] is True
+    row = notifications.raise_notification(db, user, first.notify)
+    original_tag = first.notify.tag
+
+    # The user removes it from the panel, exactly as happened in production.
+    notifications.delete_notification(db, user.id, row.id)
+
+    # ...and reschedules the task, so it stops being overdue.
+    task.due_at = dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)
+    db.commit()
+    assert nudges.task_nudge(db, user).silent is True
+
+    # The new due time passes.
+    task.due_at = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
+    db.commit()
+
+    again = nudges.task_nudge(db, user)
+
+    assert again.silent is False, (
+        "this returned silent with already_told=True for three days in production"
+    )
+    assert again.notify is not None
+    assert again.notify.tag != original_tag, (
+        "the same task at a different due time is a different situation, and the tag has "
+        "to be able to say so"
+    )
+
+
+def test_moving_the_due_time_out_stops_the_reminders(db, user):
+    """One of the two exits, and the behaviour the repetition exists to train."""
+    task = _task(db, user, "overdue", due_at=dt.datetime.now(dt.UTC) - dt.timedelta(hours=1))
+    assert nudges.task_nudge(db, user).notify is not None
+
+    task.due_at = dt.datetime.now(dt.UTC) + dt.timedelta(days=1)
+    db.commit()
+
+    assert nudges.task_nudge(db, user).silent is True
 
 
 def test_a_changed_overdue_set_is_news_again(db, user):
@@ -551,3 +720,23 @@ def test_a_deleted_briefing_is_restorable_with_the_same_identity(db, user):
     restored = journal_svc.restore_briefing(db, user.id, row.id)
     assert restored.id == row.id
     assert [b.id for b in journal_svc.list_briefings(db, user.id)] == [row.id]
+
+
+def _fire_hours(job) -> set[int]:
+    """Which local hours a job fires in, sampled from the real trigger rather than parsed."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+
+    from app.config import settings as _s
+
+    tz = _Z(_s.app_timezone)
+    trigger = job.trigger()
+    cursor = _dt.datetime(2026, 6, 1, tzinfo=tz)
+    hours = set()
+    for _ in range(40):
+        nxt = trigger.get_next_fire_time(None, cursor)
+        if nxt is None or nxt > cursor + _dt.timedelta(days=2):
+            break
+        hours.add(nxt.astimezone(tz).hour)
+        cursor = nxt + _dt.timedelta(microseconds=1)
+    return hours

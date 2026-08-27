@@ -18,7 +18,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.db.models import JobRun, Notification
 from app.jobs import runner
-from app.jobs.registry import JobResult
+from app.jobs.registry import JobResult, Reminder
 from app.jobs.registry import Notification as NotificationSpec
 
 from .conftest import TEST_PREFIX
@@ -314,7 +314,7 @@ def test_a_failing_job_is_recorded_and_contained(db, user, jobs_registry):
 
 
 def test_nothing_to_report_is_success_not_failure(db, user, jobs_registry):
-    """`task_nudge` runs twelve times a day and usually finds nothing. That is the job
+    """`task_nudge` runs seven times a day and usually finds nothing. That is the job
     working, and it must be readable at a glance as distinct from a failure — and from a
     run that never happened at all."""
 
@@ -514,3 +514,47 @@ def test_once_a_job_has_history_a_gap_IS_recorded(db, user, counting_job):
 
     statuses = [r.status for r in _runs(db, entry.name)]
     assert statuses == ["ok", "missed"]
+
+
+def test_a_job_can_remind_against_an_existing_record(db, user, jobs_registry, fake_push):
+    """The runner path for a situation that persists.
+
+    A job must never deliver anything itself — the registry exists so that quiet hours, the
+    ceiling, tracing and run recording are applied in one place rather than re-implemented
+    per job. So a repeating reminder hands back the record it already raised and the runner
+    re-delivers it, exactly as `notify` hands back a new one.
+    """
+    from app.db.models import PushSubscription
+    from app.services import notifications
+
+    from .conftest import make_subscription
+
+    sub = make_subscription()
+    db.add(PushSubscription(user_id=user.id, **sub))
+    user.quiet_hours_start = user.quiet_hours_end = 0
+    db.commit()
+
+    row = notifications.raise_notification(
+        db, user, NotificationSpec(kind="task_overdue", title="1 task is overdue", body="x")
+    )
+    assert row.push_count == 1
+
+    @jobs_registry.job(f"{TEST_PREFIX}remind", "0 9 * * *", description="reminds")
+    def _remind(db_, user_):
+        return JobResult(
+            remind=Reminder(record=row, title=row.title, body=row.body),
+            detail={"reminder": 2},
+        )
+
+    status = runner.run_job(
+        db, jobs_registry.get(f"{TEST_PREFIX}remind"), user, f"{TEST_PREFIX}remind-1"
+    )
+
+    db.refresh(row)
+    assert status == "ok"
+    assert row.push_count == 2, "the runner delivered it again"
+    assert len(fake_push) == 2
+    assert fake_push[-1][2]["Urgency"] == "high"
+    assert (
+        db.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
+    ) == [row], "one record, not two"

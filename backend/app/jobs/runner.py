@@ -297,7 +297,27 @@ def _deliver(db: Session, user: User, job: Job, result: JobResult) -> None:
         db.commit()
 
     if result.notify is not None:
-        notifications.raise_notification(db, user, result.notify, job_name=job.name)
+        # The job's own staleness bound decides how long the push service holds this for an
+        # offline device. One declaration, both decisions — see `notifications.ttl_for`.
+        notifications.raise_notification(
+            db,
+            user,
+            result.notify,
+            job_name=job.name,
+            ttl=notifications.ttl_for(job.catch_up),
+        )
+
+    if result.remind is not None:
+        # A situation that persists: deliver the record again rather than writing a new one,
+        # with its wording refreshed from how the situation reads now.
+        notifications.deliver_again(
+            db,
+            user,
+            result.remind.record,
+            title=result.remind.title,
+            body=result.remind.body,
+            ttl=notifications.ttl_for(job.catch_up),
+        )
 
 
 def tick(db: Session, user: User, now: dt.datetime | None = None) -> dict[str, str]:

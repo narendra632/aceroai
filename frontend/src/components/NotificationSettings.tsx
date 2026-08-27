@@ -218,10 +218,11 @@ export default function NotificationSettings() {
                 {status.devices} device{status.devices === 1 ? "" : "s"}{" "}
                 registered
                 {/* A readout, not a limit. There is no ceiling any more: volume is governed
-                    by whether something is NEWS — a repeated situation is suppressed by its
-                    tag — rather than by cutting you off after a fixed count, which used to
-                    discard the hourly overdue nudge first. Counted from what was DELIVERED,
-                    so clearing the panel does not reset it. */}
+                    by the nature of the subject — a measurement is reported when it crosses
+                    a band, work you still have to do repeats until you do it — rather than
+                    by cutting you off after a fixed count, which used to discard the overdue
+                    nudge first. Counts DELIVERIES, not rows: one overdue record reminded
+                    about six times counts six. Clearing the panel does not reset it. */}
                 {status.pushed_today > 0 && (
                   <> · {status.pushed_today} sent today</>
                 )}

@@ -160,9 +160,18 @@ class Settings(BaseSettings):
     # sender. Required by the VAPID spec; "mailto:" or "https:".
     vapid_subject: str = "mailto:acero@localhost"
     # How long a push service holds an undelivered message for a device that is offline.
-    # Digests are worth waiting a day for; a nudge about something time-sensitive is not.
-    push_ttl_digest_s: int = 86400
-    push_ttl_nudge_s: int = 14400
+    #
+    # ⚠ This is NOT the value used for a notification a scheduled job raised. That one is
+    # derived from the job's own `catch_up` window, which already declares how stale its
+    # output may be — see `services/notifications.deliver`. This default applies only to
+    # notifications no job produced: today, the test push from Settings.
+    #
+    # Two independent statements of staleness used to exist and they contradicted each other.
+    # `day_end_summary` declares `catch_up=3h` — "by midnight, so it still lands on the day it
+    # describes" — and was then handed to the push service with a 24-hour TTL, an instruction
+    # to deliver the thing the runner had already refused to produce that late. One
+    # declaration now serves both decisions, so they cannot drift apart again.
+    push_ttl_default_s: int = 3600
     # Quiet hours, as local hours. A notification raised inside the window is still
     # WRITTEN — only the push is suppressed, so it is waiting in the app in the morning.
     quiet_hours_start: int = 22

@@ -99,9 +99,51 @@ anything. The service worker listens for `pushsubscriptionchange`, re-subscribes
 nothing else. It is a **pointer**; the substance lives in the app. Measured, a realistic
 payload encrypts to **191 bytes**.
 
-**`TTL` is required.** It says how long the push service should hold a message for a device
-that is offline. Chrome rejects a request without it. Acero uses 24 hours for a summary and
-4 hours for a nudge — a stale reminder is worse than none.
+**⚠ `Urgency` decides whether your phone wakes up.** This is the single header that made
+notifications feel unreliable, and it is worth understanding properly.
+
+RFC 8030 defines four levels, described as the *minimum device state at which a message is
+worth delivering*: `very-low` for advertisements, `low` for topic updates, `normal` for chat,
+`high` for a time-sensitive alert. On Android, anything below `high` may be held while the
+device is dozing and released only when it is next picked up.
+
+Acero used to send digests as `Urgency: low`. Measured in production on 2026-08-26: the
+day-end summary was dispatched at **21:03:12, zero seconds** after its row was written, and
+appeared on the phone at roughly **21:40**, when it was next unlocked. Every one of the last
+25 notifications had been dispatched within 0–9 seconds and no delivery error had ever been
+recorded. The server was never slow — it was politely asking to be ignored, and the push
+service obliged.
+
+**Everything is now sent `high`, as a constant rather than a per-kind table.** This
+application has no advertisement tier: every notification it sends is one you scheduled and
+are waiting for, and a summary of your day has its entire value in arriving at the end of
+that day.
+
+This does **not** override quiet hours. Urgency tells the push service how to reach a
+*sleeping device*; whether you want to be reached at all is decided earlier, and by you.
+
+**`TTL` is required, and is derived from the job's own staleness bound.** It says how long
+the push service should hold a message for a device that is offline; Chrome rejects a request
+without it.
+
+It used to come from the same hand-maintained set of kind strings as `Urgency` — 24 hours for
+a summary, 4 hours for a nudge — and that set **contradicted the jobs it described**.
+`day_end_summary` declares `catch_up=3h`, *"by midnight, so it still lands on the day it
+describes"*, and was then handed to the push service with instructions to hold it for a full
+day: to deliver the thing the runner would have refused to produce that late.
+`morning_brief` said *"delivered by 11:30 or not at all"* and did the same.
+
+A job already declares how stale its output may be. `notifications.ttl_for` turns that one
+declaration into the TTL, so the two decisions cannot drift apart again:
+
+| Job | `catch_up` | `TTL` |
+|---|---|---|
+| `morning_brief` | 4 h | 4 h |
+| `day_end_summary` | 3 h | 3 h |
+| `task_nudge` | 45 min | 45 min |
+| `retention_sweep` | **none** — "however late" | four weeks (the maximum FCM accepts) |
+
+A notification no job produced — the test push from Settings — uses `PUSH_TTL_DEFAULT_S`.
 
 **`tag` coalesces.** Two notifications sharing a tag replace one another on the device rather
 than stacking, so a second overdue-task nudge supersedes the first instead of building a
@@ -166,7 +208,7 @@ subscription row (`last_error`, `last_error_at`).
 |---|---|---|
 | `morning_brief` | `morning_brief` | 07:30 |
 | `day_end_summary` | `day_end_summary` | 21:00 |
-| `task_overdue` | `task_nudge` | Hourly 09–21, coalesced, once per changed set |
+| `task_overdue` | `task_nudge` | Checked hourly 09–19, buzzes at most every 2 h, coalesced, **repeated until addressed** |
 | `budget` | `budget_watch` | Once at 80% of the month's limit, once at 100% |
 | `journal_empty` | `journal_nudge` | 20:30, **off by default** |
 | `test` | the button | On demand |
@@ -184,7 +226,7 @@ Three controls, all applied centrally so no individual job can forget them:
 |---|---|---|
 | Per-job toggle | from the registry | Off means the job does not run at all — not merely silenced |
 | Quiet hours | 22:00 – 07:00 | Row **is** written; the push is suppressed. It is in the bell in the morning |
-| Repetition suppression | always on | A situation already reported stays quiet until it **changes** |
+| Repetition suppression | per subject | A **measurement** already reported stays quiet until it changes band. **Work you have to do** repeats until you do it |
 | Daily ceiling | **0 — none** | Set it only as an escape hatch. See below |
 
 Quiet hours default to the server setting when unset. **Equal start and end means off** — a
@@ -193,15 +235,20 @@ means "use the default". The Settings toggle writes `0/0`.
 
 ### Why there is no daily ceiling
 
-There used to be one, defaulting to six. `task_nudge` alone can fire thirteen times a day,
-so it was **binding in ordinary use** — which means it was silently discarding notifications
-that were wanted, beginning with the most frequent one, the hourly overdue-task ping.
+There used to be one, defaulting to six. `task_nudge` alone can fire six times a day, so
+it was **binding in ordinary use** — which means it was silently discarding notifications
+that were wanted, beginning with the most frequent one, the repeating overdue-task ping.
 
 A ceiling reached during normal operation is not a safety limit. It is an undocumented
 feature that stops telling you things after lunch.
 
-Volume is governed instead by **whether something is news** — see *Saying something once* in
-`JOBS.md`. That is the right control for expected volume.
+Volume is governed instead by **the nature of the subject** — see *Saying something once* in
+`JOBS.md`. A measurement is reported when it crosses into a worse band; work you still have
+to do is reported until you do it. That is the right control for expected volume.
+
+⚠ The ceiling counts **deliveries, not records**. One overdue record reminded about seven
+times has interrupted you six times, and a ceiling that counted rows would let a repeating
+nudge past it unchecked.
 
 The setting is kept at `0` rather than deleted because it is the wrong control for
 *unexpected* volume, and that is a real failure mode: a job that loops, or one whose tag
@@ -214,9 +261,12 @@ and a bad hour with no way to stop it.
 Notifications can be removed — individually, or all the read ones at once — and restored
 from the undo toast. Two things removal deliberately leaves alone:
 
-- **The nudge behind it stays suppressed.** `already_said` asks what has been *said*, not
-  what is still on screen. Otherwise dismissing "3 tasks are overdue" would make the next
-  hourly run push it again.
+- **A band-crossing alert stays suppressed.** `already_said` asks what has been *said*, not
+  what is still on screen. Otherwise dismissing a disk warning would make the next check push
+  it again.
+- **An overdue reminder is not stopped by removing it.** The opposite: the situation is still
+  true, so the next check writes a fresh record and buzzes again. Deal with the task or move
+  its due date — those are the only two exits.
 - **The day's delivered count is unchanged.** It counts *deliveries*, not surviving
   receipts. The phone already buzzed; clearing the panel does not un-buzz it. Shown in
   Settings as "N sent today".

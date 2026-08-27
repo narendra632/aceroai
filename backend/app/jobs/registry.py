@@ -30,6 +30,7 @@ from app.config import settings
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sqlalchemy.orm import Session
 
+    from app.db.models import Notification as NotificationRow
     from app.db.models import User
 
 
@@ -47,6 +48,25 @@ class Notification:
 
 
 @dataclass(frozen=True)
+class Reminder:
+    """An existing notification to deliver again, with its wording brought up to date.
+
+    The overdue nudge reminds until the user acts, and writing a record per reminder would
+    put a column of near-identical rows in the panel each day. So the job hands back the
+    record it already raised today and the runner re-delivers it — the job still never
+    touches delivery itself, which is the whole point of this registry.
+
+    `title` and `body` are recomputed from the CURRENT situation on every reminder, so
+    renaming an overdue task does not leave the reminder repeating the name it had this
+    morning. The record's identity — its tag, and when it was first raised — is untouched.
+    """
+
+    record: "NotificationRow"
+    title: str
+    body: str
+
+
+@dataclass(frozen=True)
 class ReviewDraft:
     """A `generated_reviews` row: longer than a notification, kept and readable by date."""
 
@@ -60,13 +80,18 @@ class ReviewDraft:
 class JobResult:
     """What a job hands back.
 
-    `silent` is load-bearing and easy to mistake for a detail. `task_nudge` runs twelve
-    times a day and usually finds nothing — that is the job working, not a no-op. Recording
+    `silent` is load-bearing and easy to mistake for a detail. `task_nudge` runs eleven
+    times a day and usually finds nothing, or finds something it is not yet time to repeat
+    — that is the job working, not a no-op. Recording
     it distinctly is what keeps `job_runs` readable at a glance: a column of `silent` is
     healthy, a column of `failed` is not, and an absence of rows is a third thing entirely.
     """
 
     notify: Notification | None = None
+    #: An existing record to deliver again, for a situation that persists.
+    #:
+    #: Mutually exclusive with `notify` in practice: a situation is either new or continuing.
+    remind: "Reminder | None" = None
     review: ReviewDraft | None = None
     # Counts and identifiers only — this lands in `job_runs.detail`, never message text.
     detail: dict | None = None

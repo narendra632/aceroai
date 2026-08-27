@@ -345,6 +345,12 @@ class Notification(Base):
 
     `pushed_at` NULL means it never reached a device — which is information, not a failure:
     quiet hours, the daily cap, no subscription, or a send that did not succeed.
+
+    ⚠ Since migration 013 `pushed_at` is when it was **last** delivered, not when it was
+    delivered. A record can be delivered repeatedly: the overdue nudge reminds the user every
+    two hours against one record per day rather than writing a record per reminder.
+    `push_count` is how many times that happened, and it — not the number of rows — is what
+    "how often have I been interrupted today" means.
     """
 
     __tablename__ = "notifications"
@@ -360,7 +366,12 @@ class Notification(Base):
     tag: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
     read_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # When it was LAST delivered (migration 013), not when it was delivered.
     pushed_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # Deliveries, not records (migration 013). Starts at zero and is incremented by the code
+    # that actually delivers — a row is written BEFORE delivery is attempted, so a default of
+    # 1 would claim an interruption that may never happen.
+    push_count: Mapped[int] = mapped_column(sa.Integer, server_default="0", default=0)
     # ⚠ Soft delete (migration 012), with an exception found nowhere else in this file.
     #
     # Readers that LIST rows filter `deleted_at IS NULL`, as everywhere. But two readers ask

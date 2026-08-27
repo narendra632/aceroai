@@ -156,7 +156,7 @@ the service worker even with the app closed. It has no access to the tool loop �
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/jobs/` | Recurring work: `registry` (what a job is), `runner` (what is due, exactly once), `scheduler` (the tick), plus the seven jobs. See [`JOBS.md`](JOBS.md) |
 | `app/core/push.py` | Encrypts and signs a web-push message. No key needed to import it |
-| `app/services/notifications.py` | Store-then-deliver, quiet hours, repetition suppression, removal |
+| `app/services/notifications.py` | Store-then-deliver, quiet hours, repeat delivery, urgency and TTL, removal |
 | `app/services/vitals.py` | Disk, memory, database size, scheduler heartbeat. A reading it cannot take is `None`, never zero |
 | `app/db/models.py` | The 14 ORM tables (typed `Mapped[]`) |
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` |
@@ -555,9 +555,13 @@ sequenceDiagram
         opt a digest
             J->>J: one model call — facts in, prose out
         end
-        J-->>R: JobResult(notify?, review?, silent?)
-        R->>N: raise_notification
-        N->>P: encrypted payload (unless quiet / capped)
+        J-->>R: JobResult(notify? remind? review? silent?)
+        alt a new situation
+            R->>N: raise_notification (write the row, then deliver)
+        else the same situation, still unaddressed
+            R->>N: deliver_again (one record, push_count += 1)
+        end
+        N->>P: encrypted payload, Urgency: high, TTL = the job's catch_up
         R->>DB: record ok | silent | failed
     end
 ```
@@ -576,7 +580,9 @@ such a window at import; "however late" must be written `catch_up=None`. See
 
 ```mermaid
 flowchart LR
-    J["a job has something to say"] --> ROW[("notifications<br/><small>written FIRST</small>")]
+    J["a job has something to say"] --> NEW{"said already<br/>today?"}
+    NEW -->|no| ROW[("notifications<br/><small>written FIRST</small>")]
+    NEW -->|"yes, and still<br/>unaddressed"| ROW
     ROW --> POL{"quiet hours?<br/>daily cap?"}
     POL -->|suppressed| BELL["the bell in the app"]
     POL -->|deliver| SUBS[("push_subscriptions")]
@@ -596,7 +602,19 @@ drawer must not make working software look broken.
 
 The payload is encrypted with keys the **browser** generated, so the push service relays
 something it cannot read. It is capped at ~4 KB, which is why it is a pointer — the substance
-stays in the app. Full detail in [`NOTIFICATIONS.md`](NOTIFICATIONS.md).
+stays in the app.
+
+**One record can be delivered many times.** An overdue task is reminded about every two hours
+until it is dealt with or rescheduled, and each reminder delivers the *same* record rather
+than writing another — otherwise a column of near-identical rows each day would bury
+everything else in the panel. `pushed_at` is therefore when it was **last** delivered and `push_count` is how
+many times, which is also what "how often has this interrupted me today" has to count.
+
+**Everything is sent `Urgency: high`, and its `TTL` is the producing job's `catch_up`.** The
+first is why a 21:00 summary now arrives at 21:00 rather than whenever the phone is next
+picked up; the second is so that one declaration of staleness governs both whether a job runs
+late and how long its delivery stays valid. Full detail in
+[`NOTIFICATIONS.md`](NOTIFICATIONS.md).
 
 ## 5. Data model
 
@@ -743,7 +761,8 @@ erDiagram
         text url "in-app route"
         text tag "same tag replaces on the device"
         timestamptz read_at
-        timestamptz pushed_at "null = never reached a device"
+        timestamptz pushed_at "null = never reached; else LAST delivered"
+        int push_count "deliveries, not records"
         timestamptz deleted_at "soft delete; two readers ignore it on purpose"
     }
     push_subscriptions {

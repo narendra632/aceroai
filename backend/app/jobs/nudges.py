@@ -4,10 +4,25 @@
 cost nothing, run instantly, and are structurally incapable of inventing a task — which is
 why most jobs should look like this and only the two digests do not.
 
-The hard part here is not finding the overdue tasks. It is **not telling you twice.** A
-nudge that repeats every hour is worse than no nudge at all: you stop reading them, and then
-the one that mattered goes unread too. So each job carries its own definition of "already
-said", and `task_nudge` re-raises only when the set of overdue tasks has actually changed.
+The hard part here is not finding the overdue tasks. It is deciding **when to say it again**,
+and the three jobs answer that differently on purpose:
+
+- `budget_watch` reports a measurement crossing into a worse band. Once you know spend passed
+  80%, saying it again adds nothing until it passes 100%, so it carries a definition of
+  "already said" and stays quiet. Tagged by month, so it speaks once in August and again in
+  September.
+- `journal_nudge` asks about one day. Tagged by date; once is the whole of it.
+- `task_nudge` reports **work you still have to do**. It checks hourly so a task that has
+  just fallen due is picked up quickly, and interrupts at most every two hours until you deal
+  with it or move the due time out. Those are two different numbers on purpose — see
+  `REMIND_EVERY`.
+
+That last one was told-once and it was wrong. A single notification — raised before any
+device had subscribed, so never delivered, and then removed from the panel — silenced the
+feature for three days with no error anywhere. A reminder you can end in one tap is not
+fatigue; a reminder that gives up after one unheard attempt is not a reminder. The behaviour
+this trains is "deal with it or reschedule it honestly", and it is deliberately not explained
+in the notification text: a reminder that re-explains itself every two hours is a worse one.
 """
 
 import datetime as dt
@@ -21,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import JournalEntry, Task, User
-from app.jobs.registry import JobResult, job
+from app.jobs.registry import JobResult, Reminder, job
 from app.jobs.registry import Notification as NotificationSpec
 from app.services import budget, insights, notifications
 
@@ -35,14 +50,33 @@ def _tz() -> ZoneInfo:
 # --- overdue tasks ------------------------------------------------------------------
 
 
+#: How long to leave between interrupting the user about the same unchanged situation.
+#:
+#: ⚠ Deliberately NOT the same thing as the schedule, and they were briefly conflated. When
+#: the job itself ran every two hours, the repetition interval had silently become the
+#: DETECTION delay too: a task falling due at 11:05 was not overdue at the 11:00 check and
+#: went unmentioned until 13:03, nearly two hours later.
+#:
+#: They are two different questions. The schedule answers "how soon do I find out?", this
+#: answers "how often am I nagged?". Hourly checks paced to a two-hourly reminder gives a
+#: sub-hour answer to the first without changing the second.
+REMIND_EVERY = dt.timedelta(hours=2)
+
+
 @job(
     "task_nudge",
-    "0 9-21 * * *",
-    description="A quiet nudge when a task's due time has passed.",
-    # Under an hour, because the occurrences are an hour apart — a longer window could
-    # never expire, and "missed" would become unreachable. In practice the five-minute tick
-    # means this runs within minutes; the bound only matters after an outage, where the
-    # next hour's nudge is a better answer than a stale one.
+    # Hourly, 09:00 to 19:00. Interruptions are paced by REMIND_EVERY, not by this, so
+    # checking often costs one indexed query and buys a fast first nudge.
+    #
+    # It stops at 19:00 rather than 21:00 because `day_end_summary` fires at 21:00 and
+    # already lists what is overdue. Two notifications arriving together saying overlapping
+    # things is how a reminder starts reading as noise.
+    "0 9-19 * * *",
+    description="Reminds you every couple of hours about a task whose due time has passed.",
+    # Under the one-hour gap between occurrences: a window at least as long as the gap can
+    # never expire, so "missed" would become unreachable — the registry enforces this. In
+    # practice the five-minute tick means this runs within minutes of the hour; the bound
+    # only matters after an outage, where the next check beats a stale one.
     catch_up=dt.timedelta(minutes=45),
 )
 def task_nudge(db: Session, user: User) -> JobResult:
@@ -68,24 +102,41 @@ def task_nudge(db: Session, user: User) -> JobResult:
     if not overdue:
         return JobResult(silent=True)
 
-    # The tag IS the state: which tasks are overdue right now. If nothing has changed since
-    # the last nudge, the tag matches and we stay quiet. Complete one and the tag changes,
-    # so the next nudge is genuinely new information.
-    fingerprint = hashlib.sha256(",".join(str(t.id) for t in overdue).encode()).hexdigest()[:16]
+    # The tag identifies the SITUATION: which tasks are overdue, and when each was due.
+    #
+    # ⚠ The due time is in here for a reason found the expensive way. The tag used to hash
+    # ids alone, which meant a task that went overdue, was rescheduled, and went overdue again
+    # produced the identical tag — so the second episode was suppressed by the notification
+    # from the first, permanently. Including `due_at` makes a reschedule what it actually is:
+    # a different situation.
+    fingerprint = hashlib.sha256(
+        ",".join(f"{t.id}@{t.due_at.isoformat()}" for t in overdue).encode()
+    ).hexdigest()[:16]
     tag = f"overdue-{fingerprint}"
-    if notifications.already_said(db, user.id, "task_overdue", tag):
-        return JobResult(silent=True, detail={"overdue": len(overdue), "already_told": True})
 
-    if len(overdue) == 1:
-        title = "1 task is overdue"
-        body = overdue[0].title
-    else:
-        title = f"{len(overdue)} tasks are overdue"
-        # Coalesced deliberately: one notification naming a couple of them, never one per
-        # task. Three separate pings about three tasks is how people turn notifications off.
-        body = "; ".join(t.title for t in overdue[:3])
-        if len(overdue) > 3:
-            body += f" and {len(overdue) - 3} more"
+    # Composed BEFORE deciding whether this is new or a repeat, because a repeat carries the
+    # wording too — renaming an overdue task must not leave the reminder repeating the name
+    # it had this morning.
+    title, body = _describe(overdue)
+
+    # An overdue task is reported until it is DEALT WITH, not until it has been mentioned
+    # once. There is no `already_said` check here, and that asymmetry with `budget_watch` and
+    # `disk_watch` is the point: those report a measurement crossing into a worse band, where
+    # repeating adds nothing, while this reports work the user still has to do.
+    #
+    # The repetition ends when the task is completed, dropped, deleted, snoozed, or its due
+    # time is moved out — all of which drop it from the query above. Nothing else stops it,
+    # including reading or removing the notification.
+    existing = notifications.todays_record(db, user.id, "task_overdue", tag)
+    if existing is not None:
+        if not notifications.reminder_is_due(existing, REMIND_EVERY):
+            # Found on an hourly check, but it is not yet time to interrupt again. The job
+            # ran and correctly said nothing, which is what `silent` is for.
+            return JobResult(silent=True, detail={"overdue": len(overdue), "holding": True})
+        return JobResult(
+            remind=Reminder(record=existing, title=title, body=body),
+            detail={"overdue": len(overdue), "reminder": (existing.push_count or 0) + 1},
+        )
 
     return JobResult(
         notify=NotificationSpec(
@@ -93,6 +144,18 @@ def task_nudge(db: Session, user: User) -> JobResult:
         ),
         detail={"overdue": len(overdue)},
     )
+
+
+def _describe(overdue: list[Task]) -> tuple[str, str]:
+    """How a set of overdue tasks reads. Recomputed on every reminder, never cached."""
+    if len(overdue) == 1:
+        return "1 task is overdue", overdue[0].title
+    # Coalesced deliberately: one notification naming a couple of them, never one per task.
+    # Three separate pings about three tasks is how people turn notifications off.
+    body = "; ".join(t.title for t in overdue[:3])
+    if len(overdue) > 3:
+        body += f" and {len(overdue) - 3} more"
+    return f"{len(overdue)} tasks are overdue", body
 
 
 # --- spend ---------------------------------------------------------------------------

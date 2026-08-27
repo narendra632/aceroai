@@ -250,6 +250,25 @@ tells you in the interface when one fires.
   signal rather than noise. The option is `pg_search`/ParadeDB, which costs a new
   dependency and a different Postgres image — priced deliberately, not deferred vaguely.
 
+- **⚠ A warning raised inside quiet hours can go a full day without ever buzzing.** Quiet
+  hours suppress the *push* and keep the *record*, which is correct and deliberate. But a job
+  that also suppresses repeats then never gets a second chance: `disk_watch` runs at 00:00,
+  06:00, 12:00 and 18:00, and the first two fall inside the 22:00–07:00 window. A crossing
+  detected at midnight is recorded and not delivered; at 06:00 and again at 12:00
+  `already_said` finds it inside its 24-hour window and stays quiet. The row sits in the
+  panel and the phone never rings.
+
+  Found by walking the behaviour of `reliable-urgent-notifications` rather than its code, and
+  deliberately left out of that change: the general fix is **"deliver what quiet hours held,
+  once quiet hours end"** — a pending-delivery concept that belongs in its own change, not
+  bolted onto a nudge rewrite. A narrower fix (pace repeats from the last *delivery*, as
+  `task_nudge` now does) would work for a job that repeats, and `disk_watch` deliberately
+  does not.
+
+  **Trigger: production disk crossing 80%. It is at 77%.** This is the one item here whose
+  trigger is already close, and the warning it would swallow is the one about the disk that
+  stops Postgres accepting writes on a machine with no backup.
+
 - **A forced job re-run spends money but leaves no record.** `run_job(..., force=True)`
   bypasses the already-ran check and executes — including the model call — but its
   `_record` then hits `UNIQUE (job_name, occurrence_key)`, and that `IntegrityError` is

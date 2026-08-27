@@ -859,7 +859,7 @@ export const CONCEPTS: Concept[] = [
     title: "Cron, and a trap inside it",
     what: "A five-field notation for repeating times, used here to describe when each job runs.",
     how: [
-      "0 21 * * * means 21:00 every day. 0 9-21 * * * means hourly between 09:00 and 21:00",
+      "0 21 * * * means 21:00 every day. 0 9-19 * * * means hourly between 09:00 and 19:00",
       "Read in your timezone, so end of day means the end of YOUR day",
       "The library counts weekdays from Monday while every crontab reference counts from Sunday",
       "Acero refuses a numeric weekday at startup rather than running a job a day early forever",
@@ -913,6 +913,23 @@ export const CONCEPTS: Concept[] = [
     reads: [{ label: "How notifications work", href: "docs/NOTIFICATIONS.md" }],
   },
   {
+    id: "urgency",
+    group: "delivery",
+    title: "Why a notification can arrive late",
+    what: "Sending a notification and your phone showing it are two different events, and the gap between them is something the sender asks for.",
+    how: [
+      "Every push carries an Urgency header: the phone's system uses it to decide whether to wake up",
+      "Anything below 'high' can be held while the phone is idle and released only when you pick it up",
+      "Acero used to mark the daily summaries 'low', which is a request to be ignored until convenient",
+      "Everything is now sent 'high', because nothing here is an advertisement — you scheduled all of it",
+      "Quiet hours are unaffected: urgency says how to reach a sleeping phone, not whether to",
+    ],
+    measured:
+      "Measured in production: the 21:00 summary was sent at 21:03:12, zero seconds after being written, and appeared on the phone at about 21:40 — when it was next unlocked.",
+    code: ["backend/app/services/notifications.py", "backend/app/core/push.py"],
+    reads: [{ label: "How notifications work", href: "docs/NOTIFICATIONS.md" }],
+  },
+  {
     id: "unsaid",
     group: "delivery",
     title: "Deleting the record does not unsay it",
@@ -920,9 +937,10 @@ export const CONCEPTS: Concept[] = [
     how: [
       "Two questions read old notifications: 'have I said this?' and 'how many have I sent today?'",
       "Both deliberately still see the ones you deleted",
-      "Otherwise dismissing 'three tasks are overdue' would make the next hour treat it as news",
-      "Delete would quietly come to mean 'remind me again within the hour'",
+      "Otherwise dismissing a disk warning would make the next check treat it as news again",
+      "Delete would quietly come to mean 'tell me again shortly'",
       "Everywhere else, a deleted row is hidden from every reader — these two are the exceptions",
+      "For an overdue task the answer is the opposite: deleting it does not stop the reminder, because the task is still overdue",
     ],
     measured:
       "The phone already buzzed. Throwing away the receipt does not un-buzz it.",
@@ -1194,6 +1212,8 @@ export const PROACTIVE_FLOW: Diagram = {
       how: [
         "A row with no send time never reached a device: quiet hours, the cap, or no device at all",
         "That absence is information, so it is kept rather than hidden",
+        "One row can be sent many times: an overdue task reminds every 2 hours against a single row, and counts them",
+        "Its wording is rewritten each time, so renaming the task changes what the reminder says",
         "Pruned after {notification_retention_days} days by the same nightly sweep that prunes traces",
       ],
       code: ["backend/app/db/models.py"],
@@ -1201,12 +1221,14 @@ export const PROACTIVE_FLOW: Diagram = {
     policy: {
       id: "policy",
       title: "Should it interrupt?",
-      what: "Quiet hours, and whether this is actually news, decide if it becomes a buzz in your pocket or waits quietly in the app.",
+      what: "Quiet hours, and what kind of thing this is, decide whether it becomes a buzz in your pocket or waits quietly in the app.",
       how: [
         "Quiet hours default to {quiet_hours_start}:00 until {quiet_hours_end}:00: recorded, not delivered",
-        "A situation already reported stays quiet until it CHANGES — that is what limits volume",
+        "A MEASUREMENT already reported stays quiet until it crosses into a worse band",
+        "WORK YOU HAVE TO DO repeats until you do it — checked hourly, buzzing at most every 2 hours",
+        "Those are two numbers on purpose: how fast you find out, and how often you are nagged",
+        "The only two ways to stop it: deal with the task, or move its due date",
         "There is no daily ceiling: one reached in normal use just deletes what you wanted",
-        "Notification fatigue is the most common way a feature like this dies",
         "Applied centrally, so no individual job can forget it",
       ],
       code: ["backend/app/services/notifications.py"],

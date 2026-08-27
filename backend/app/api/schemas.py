@@ -418,8 +418,7 @@ class LearnConstants(BaseModel):
     notification_retention_days: int
     quiet_hours_start: int
     quiet_hours_end: int
-    push_ttl_digest_s: int
-    push_ttl_nudge_s: int
+    push_ttl_default_s: int
     push_payload_max_bytes: int
 
 
@@ -437,8 +436,11 @@ class NotificationOut(BaseModel):
     read_at: dt.datetime | None
     # NULL means it never reached a device. That is information the user can act on —
     # quiet hours, the daily cap, no subscription, or a send that failed — so it is
-    # surfaced rather than hidden.
+    # surfaced rather than hidden. Since migration 013 it is when it was LAST delivered.
     pushed_at: dt.datetime | None
+    # How many times this record was delivered. Greater than 1 for a reminder that repeats
+    # until acted on, so the panel can say "reminded 4 times" rather than showing four rows.
+    push_count: int
 
     model_config = ConfigDict(from_attributes=True)
 

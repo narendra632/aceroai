@@ -307,7 +307,7 @@ shape is different in ways worth setting side by side.
 ```
 resolve the due occurrence per job    0.02 - 3.3 ms   (measured; the 3.3 ms
                                                        worst case is a 7-day
-                                                       window on an hourly job)
+                                                       window on a two-hourly job)
 one indexed lookup per job            ~0.3 ms
 ------------------------------------------------------
 six jobs, nothing due                 under 10 ms, every 5 minutes

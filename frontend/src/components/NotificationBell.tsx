@@ -119,6 +119,20 @@ function Row({
         <span className={cn("line-clamp-2 text-xs text-muted-foreground", !n.read_at && "pl-3.5")}>
           {n.body}
         </span>
+        {/* A reminder that repeats lives on ONE row rather than one row per buzz, so the row
+            has to say how often it actually interrupted you — otherwise seven reminders and
+            one look identical here. */}
+        {n.push_count > 1 && (
+          <span
+            className={cn(
+              "text-[11px] text-muted-foreground/70",
+              !n.read_at && "pl-3.5",
+            )}
+          >
+            Reminded {n.push_count} times
+            {n.pushed_at && ` · last ${relative(n.pushed_at)}`}
+          </span>
+        )}
       </button>
       {/* Always rendered, never revealed on hover: the device this app is installed on is
           a phone, where there is no hover and a hidden control simply does not exist. */}

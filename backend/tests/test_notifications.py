@@ -147,19 +147,57 @@ def test_an_oversized_payload_is_refused_rather_than_sent(db, user, fake_push):
         )
 
 
-def test_digests_get_a_longer_ttl_than_nudges(db, user, loud, fake_push):
-    """A summary is worth holding for a day if the phone is off. A reminder about something
-    time-sensitive is not."""
+def test_the_ttl_is_the_producing_jobs_staleness_bound(db, user, loud, fake_push):
+    """One declaration, both decisions.
+
+    This replaces a test that asserted digests get a 24-hour TTL and nudges 4 hours, from a
+    hand-maintained set of kind strings. That set disagreed with the jobs it described:
+    `day_end_summary` declares `catch_up=3h` — "by midnight, so it still lands on the day it
+    describes" — and was sent with instructions to hold it for a full day.
+    """
     _subscribe(db, user)
 
-    notifications.raise_notification(db, user, spec(kind="day_end_summary"))
-    notifications.raise_notification(db, user, spec(kind="task_overdue"))
+    notifications.raise_notification(
+        db, user, spec(kind="day_end_summary"), ttl=notifications.ttl_for(dt.timedelta(hours=3))
+    )
+    assert int(fake_push[-1][2]["TTL"]) == 3 * 3600
 
-    digest_ttl = int(fake_push[0][2]["TTL"])
-    nudge_ttl = int(fake_push[1][2]["TTL"])
-    assert digest_ttl == settings.push_ttl_digest_s
-    assert nudge_ttl == settings.push_ttl_nudge_s
-    assert digest_ttl > nudge_ttl
+    notifications.raise_notification(
+        db, user, spec(kind="task_overdue"), ttl=notifications.ttl_for(dt.timedelta(hours=1))
+    )
+    assert int(fake_push[-1][2]["TTL"]) == 3600
+
+
+def test_work_with_no_staleness_bound_places_none_on_delivery(db, user, loud, fake_push):
+    """`catch_up=None` means "however late" — retention is strictly better swept late than
+    not swept. Its delivery says the same rather than quietly expiring in an hour."""
+    _subscribe(db, user)
+    notifications.raise_notification(db, user, spec(), ttl=notifications.ttl_for(None))
+    assert int(fake_push[-1][2]["TTL"]) == notifications.MAX_TTL_S
+
+
+def test_a_notification_no_job_produced_uses_the_default(db, user, loud, fake_push):
+    """The test push from Settings has no job behind it and so no bound to inherit."""
+    _subscribe(db, user)
+    notifications.raise_notification(db, user, spec())
+    assert int(fake_push[-1][2]["TTL"]) == settings.push_ttl_default_s
+
+
+@pytest.mark.parametrize(
+    "kind", ["day_end_summary", "morning_brief", "task_overdue", "journal_empty", "test"]
+)
+def test_every_notification_is_sent_as_time_critical(db, user, loud, fake_push, kind):
+    """⚠ Asserts the HEADER the transport receives, not the constant — the constant agreeing
+    with itself proves nothing.
+
+    Measured in production on 2026-08-26: the day-end summary was dispatched at 21:03:12,
+    zero seconds after its row was written, and reached the phone at roughly 21:40 when it
+    was next unlocked. It had been sent `Urgency: low`, which asks the push service not to
+    wake a dozing device. The server was never slow; it was asking to be ignored.
+    """
+    _subscribe(db, user)
+    notifications.raise_notification(db, user, spec(kind=kind))
+    assert fake_push[-1][2]["Urgency"] == "high"
 
 
 # --- dead subscriptions ------------------------------------------------------------------
@@ -439,9 +477,9 @@ def test_undo_restores_exactly_what_was_cleared_and_nothing_else(db, user):
 def test_with_the_default_settings_nothing_is_ever_withheld_for_volume(db, user, loud, fake_push):
     """Pins the removal of the ceiling, so it cannot come back by accident.
 
-    It used to default to 6 while `task_nudge` alone can fire thirteen times a day, which
-    meant it was discarding notifications that were wanted — starting with the hourly
-    overdue ping, the one most explicitly asked for.
+    It used to default to 6 while `task_nudge` alone can fire seven times a day, which meant
+    it was discarding notifications that were wanted — starting with the repeating overdue
+    ping, the one most explicitly asked for.
     """
     _subscribe(db, user)
     for i in range(12):
@@ -494,3 +532,182 @@ def test_already_said_with_a_window_ignores_anything_older(db, user):
         "without the window it is still found — both halves must hold, or the parameter "
         "could be silently doing nothing"
     )
+
+
+# --- repeat delivery (migration 013) -------------------------------------------------------
+
+
+def test_urgency_does_not_defeat_quiet_hours(db, user, fake_push):
+    """Every notification is now sent time-critical, and that must not have quietly become a
+    way to buzz someone at 3am.
+
+    Urgency is a request to the push service about how to reach a SLEEPING DEVICE. Whether
+    the user wants to be reached at all is a different decision, made earlier and by them.
+    """
+    _subscribe(db, user)
+    hour = dt.datetime.now(ZoneInfo(settings.app_timezone)).hour
+    user.quiet_hours_start, user.quiet_hours_end = hour, (hour + 1) % 24
+    db.commit()
+
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+
+    assert fake_push == [], "urgency must not become an override for the user's own policy"
+    assert row.pushed_at is None
+    assert row.push_count == 0
+
+
+def test_a_delivered_record_counts_one_delivery(db, user, loud, fake_push):
+    _subscribe(db, user)
+    row = notifications.raise_notification(db, user, spec())
+    assert row.pushed_at is not None
+    assert row.push_count == 1
+
+
+def test_an_undelivered_record_counts_none(db, user):
+    """The counter starts at zero, which is why migration 013 does not default it to 1: the
+    row is written BEFORE delivery is attempted, so a default of 1 would claim an
+    interruption that never happened."""
+    row = notifications.raise_notification(db, user, spec())
+    assert row.pushed_at is None
+    assert row.push_count == 0
+
+
+def test_delivering_again_reuses_the_record_and_counts_the_buzz(db, user, loud, fake_push):
+    """The shape the overdue nudge relies on: one record, many interruptions."""
+    _subscribe(db, user)
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+    first_seen = row.created_at
+
+    for expected in (2, 3, 4):
+        assert notifications.deliver_again(db, user, row) is True
+        assert row.push_count == expected
+
+    assert len(fake_push) == 4, "each reminder is a real send"
+    assert row.created_at == first_seen, (
+        "created_at says when the situation BEGAN — 'overdue since 10:03' is the useful "
+        "fact, and moving it would destroy that to gain nothing"
+    )
+    assert len(notifications.list_for_user(db, user.id)) == 1, "one record, not four"
+
+
+def test_delivering_again_obeys_quiet_hours(db, user, loud, fake_push):
+    """Being told once already does not stop quiet hours applying to the reminder."""
+    _subscribe(db, user)
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+    assert row.push_count == 1
+
+    hour = dt.datetime.now(ZoneInfo(settings.app_timezone)).hour
+    user.quiet_hours_start, user.quiet_hours_end = hour, (hour + 1) % 24
+    db.commit()
+
+    assert notifications.deliver_again(db, user, row) is False
+    assert row.push_count == 1, "a suppressed reminder is not a delivery"
+
+
+def test_the_days_count_counts_deliveries_not_records(db, user, loud, fake_push):
+    """⚠ Load-bearing. A ceiling is measured against this, so counting ROWS would report
+    seven buzzes as one and a ceiling of 2 would never be reached by a repeating nudge."""
+    _subscribe(db, user)
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+    notifications.deliver_again(db, user, row)
+    notifications.deliver_again(db, user, row)
+
+    assert len(notifications.list_for_user(db, user.id)) == 1
+    assert notifications.pushed_today(db, user.id) == 3
+
+
+def test_a_ceiling_counts_repeat_deliveries_against_itself(db, user, loud, fake_push):
+    _subscribe(db, user)
+    user.daily_push_cap = 2
+    db.commit()
+
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+    assert row.push_count == 1
+    assert notifications.deliver_again(db, user, row) is True
+    assert notifications.deliver_again(db, user, row) is False, "the ceiling applies to buzzes"
+    assert row.push_count == 2
+
+
+def test_removing_a_repeated_record_still_does_not_reduce_the_count(db, user, loud, fake_push):
+    """The migration-012 invariant, restated for a record delivered many times."""
+    _subscribe(db, user)
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+    notifications.deliver_again(db, user, row)
+    notifications.delete_notification(db, user.id, row.id)
+
+    assert notifications.pushed_today(db, user.id) == 2
+
+
+# --- todays_record -------------------------------------------------------------------------
+
+
+def test_todays_record_finds_the_live_record_for_this_situation(db, user):
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue", tag="overdue-a"))
+    found = notifications.todays_record(db, user.id, "task_overdue", "overdue-a")
+    assert found is not None and found.id == row.id
+
+
+def test_todays_record_ignores_a_different_situation(db, user):
+    notifications.raise_notification(db, user, spec(kind="task_overdue", tag="overdue-a"))
+    assert notifications.todays_record(db, user.id, "task_overdue", "overdue-b") is None
+
+
+def test_todays_record_ignores_a_removed_record(db, user):
+    """Removing today's reminder must not silence the situation, and must not resurrect the
+    row either. The next check writes a fresh record instead."""
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue", tag="overdue-a"))
+    notifications.delete_notification(db, user.id, row.id)
+    assert notifications.todays_record(db, user.id, "task_overdue", "overdue-a") is None
+
+
+def test_todays_record_ignores_yesterdays(db, user):
+    """Why the bound is a day.
+
+    The panel is ordered `created_at DESC`. Without this, a task overdue for three weeks
+    would hold a three-week-old record at the bottom of a fifty-row list while the phone
+    buzzed about it every two hours — invisible in the very application doing the nudging.
+    """
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue", tag="overdue-a"))
+    row.created_at = dt.datetime.now(dt.UTC) - dt.timedelta(days=1)
+    db.commit()
+    assert notifications.todays_record(db, user.id, "task_overdue", "overdue-a") is None
+
+
+def test_a_reminder_can_refresh_the_wording_without_becoming_a_new_record(
+    db, user, loud, fake_push
+):
+    """Renaming the thing a reminder is about must change what the reminder says.
+
+    The tag pins WHICH situation this is; the wording describes it as it reads now. Without
+    this, a renamed overdue task would be reminded about under its old name until midnight.
+    """
+    _subscribe(db, user)
+    row = notifications.raise_notification(
+        db, user, spec(kind="task_overdue", title="1 task is overdue", body="buy gifts")
+    )
+    created = row.created_at
+
+    notifications.deliver_again(db, user, row, title="1 task is overdue", body="buy more gifts")
+
+    assert row.body == "buy more gifts"
+    assert row.created_at == created, "identity and start time are untouched"
+    assert row.push_count == 2
+    assert len(notifications.list_for_user(db, user.id)) == 1
+
+
+def test_a_reminder_is_paced_by_time_since_the_last_delivery(db, user, loud, fake_push):
+    _subscribe(db, user)
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+
+    assert notifications.reminder_is_due(row, dt.timedelta(hours=2)) is False
+    row.pushed_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2, seconds=1)
+    db.commit()
+    assert notifications.reminder_is_due(row, dt.timedelta(hours=2)) is True
+
+
+def test_an_undelivered_record_is_always_due_for_a_reminder(db, user):
+    """Pacing measures time since the last INTERRUPTION, and a record suppressed by quiet
+    hours has interrupted nobody."""
+    row = notifications.raise_notification(db, user, spec(kind="task_overdue"))
+    assert row.pushed_at is None
+    assert notifications.reminder_is_due(row, dt.timedelta(hours=2)) is True

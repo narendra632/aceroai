@@ -737,9 +737,16 @@ export type NotificationRow = {
   body: string;
   url: string | null;
   tag: string | null;
+  /** When the situation BEGAN, not when it was last mentioned. An overdue task that has been
+   *  reminded about all day still reads "10:03 AM", which is the useful fact. */
   created_at: string;
   read_at: string | null;
+  /** When it was LAST delivered (migration 013). */
   pushed_at: string | null;
+  /** How many times this record reached a device. Greater than 1 for a reminder that repeats
+   *  until acted on — the overdue nudge buzzes every two hours against one record rather than
+   *  writing seven near-identical rows a day. */
+  push_count: number;
 };
 
 export async function listNotifications(): Promise<{

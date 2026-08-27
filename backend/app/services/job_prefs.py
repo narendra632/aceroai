@@ -108,9 +108,18 @@ def human_schedule(expr: str) -> str:
     if hour.isdigit():
         return f"every day at {at(hour)}"
     if "-" in hour:
-        start, end = hour.split("-")
-        if start.isdigit() and end.isdigit():
-            return f"hourly between {int(start):02d}:00 and {int(end):02d}:00"
+        # `9-21` or `9-21/2`. The step arrived with the two-hourly overdue nudge; without
+        # handling it this fell through to the raw expression, which is honest but is not
+        # something to show a person in Settings.
+        span, _, step = hour.partition("/")
+        start, _, end = span.partition("-")
+        if start.isdigit() and end.isdigit() and (step == "" or step.isdigit()):
+            window = f"between {int(start):02d}:00 and {int(end):02d}:00"
+            if step in ("", "1"):
+                return f"hourly {window}"
+            return f"every {int(step)} hours {window}"
+    if hour.startswith("*/") and hour[2:].isdigit():
+        return f"every {int(hour[2:])} hours"
     return expr
 
 

@@ -86,7 +86,6 @@ def get_constants(user: User = Depends(get_current_user)) -> LearnConstants:
         notification_retention_days=settings.notification_retention_days,
         quiet_hours_start=settings.quiet_hours_start,
         quiet_hours_end=settings.quiet_hours_end,
-        push_ttl_digest_s=settings.push_ttl_digest_s,
-        push_ttl_nudge_s=settings.push_ttl_nudge_s,
+        push_ttl_default_s=settings.push_ttl_default_s,
         push_payload_max_bytes=push.MAX_PAYLOAD_BYTES,
     )

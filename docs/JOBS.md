@@ -56,7 +56,7 @@ Each job says how late it may still run.
 |---|---|---|---|
 | `morning_brief` | 07:30 | 11:30 | A "morning brief" at 4pm is not late, it is wrong |
 | `day_end_summary` | 21:00 | midnight | So it still lands on the day it describes |
-| `task_nudge` | hourly, 09–21 | +45 min | Next hour's nudge beats a stale one |
+| `task_nudge` | hourly, 09–19 | +45 min | The next check beats a stale one |
 | `budget_watch` | 09:00 | 21:00 | A spend warning is useful all day |
 | `journal_nudge` | 20:30 | 22:30 | "Write about today", delivered tomorrow, is noise |
 | `retention_sweep` | 03:15 | **however late** | Sweeping late beats not sweeping |
@@ -150,7 +150,7 @@ JobResult(
 )
 ```
 
-`silent` is load-bearing. `task_nudge` runs twelve times a day and usually finds nothing —
+`silent` is load-bearing. `task_nudge` runs eleven times a day and usually finds nothing —
 that is the job *working*. A column of `silent` in `job_runs` is healthy, a column of
 `failed` is not, and an absence of rows is a third thing entirely.
 
@@ -263,11 +263,26 @@ Every job that can notify carries a **tag** describing *the situation it is repo
 `already_said()` refuses to raise the same tag twice. What goes in the tag decides
 everything, and there are two shapes:
 
-**A tag that encodes a changing set.** `task_nudge` hashes the ids of the tasks that are
-currently overdue. Complete one and the hash changes, so the next nudge is genuinely new
-information; change nothing and it stays silent. This kind of tag **stops matching by
-itself**, so it wants an *unbounded* lookback — a time limit would only re-announce a
-situation that has not changed.
+**⚠ A tag that encodes a changing set — and why this reasoning was wrong.**
+
+`task_nudge` used to hash the ids of the currently-overdue tasks, and the argument for it
+ran: complete one and the hash changes, so the next nudge is new information; change nothing
+and it stays silent. Such a tag "stops matching by itself", so it wants an *unbounded*
+lookback.
+
+That is true of the situation **changing**. It is silent about the situation **changing
+back**. The tag samples the state; it cannot represent a transition, so `{gifts}` -> `{}` ->
+`{gifts}` produces the identical tag at both ends.
+
+In production it ran exactly like that. The nudge raised one notification in the lifetime of
+the application, on 2026-08-24 — never delivered, because no browser had subscribed yet, and
+then removed from the panel. The task was rescheduled; its new due time passed two days
+later; the tag matched; and every run afterwards returned `already_told`. The feature was
+silent from its first firing and nothing reported an error anywhere.
+
+Two things changed. The tag now includes each task's **due time**, so rescheduling is
+recognised as a different situation. And the overdue nudge no longer asks `already_said` at
+all — see *A situation you have to act on* below.
 
 **A tag that can recur.** `disk_watch` tags by the 5% band the reading falls into —
 `disk-80`, `disk-85`. Crossing 80% says so once; 81–84% is the same band and stays quiet;
@@ -282,13 +297,61 @@ crossing, reminded daily while still above.**
 Getting this backwards produces either an alert that never fires again, or one that fires
 every run. Both look like the code working.
 
+**The test is whether the tag contains something monotonic.** `journal-2026-08-27` and
+`budget-warn-2026-08` each name one day or one month and can never come round again, so an
+unbounded lookback is safe. `disk-80` names a state and needs `since`. The overdue
+fingerprint named neither and had no bound, which is the failure above.
+
+### A situation you have to act on
+
+`already_said` answers *"is this news?"*, and news is the right control for a **measurement**.
+It is the wrong control for **work the user still has to do**.
+
+`task_nudge` therefore does not use it. It checks **hourly between 09:00 and 19:00** and
+interrupts **at most every two hours** — up to six times a day if you ignore it.
+
+⚠ Those are two numbers on purpose, and they were briefly one. A single two-hourly schedule
+reads like *"remind me every two hours"* and quietly also means *"wait up to two hours to be
+told at all"*: a task falling due at 11:05 is not overdue at the 11:00 check, so nothing is
+said until 13:03. The schedule answers *how soon do I find out*; `REMIND_EVERY` answers *how
+often am I nagged*. Pacing is measured from the last **delivery**, so a reminder held back by
+quiet hours is not treated as an interruption that already happened.
+
+The window ends at 19:00 rather than 21:00 because `day_end_summary` fires at 21:00 and
+already lists what is overdue; two notifications arriving in the same second saying
+overlapping things is how a reminder starts reading as noise.
+
+The repetition ends when the task
+is completed, dropped, deleted, snoozed, or its due time is moved into the future. Nothing
+else ends it, and in particular reading or removing the notification does not.
+
+That would be a column of near-identical rows in the panel each day, so it is **one record
+per day, delivered repeatedly**: `notifications.todays_record` finds the record already raised for
+this exact situation today and the runner delivers that again rather than writing another.
+`push_count` is how many times, and the panel shows it as "Reminded 4 times". The wording is
+recomputed on every reminder, so renaming an overdue task changes what the reminder says
+rather than leaving it repeating this morning's name — the tag pins *which* situation the
+record is about, and the text describes that situation as it reads now.
+
+Two bounds on that lookup, each doing work. **Live**: if you delete today's reminder while
+the task is still overdue, the next check writes a fresh record rather than re-delivering a
+row that is not in the panel. **Today**: the panel is ordered newest-first, so a record from
+three weeks ago would sit at the bottom of the list while the phone buzzed about it — invisible
+in the very application doing the nudging.
+
+The behaviour this trains is *deal with it, or reschedule it honestly*. That is deliberately
+**not** stated in the notification text: a reminder that re-explains itself every two hours is
+a worse reminder.
+
 ### Removing a notification does not make it unsaid
 
 `already_said` deliberately **does not filter deleted rows.** It asks what has been *said*,
-not what is still on screen. Were it filtered, dismissing "3 tasks are overdue" would erase
-the evidence that it was ever said — so the next hourly run would treat an unchanged
-situation as news and push it again. Delete would quietly mean *"remind me within the
-hour"*, on precisely the notification most likely to be dismissed.
+not what is still on screen. Were it filtered, dismissing a disk warning would erase the
+evidence that it was ever said, so the next check would treat an unchanged situation as news
+and push it again — delete would quietly mean *"tell me again shortly"*.
+
+For the overdue nudge the question no longer arises, and the answer is the opposite anyway:
+removing the reminder does not stop it, because it repeats until the task is dealt with.
 
 ### Deleting a briefing does not cause it to be written again
 

@@ -211,7 +211,8 @@ def test_listing_jobs_describes_each_one_in_plain_language(auth_client):
     assert len(jobs) >= 6
     by_name = {j["name"]: j for j in jobs}
     assert by_name["day_end_summary"]["when"] == "every day at 21:00"
-    assert by_name["task_nudge"]["when"] == "hourly between 09:00 and 21:00"
+    assert by_name["task_nudge"]["when"] == "hourly between 09:00 and 19:00"
+    assert by_name["disk_watch"]["when"] == "every 6 hours"
     for job in jobs:
         assert job["description"].strip()
         assert job["schedule"], "the raw expression is the truth"
