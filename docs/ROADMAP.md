@@ -269,6 +269,24 @@ tells you in the interface when one fires.
   trigger is already close, and the warning it would swallow is the one about the disk that
   stops Postgres accepting writes on a machine with no backup.
 
+- **⚠ Five memory tests fail at random in CI, and they block the deploy when they do.**
+  `test_memory`, `test_memory_contradiction` and `test_memory_tools` failed on 2026-09-03 and
+  passed on the very next run with byte-identical backend code. `deploy` has `needs: backend`,
+  so a random failure silently means "nothing shipped".
+
+  Ruled out by testing, not reasoning: a fresh database, CI's newer pgvector (0.8.6 vs 0.8.5),
+  the whole suite in CI's own order, parallel test workers (there are none), and venv drift.
+  The HNSW-index theory was the confident one and the query plan disproved it — at these row
+  counts Postgres uses a sequential scan, so approximate search is not involved at all.
+
+  **The live lead:** in all five failures the missing row is the FIRST-inserted or
+  pre-existing one, and every symptom is the same symptom — a committed row absent from a
+  query result. That makes it a row-visibility or cleanup-ordering question, not a vector one.
+
+  **Trigger: the next time CI fails without a code cause.** Worth real time, for two reasons:
+  a flaky suite blocks deploys at random, and if it is a genuine visibility bug rather than a
+  test artifact then facts are sometimes not recalled in chat, silently.
+
 - **A forced job re-run spends money but leaves no record.** `run_job(..., force=True)`
   bypasses the already-ran check and executes — including the model call — but its
   `_record` then hits `UNIQUE (job_name, occurrence_key)`, and that `IntegrityError` is
