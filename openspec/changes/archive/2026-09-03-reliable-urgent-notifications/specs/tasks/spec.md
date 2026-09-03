@@ -1,8 +1,34 @@
 # tasks Specification
 
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: Tasks that need attention can prompt the system to speak first
+
+**Reason**: This requirement said a task must be raised **once**: *"A task SHALL NOT be raised
+repeatedly for the same condition."* It was written to prevent notification fatigue and it
+produced the opposite failure — a task raised once and then silent is a task the system has
+stopped helping with.
+
+In production it did worse than that. The overdue nudge raised exactly one notification in the
+lifetime of the application, on 2026-08-24. It was never delivered, because no browser had
+subscribed yet, and it was then removed from the panel. The suppression tag hashed task ids
+with no time bound, so when the task was rescheduled and fell due again the tag matched that
+undelivered notification and every run afterwards reported "already told". The feature was
+silent from its first firing, and nothing anywhere reported an error.
+
+Removed rather than modified because its meaning **inverts** rather than shifts, and its
+scenario "Not told twice" asserts precisely what must no longer be true. Keeping the name over
+opposite content would have been the more confusing record.
+
+**Migration**: Replaced in full by *"Tasks that need attention keep asking until they are
+addressed"*, below. Every guarantee worth keeping is carried over: coalescing several overdue
+tasks into one notification, silence for snoozed and finished tasks, and raising a task whose
+due time has passed. What changes is that the reminder now repeats until the user acts, and
+ends the moment they do.
+
+## ADDED Requirements
+
+### Requirement: Tasks that need attention keep asking until they are addressed
 
 The system SHALL be able to notice, without being asked, that the user's tasks require
 attention — at minimum that a task's due time has passed — and raise a notification.
@@ -22,12 +48,6 @@ unmentioned for the whole interval. The system SHALL check more often than it in
 
 Reporting SHALL be confined to daytime hours, and SHALL NOT coincide with a scheduled summary
 that already describes what is overdue.
-
-**This reverses the previous requirement that a task be raised only once.** That rule was
-written to prevent notification fatigue, and it produced the opposite failure: a task raised
-once and then silent is a task the system has stopped helping with. Repetition that ends the
-moment the user acts is not fatigue — it is the mechanism by which an overdue task is either
-dealt with or honestly rescheduled.
 
 The system SHALL NOT explain this rule in the notification text. Stating "deal with this or
 move its due date" in every reminder would make each one longer without making it more
@@ -86,10 +106,6 @@ task that is completed, dropped or deleted SHALL NOT be raised at all.
 
 - **WHEN** a scheduled summary that already lists overdue tasks is delivered
 - **THEN** no overdue reminder is delivered at the same time
-
-This replaces the scenario formerly named "Not told twice", which asserted the opposite. It
-is removed deliberately and not by oversight: in production it silenced the overdue nudge
-permanently after a single undelivered notification.
 
 #### Scenario: Removing the reminder does not stop it
 

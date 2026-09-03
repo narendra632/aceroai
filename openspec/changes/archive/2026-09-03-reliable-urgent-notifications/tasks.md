@@ -168,17 +168,20 @@
       the "stale dev servers" note warns about, in a form that hides from `Get-Process`.
       Backend on `127.0.0.1:8000`; vite binds IPv6 only, so it answers on `localhost:5173`
       and NOT on `127.0.0.1:5173`
-- [ ] 8.5 Manually: task due one minute ago → nudge arrives; next check re-delivers against
+- [x] 8.5 Tested by Narendra on the live app. Manually: task due one minute ago → nudge arrives; next check re-delivers against
       the same record and the panel says "Reminded 2 times"; move the due date out → it stops.
       Check the row at ~360px while there
 - [x] 8.6 `openspec validate reliable-urgent-notifications --strict`
 
 ## 9. Production
 
-- [ ] 9.1 Confirm `.env` is not staged before committing
-- [ ] 9.2 Deploy; confirm migration 013 applied and the API came up healthy
-- [ ] 9.3 Confirm on the phone that a nudge arrives promptly while the device is idle and
-      untouched — the whole point of the urgency change, and unverifiable in tests
+- [x] 9.1 `.env` confirmed unstaged before both commits
+- [x] 9.2 Deployed. ⚠ The FIRST push did not deploy at all: `deploy` has `needs: backend`,
+      and five memory tests failed — in code this change never touched, and they passed on
+      the re-run with identical backend code. Recorded as a flake worth its own
+      investigation in `docs/ROADMAP.md`. Live and verified via the public
+      `/openapi.json`, which now serves `push_count` and `push_ttl_default_s`
+- [x] 9.3 Confirmed on the phone by Narendra
 - [ ] 9.4 After a day, check `push_count` against the hours the task was overdue, and record
       whether `Urgency: normal` had also been deferred — the open question in `design.md`
 
