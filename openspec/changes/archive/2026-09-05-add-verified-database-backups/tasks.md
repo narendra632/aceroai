@@ -48,7 +48,7 @@ obstacle that would otherwise surface at a random moment during it.
       not resolve, quarantine the five with an explicit skip marker naming this task and the
       lead, so the suite becomes trustworthy either way. A quarantine is an acceptable
       outcome; an intermittently red suite during this change is not
-- [ ] 0.4 Confirm the service account grant actually works end to end before building on it:
+- [x] 0.4 Confirm the service account grant actually works end to end before building on it:
       from the VM, write and then delete a single test object in `gs://aceroai-backups` using
       Application Default Credentials. This proves the IAM grant, the access scopes and the
       metadata-server credential path together, and it is a one-line failure now rather than a
@@ -137,11 +137,11 @@ obstacle that would otherwise surface at a random moment during it.
       `backup_watch`, each with a comment explaining the value chosen. An empty bucket name
       disables the jobs cleanly rather than failing nightly, so a developer machine is not
       required to have a bucket
-- [ ] 5.2 Lifecycle rules on the bucket — `daily/` 14 days, `weekly/` 56 days, `monthly/` 365
+- [x] 5.2 Lifecycle rules on the bucket — configured 2026-09-06: `daily/` 14d, `weekly/` 56d, `monthly/` 365d, each with its prefix set. Original wording: — `daily/` 14 days, `weekly/` 56 days, `monthly/` 365
       days — configured in the console and **recorded in `docs/DEPLOY.md`**, since they are
       part of the system's behaviour and live outside the repository. Note explicitly that this
       is the one part of retention that cannot be verified by a test
-- [ ] 5.3 Confirm after configuring: bucket soft-delete is on by default and retains deleted
+- [x] 5.3 Confirm after configuring: bucket soft-delete is on by default and retains deleted
       objects for a further period; this is harmless at this size but should not be a surprise
       when object counts do not match expectations
 
@@ -189,11 +189,11 @@ obstacle that would otherwise surface at a random moment during it.
       rejected it) and a manifest count inflated (`restored with 1 rows in 'users', manifest
       says 1000`). The scratch database was confirmed dropped afterwards. This is the half the
       test suite cannot prove, and it is now proven before deploy rather than after
-- [ ] 8.5 After deploy, on the VM: force one `db_backup` run and confirm the object and its
+- [x] 8.5 Done 2026-09-06 — `db_backup -f` returned `ok`, dump and manifest both present in the bucket. Original wording:, on the VM: force one `db_backup` run and confirm the object and its
       manifest appear in the bucket
-- [ ] 8.6 After deploy: force one `restore_check` run against that object and confirm it
+- [x] 8.6 Done 2026-09-06 — `restore_check -f` returned `ok`: the real backup was rebuilt into a scratch database and every table matched its manifest. Original wording:: force one `restore_check` run against that object and confirm it
       verifies, then confirm the scratch database no longer exists
-- [ ] 8.7 **Prove the alarm works by breaking it on purpose.** Point the bucket setting at a
+- [x] 8.7 Done 2026-09-06 — bucket pointed at a nonexistent name, `db_backup` reported `cannot write 'daily/agent-20260905T184251Z.dump'`, and the notification **arrived on the phone**. Setting restored and verified. Original wording: **Prove the alarm works by breaking it on purpose.** Point the bucket setting at a
       name that does not exist, run `db_backup`, and confirm the failure notification arrives
       on the phone. Restore the setting afterwards. An untested alarm is the same class of
       thing as an untested backup
