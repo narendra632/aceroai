@@ -132,15 +132,22 @@ def _same_text_active(db: Session, user_id: uuid.UUID, text: str) -> ProfileFact
 def nearest_active(
     db: Session, user_id: uuid.UUID, vec: Sequence[float]
 ) -> tuple[ProfileFact, float] | None:
-    """The closest active fact to `vec`, with its cosine distance. None if there are none."""
+    """The closest active fact to `vec`, with its cosine distance. None if there are none.
+
+    ⚠ `LIMIT 1` over a tie is a coin flip, and this feeds contradiction detection — so an
+    arbitrary winner here means a new fact is judged against an arbitrary one of several
+    equally-close existing facts. The tie is broken the same way as in `recall.vector_rank`
+    and for the same reason; see the note there.
+    """
+    distance = ProfileFact.embedding.cosine_distance(list(vec)).label("d")
     row = db.execute(
-        live(select(ProfileFact, ProfileFact.embedding.cosine_distance(list(vec)).label("d")))
+        live(select(ProfileFact, distance))
         .where(
             ProfileFact.user_id == user_id,
             ProfileFact.status == "active",
             ProfileFact.embedding.isnot(None),
         )
-        .order_by(ProfileFact.embedding.cosine_distance(list(vec)))
+        .order_by(distance, ProfileFact.created_at.desc(), ProfileFact.id)
         .limit(1)
     ).first()
     return (row[0], float(row[1])) if row is not None else None
@@ -554,8 +561,15 @@ def neighbours(
         inner_where.append(o.id.in_(ids))
         outer_where.append(f.id.in_(ids))
 
+    # Tie-broken like every other nearest-neighbour query here, so the graph drawn for a
+    # given memory is the same graph every time it is drawn. An edge that appears and
+    # disappears between two identical page loads reads as a bug in the memory itself.
     nearest = (
-        select(o.id.label("target"), dist).where(*inner_where).order_by(dist).limit(k).lateral("n")
+        select(o.id.label("target"), dist)
+        .where(*inner_where)
+        .order_by(dist, o.created_at.desc(), o.id)
+        .limit(k)
+        .lateral("n")
     )
     stmt = (
         select(f.id.label("source"), nearest.c.target, nearest.c.dist)

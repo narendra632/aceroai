@@ -181,7 +181,20 @@ def choose_terms(db: Session, user_id: uuid.UUID, message: str) -> tuple[list[st
 def vector_rank(
     db: Session, user_id: uuid.UUID, query_vec: Sequence[float], limit: int
 ) -> list[tuple[RecalledFact, float]]:
-    """The nearest live facts by meaning, closest first, each with its cosine distance."""
+    """The nearest live facts by meaning, closest first, each with its cosine distance.
+
+    ⚠ The ordering is TOTAL, not just by distance. Two facts can sit at exactly the same
+    cosine distance from a query — genuinely, not as a rounding artefact — and `ORDER BY
+    distance LIMIT n` then returns whichever of them Postgres happened to scan first. Which
+    rows survive the limit changes as the heap is rewritten by ordinary updates and vacuum,
+    so the same question against unchanged data could recall different facts on consecutive
+    calls, and nothing anywhere reported it.
+
+    `created_at DESC` breaks the tie, because between two equally relevant memories the more
+    recent one is the better answer. `id` follows it only to make the order total when even
+    the timestamps match — rows written in one transaction share a `created_at`, since
+    Postgres `now()` is transaction start time.
+    """
     distance = ProfileFact.embedding.cosine_distance(list(query_vec)).label("d")
     stmt = (
         live(select(ProfileFact.id, ProfileFact.fact, ProfileFact.category, distance))
@@ -190,7 +203,7 @@ def vector_rank(
             ProfileFact.status == "active",
             ProfileFact.embedding.isnot(None),
         )
-        .order_by(distance)
+        .order_by(distance, ProfileFact.created_at.desc(), ProfileFact.id)
         .limit(limit)
     )
     return [

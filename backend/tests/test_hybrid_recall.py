@@ -10,10 +10,12 @@ runs against real Postgres full-text search, because that is the half the change
 """
 
 import pytest
+from sqlalchemy import select
 
 from app.config import settings
 from app.core import recall as hybrid
 from app.db.models import ProfileFact
+from app.services import memory as memory_service
 
 # Filler facts sharing ordinary vocabulary, so document frequencies behave like a real
 # memory rather than like a five-row fixture where every word is 20% of the corpus.
@@ -85,9 +87,22 @@ def _add(db, user, text, spread, *, status="active", deleted=False, category="ot
 
 @pytest.fixture
 def memory(db, user):
-    """A realistic little memory: twenty ordinary facts, plus the five this suite asks about."""
+    """A realistic little memory: twenty ordinary facts, plus the five this suite asks about.
+
+    ⚠ The filler spreads must not COINCIDE with the spreads of the facts this suite asserts
+    about. They did: `1 + (i % 3) * 0.05` produced 1.00, 1.05 and 1.10, and 1.10 is exactly
+    the spread of both certification facts — so seven filler facts sat at an identical
+    cosine distance to them, and which ones survived `LIMIT recall_pool` was decided by
+    physical row order. That is what made five tests in this area fail at random in CI,
+    always losing an early-inserted row, for weeks.
+
+    The production code no longer breaks such ties arbitrarily (see `recall.vector_rank`),
+    but a test whose subject is tied with its own filler is asserting something the data
+    does not determine, whatever the tiebreak rule is. 0.03 keeps the fillers realistically
+    nearby — 1.00, 1.03, 1.06 — while colliding with none of 1.1, 1.2, 1.3.
+    """
     for i, text in enumerate(FILLER):
-        _add(db, user, text, 1 + (i % 3) * 0.05)
+        _add(db, user, text, 1 + (i % 3) * 0.03)
     _add(db, user, "Narendra works at TCS.", 0, category="work")
     _add(db, user, "Narendra has completed the AI-901 certification.", 1.1, category="work")
     _add(db, user, "Narendra has completed the AI-103 certification.", 1.1, category="work")
@@ -258,3 +273,85 @@ def test_an_empty_lexical_result_is_an_answer_not_a_failure(db, memory):
     words, _ = hybrid.choose_terms(db, memory.id, "xylophone harpsichord theremin")
     assert words == []
     assert hybrid.search(db, memory, "xylophone harpsichord theremin", _unrelated()) == []
+
+
+# --- tied distances -------------------------------------------------------------------
+#
+# Two facts can sit at EXACTLY the same cosine distance from a query. `ORDER BY distance
+# LIMIT n` then returns whichever ones Postgres scanned first, and that order changes as
+# the heap is rewritten — so identical data could answer the same question differently on
+# consecutive calls. It did, undetected, for as long as recall has existed. These tests pin
+# the total ordering that replaced it.
+
+
+def test_tied_facts_are_ranked_newest_first(db, user):
+    """When meaning cannot separate two facts, recency does — and it does so every time.
+
+    Written against the actual defect: five facts with IDENTICAL vectors, a limit of two.
+    Without a tiebreak the two returned were whichever the scan reached first, which is
+    insertion order — the two OLDEST. The rule is the opposite, and it is a rule rather
+    than an accident.
+    """
+    import datetime as dt
+
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    for n in range(5):
+        row = _add(db, user, f"Narendra tied fact number {n}.", 1.0)
+        row.created_at = base + dt.timedelta(days=n)
+    db.commit()
+
+    ranked = hybrid.vector_rank(db, user.id, _vec(1.0), 2)
+    assert [f.fact for f, _ in ranked] == [
+        "Narendra tied fact number 4.",
+        "Narendra tied fact number 3.",
+    ]
+    assert ranked[0][1] == ranked[1][1], "the premise: these really are tied"
+
+
+def test_tied_ranking_survives_the_heap_being_rewritten(db, user):
+    """The same question, the same data, the same answer — after the rows have moved.
+
+    ⚠ Honest about its own strength: this one **passed even without the tiebreak**, so it is
+    a guard rather than a reproduction. Postgres updates a row in place when the page has
+    space, so a single pass of small updates does not reliably disturb the scan order — what
+    does is months of ordinary use and autovacuum, which a test cannot stage.
+
+    `test_tied_facts_are_ranked_newest_first` and `test_the_nearest_active_fact_is_not_a_coin_flip`
+    are the two that actually fail without the fix; both were confirmed red against the old
+    ordering before this was committed. This test is kept because the invariant it states —
+    identical data answers identically — is the one that matters in production, and it will
+    catch a future change that reintroduces a partial order by some other route.
+    """
+    for n in range(6):
+        _add(db, user, f"Narendra shuffled fact number {n}.", 1.0)
+    db.commit()
+
+    before = [f.fact for f, _ in hybrid.vector_rank(db, user.id, _vec(1.0), 3)]
+
+    for row in db.execute(select(ProfileFact).where(ProfileFact.user_id == user.id)).scalars():
+        row.confidence = 0.5  # a real UPDATE: same values ranked, new physical order
+    db.commit()
+
+    after = [f.fact for f, _ in hybrid.vector_rank(db, user.id, _vec(1.0), 3)]
+    assert before == after
+
+
+def test_the_nearest_active_fact_is_not_a_coin_flip(db, user):
+    """Contradiction detection asks for ONE nearest fact. A tie made that arbitrary.
+
+    This is the higher-stakes half of the same defect: `nearest_active` decides which
+    existing fact a new one is judged against, so an arbitrary winner means a new fact is
+    compared with an arbitrary member of a tied group.
+    """
+    import datetime as dt
+
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    for n in range(4):
+        row = _add(db, user, f"Narendra equidistant fact number {n}.", 1.0)
+        row.created_at = base + dt.timedelta(days=n)
+    db.commit()
+
+    for _ in range(3):
+        found = memory_service.nearest_active(db, user.id, _vec(1.0))
+        assert found is not None
+        assert found[0].fact == "Narendra equidistant fact number 3."
