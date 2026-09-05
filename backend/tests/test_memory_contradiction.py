@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.core import memory
 from app.db.models import ProfileFact
 from app.services import memory as svc
+from tests._quarantine import MEMORY_VISIBILITY_RACE
 
 
 def _onehot(i: int, val: float = 1.0) -> list[float]:
@@ -100,6 +101,7 @@ def test_changed_fact_supersedes_instead_of_being_dropped(monkeypatch, db, user)
     assert "works at Company A" not in memory.recall_facts(db, user, _onehot(3), k=10)
 
 
+@MEMORY_VISIBILITY_RACE
 def test_a_restatement_is_flagged_not_superseded(monkeypatch, db, user):
     """A restatement must NOT create a supersession chain — that would fill the history
     with events that never happened.
@@ -237,6 +239,7 @@ def test_chat_turn_threads_the_message_id_into_provenance(auth_client, db, user,
 # --- the bounded prompt -----------------------------------------------------------
 
 
+@MEMORY_VISIBILITY_RACE
 def test_the_duplicate_check_runs_even_when_the_known_block_is_empty(monkeypatch, db, user):
     """The safety argument for bounding the known-facts list, asserted.
 

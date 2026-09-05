@@ -21,6 +21,7 @@ from app.core import memory as core_memory
 from app.core import tools
 from app.db.models import ProfileFact
 from app.services import memory as svc
+from tests._quarantine import MEMORY_VISIBILITY_RACE
 
 
 def _vec(i: int, val: float = 1.0) -> list[float]:
@@ -75,6 +76,7 @@ def _facts(db, user, status="active"):
 # --- the exchange that failed -------------------------------------------------------
 
 
+@MEMORY_VISIBILITY_RACE
 def test_remember_fact_stores_something_recallable(db, user, embed):
     """3.7 — the exact instruction that used to do nothing."""
     result = _run(

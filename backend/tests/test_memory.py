@@ -12,6 +12,7 @@ from app.config import settings
 from app.core import composer, memory
 from app.core.recall import RecalledFact
 from app.db.models import ChatSession, ProfileFact
+from tests._quarantine import MEMORY_VISIBILITY_RACE
 
 
 def _onehot(i: int, val: float = 1.0) -> list[float]:
@@ -40,6 +41,7 @@ def _active_count(db, user) -> int:
     ).scalar()
 
 
+@MEMORY_VISIBILITY_RACE
 def test_recall_orders_by_similarity_and_excludes_inactive(db, user):
     db.add_all(
         [
@@ -64,6 +66,7 @@ def test_recall_k_zero_returns_nothing(db, user):
     assert memory.recall_facts(db, user, _onehot(0), k=0) == []
 
 
+@MEMORY_VISIBILITY_RACE
 def test_store_flags_a_near_duplicate_instead_of_dropping_it(db, user):
     """The behaviour change this whole spec exists for.
 

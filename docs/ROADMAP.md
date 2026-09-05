@@ -237,6 +237,36 @@ that way.
   can be lost**, because copies are nightly and full rather than continuous. Point-in-time
   recovery is the upgrade, and its trigger is real money in the Investments ledger.
 
+## Owed work — switched off, not fixed
+
+- **Five memory tests are quarantined** (2026-09-05, `backend/tests/_quarantine.py`). They
+  fail intermittently on CI's Linux runner and have never once failed locally — nine
+  consecutive clean full-suite runs on the same commit CI rejected, three of them against a
+  brand-new database created to imitate CI's.
+
+  The five share one symptom, which is why they are one bug and not five: **a row that
+  exists is not found by a vector query.** The clearest case has `recall_facts` returning an
+  empty list for a fact whose embedding the test has just asserted is not null — and that
+  query has no distance filter, only `ORDER BY … LIMIT`, so it cannot return nothing unless
+  the row was not in the database yet.
+
+  The live lead is `autoflush=False` on `SessionLocal`: an unflushed row is found by
+  `db.get()` (the identity map answers without a query) and missed by a `SELECT`. Ruled out
+  already: fresh database, pgvector 0.8.5 vs 0.8.6, CI ordering, parallel workers, venv
+  drift, HNSW (`EXPLAIN` showed a sequential scan), and tied cosine distances — that last
+  one turned out to be a **real and separate** production bug, fixed in `05aedb0`, which did
+  not cause these.
+
+  **The way to lift it is not to chase the flake**, which cannot be reproduced where it can
+  be debugged. It is to assert the mechanism directly — a test that adds a row without
+  flushing and shows `db.get` finds it while a `SELECT` does not — and then make the write
+  path flush before anything queries it.
+
+  ⚠ **If the lead is right, this is a live defect**, not merely a test problem: a fact could
+  be stored and then not recalled. Switched off because `deploy: needs: backend` meant an
+  intermittently red suite stopped every deploy at random, including the one carrying
+  database backups. A test that blocks shipping two runs in three has stopped being a signal.
+
 ## Triggered work — scheduled by a measurement, not a date
 
 These are not "someday" items. Each has a **numeric trigger**, and the knowledge graph
