@@ -61,6 +61,9 @@ Each job says how late it may still run.
 | `journal_nudge` | 20:30 | 22:30 | "Write about today", delivered tomorrow, is noise |
 | `retention_sweep` | 03:15 | **however late** | Sweeping late beats not sweeping |
 | `disk_watch` | every 6 h | +2 h | A full disk stops Postgres accepting writes |
+| `db_backup` | 02:30 | +6 h | A night skipped in silence is a night with no copy |
+| `restore_check` | 1st, 04:00 | +12 h | Monthly; a day late proves the same thing |
+| `backup_watch` | 10:00 | +6 h | It reports a silence, so it must not join one |
 
 ⚠ **A trap, found by measurement.** The window must be *shorter than the gap between runs*.
 A daily job with a 24-hour window can never be missed — its occurrences are 24 hours apart,
@@ -233,7 +236,51 @@ a poor joke.
 
 ---
 
-## 8. Where the code is
+## 8. Backups: three jobs, because three things fail
+
+Backups do not usually fail loudly. They fail by **stopping**, and a system that has stopped
+looks exactly like a system with nothing to report. So the work is split three ways, and each
+part answers a question the others cannot:
+
+| Job | Question it answers | When |
+|---|---|---|
+| `db_backup` | Does a copy exist? | 02:30 nightly |
+| `restore_check` | Is the copy usable? | 04:00 on the 1st |
+| `backup_watch` | Has either stopped happening? | 10:00 daily |
+
+**`backup_watch` must stay a separate job.** A job that does not run cannot report that it
+did not run. Folding the staleness check into `db_backup` produces monitoring that works only
+while the thing it monitors is healthy — which is the shape of backup monitoring that looks
+fine for a year and then turns out to be decorative. It also runs at a different hour, so
+whatever stops one is less likely to stop both unnoticed.
+
+**A copy carries a manifest.** Beside every dump sits a small JSON file recording its
+SHA-256 and the row count of every table *at the moment it was taken*. Without it, a restore
+proves only that some file restored — and a truncated dump often restores with no error at
+all, leaving a database quietly smaller than it should be. `restore_check` compares against
+the manifest, never against the live database, which has moved on since.
+
+**Failures are reported by the job, not by the runner.** An unhandled exception is recorded
+as `failed` and notifies nobody — that is the isolation guarantee, and it is right for most
+work. A backup is the exception, so these jobs catch what they can name and hand back a
+notification. The runner then records `ok`, because the job did its job: make a copy *or say
+why it could not*. That is why `services.backups.last_successful_at` identifies a real
+success by the `object` key in `detail` and never by the status — otherwise a night of
+correctly-reported failures would read as a night of backups.
+
+**Nothing here ever deletes a backup.** Old copies expire through lifecycle rules on the
+bucket (14 daily / 8 weekly / 12 monthly). Code that deletes backups is code that can delete
+the wrong backup, on the one asset with no second copy, on a path exercised once a night in
+production only.
+
+The accepted cost, stated rather than buried: a full copy nightly means **up to 24 hours of
+work can be lost**. Point-in-time recovery would reduce that to seconds and costs an unbroken
+chain of fragments whose breakage is silent until a restore is attempted — the exact failure
+this design exists to remove. The trigger to revisit is real money in the Investments ledger.
+
+---
+
+## 9. Where the code is
 
 ```
 backend/app/jobs/
@@ -244,13 +291,14 @@ backend/app/jobs/
   housekeeping.py  retention_sweep, disk_watch
   brief.py         morning_brief, day_end_summary   (the only jobs that call a model)
   nudges.py        task_nudge, budget_watch, journal_nudge
+  backups.py       db_backup, restore_check, backup_watch
 
 backend/app/services/job_prefs.py    on/off, and how the schedule is phrased for a person
 backend/app/api/jobs.py              list and toggle
 ```
 
-Tests: `backend/tests/test_jobs.py` (the machinery) and `test_job_content.py` (what the six
-shipped jobs actually decide).
+Tests: `backend/tests/test_jobs.py` (the machinery), `test_job_content.py` (what the shipped
+jobs actually decide) and `test_backups.py` (the three backup jobs).
 
 ---
 
@@ -373,4 +421,4 @@ That series was missing from the chart when scheduled jobs first shipped, which 
 chart quietly understated spend while the tile above it did not. A chart that disagrees with
 the number printed next to it is worse than no chart.
 
-Most jobs cost nothing at all — five of the seven never call a model.
+Most jobs cost nothing at all — eight of the ten never call a model.

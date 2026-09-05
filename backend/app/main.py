@@ -12,6 +12,7 @@ from app.api import notifications as notifications_api
 from app.api import settings as settings_api
 from app.config import DEV_JWT_SECRET, settings
 from app.jobs import scheduler
+from app.services.backups import check_tooling
 from app.services.errors import Duplicate, Invalid, NotFound
 
 # Secrets that turn up inside log TEXT rather than being logged deliberately: httpx's
@@ -91,6 +92,9 @@ def check_production_config() -> None:
 async def lifespan(app: FastAPI):
     configure_logging()
     check_production_config()
+    # Says so at deploy if a bucket is configured but this image cannot take a dump —
+    # otherwise the first symptom would be a notification at 02:30 some night later.
+    check_tooling()
     # The job scheduler holds the background slot the Telegram poller used to occupy. It
     # registers exactly ONE APScheduler job — a tick — and `app/jobs/runner.py` plus the
     # `job_runs` table decide what actually runs. See docs/JOBS.md.

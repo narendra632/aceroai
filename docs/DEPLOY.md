@@ -298,12 +298,61 @@ Then send a real message and ask the assistant to add a task.
 - **Logs**: `docker compose -f docker-compose.prod.yml logs -f api`
 - **Restart**: `... up -d` (after editing `.env`) · **Stop**: `... down`
 - **Update (manual)**: `git pull && docker compose -f docker-compose.prod.yml up -d --build`
-- **DB backup** — there is no automated backup; taking one is manual. A dump left *on the
-  same VM* protects against a bad migration but not against losing the disk:
+- **DB backup** — automated nightly; see *Backups* below. To take an extra one by hand
+  (before a risky migration, say):
   ```bash
   docker compose -f docker-compose.prod.yml exec -T db pg_dump -U agent agent > ~/backup-$(date +%F).sql
   ```
+  ⚠ A dump left *on the same VM* protects against a bad migration but not against losing the
+  disk. The scheduled job exists because that second case is the one that ends the project.
 - **Budget**: you should stay at $0; the $1 alert warns you otherwise.
+
+### Backups
+
+Nightly copies of the database go to Google Cloud Storage. Three jobs, because three things
+fail independently — `db_backup` (02:30), `restore_check` (04:00 on the 1st) and
+`backup_watch` (10:00 daily). See docs/JOBS.md §8 for why the third is separate.
+
+**One-time setup, in the Cloud console:**
+
+1. **Create a bucket** — Cloud Storage → Buckets → Create. Uniform access, public access
+   prevention on. Location is a free choice: `us` multi-region gives geo-redundancy across
+   several US regions, which for a *backup* is a feature rather than a cost.
+2. **Grant the VM's service account `Storage Object Admin` on that bucket** — bucket →
+   Permissions → Grant access. **On the bucket, not the project.** It is the same service
+   account that already authenticates Vertex.
+3. **Set `BACKUP_BUCKET` in the server `.env`.**
+
+No key file, no new secret. Authentication is Application Default Credentials through the
+GCE metadata server — the same path Vertex already uses, which is why access scopes are
+already `cloud-platform` and no VM restart is needed.
+
+**Retention is configured on the bucket, not in code**, so it keeps working when the
+application does not, and so nothing this project runs is ever capable of deleting a backup.
+Add three lifecycle rules — Bucket → Lifecycle → Add a rule, *Delete object*, with **Age**
+and **Prefix** conditions:
+
+| Prefix | Delete after | Keeps roughly |
+|---|---|---|
+| `daily/` | 14 days | two weeks of nightly copies |
+| `weekly/` | 56 days | eight weekly copies |
+| `monthly/` | 365 days | a year of monthly copies |
+
+⚠ **This is the one part of backups no test can verify.** Everything else is asserted in
+`tests/test_backups.py` or proven monthly by `restore_check`; retention lives outside the
+repository and is only ever confirmed by looking. Check the bucket after the first month.
+
+At roughly 3 MB per copy, all of this is about 100 MB and well under ₹1/month.
+
+**Why twelve monthly copies.** Daily and weekly copies cover mistakes noticed quickly. They
+cannot cover the failure where wrong data is written and then faithfully copied every night
+afterwards — at that point every recent copy contains the fault, and only one predating it
+holds the truth. The monthlies also let you find *when* it started.
+
+**Verifying it works.** The honest test is to break it on purpose: set `BACKUP_BUCKET` to a
+name that does not exist, run `python -m app.jobs.run db_backup`, and confirm the failure
+notification reaches your phone. Then set it back. An alarm nobody has ever set off is the
+same class of thing as a backup nobody has ever restored.
 
 ### Trace retention
 

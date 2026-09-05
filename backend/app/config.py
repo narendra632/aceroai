@@ -197,6 +197,30 @@ class Settings(BaseSettings):
     disk_warn_percent: int = 80
     disk_band_percent: int = 5
 
+    # --- backups ---
+    # The bucket nightly database copies are written to. EMPTY DISABLES THE BACKUP JOBS,
+    # which is the correct behaviour on a developer machine that has no bucket and should
+    # not fail every night against storage that was never meant to exist. It is NOT a way to
+    # be quietly unbacked in production: `backup_watch` reports the absence of recent copies
+    # regardless of why they are absent, so an unset bucket in production is caught by the
+    # silence rather than hidden by it.
+    backup_bucket: str = ""
+    # Copies are written under these prefixes; each has its own lifecycle rule on the bucket
+    # (14 / 56 / 365 days), which is what enforces retention. Nothing in this application
+    # deletes a backup — see the change record for why that is deliberate.
+    backup_prefix_daily: str = "daily/"
+    backup_prefix_weekly: str = "weekly/"
+    backup_prefix_monthly: str = "monthly/"
+    # How long without a SUCCESSFUL copy before `backup_watch` says so. Longer than one
+    # nightly interval on purpose: a single missed night — a restart, a transient refusal
+    # from the storage service — must not cry wolf, while two consecutive failures always
+    # speak. The failure of an individual run is reported separately and immediately.
+    backup_stale_hours: int = 48
+    # The scratch database `restore_check` restores into. Never the live one; the name is
+    # fixed so that a run interrupted before it could clean up is recognised and dropped by
+    # the next run rather than accumulating.
+    backup_verify_dbname: str = "acero_restore_check"
+
     # --- trace retention (migration 008) ---
     # Observability must not consume the storage the application depends on. Spans are
     # ~8 rows per turn and carry the least long-term value: nobody asks about the latency

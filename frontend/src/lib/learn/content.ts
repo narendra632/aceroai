@@ -565,6 +565,22 @@ export const CONCEPTS: Concept[] = [
     concepts: ["cosine"],
   },
   {
+    id: "tiebreak",
+    group: "memory",
+    title: "When two memories are equally close",
+    what: "Two facts can sit at exactly the same distance from a question, and then something has to decide.",
+    how: [
+      "Ranking by distance alone leaves ties unordered — the database returns whichever it read first",
+      "With a limit, which tied fact gets cut is then decided by where the row physically sits",
+      "Rows move as data is updated, so the same question could answer differently over time",
+      "Ties now break by recency: between two equally relevant memories, the newer one wins",
+    ],
+    measured:
+      "Five tests failed at random for weeks before this was traced to tied distances, not to the vectors.",
+    code: ["backend/app/core/recall.py", "backend/app/services/memory.py"],
+    concepts: ["cosine"],
+  },
+  {
     id: "cosine",
     group: "memory",
     title: "Cosine distance",
@@ -985,6 +1001,23 @@ export const CONCEPTS: Concept[] = [
       "On iPhone, installing is also the precondition for notifications working at all",
     ],
     code: ["frontend/public/manifest.webmanifest"],
+  },
+  {
+    id: "backup",
+    group: "data",
+    title: "A backup nobody has restored",
+    what: "Copying the database is the easy half. Proving a copy still works is the half that gets skipped.",
+    how: [
+      "A copy is written nightly, with a note of its checksum and every table's row count",
+      "Once a month a copy is rebuilt into a scratch database and checked against that note",
+      "A half-uploaded copy often restores with no error at all, just quietly missing rows",
+      "A third job watches for silence, because work that stopped cannot report that it stopped",
+      "Old copies expire by a rule on the bucket — nothing here is able to delete a backup",
+    ],
+    measured:
+      "The whole database is 9.3 MB, so a year of copies costs roughly a quarter of a rupee a month.",
+    code: ["backend/app/services/backups.py", "backend/app/jobs/backups.py"],
+    reads: [{ label: "How Acero does things unasked", href: "docs/JOBS.md" }],
   },
 ];
 

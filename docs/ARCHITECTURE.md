@@ -154,10 +154,12 @@ the service worker even with the app closed. It has no access to the tool loop �
 | `app/api/learn.py` | The tuning values the Learn section quotes. Read-only, derived from `settings`, allow-listed |
 | `app/api/insights.py` | `overview` · `turns` · `turns/{id}` · `vitals` — read-only |
 | `app/api/schemas.py` | Pydantic request/response models |
-| `app/jobs/` | Recurring work: `registry` (what a job is), `runner` (what is due, exactly once), `scheduler` (the tick), plus the seven jobs. See [`JOBS.md`](JOBS.md) |
+| `app/jobs/` | Recurring work: `registry` (what a job is), `runner` (what is due, exactly once), `scheduler` (the tick), plus the ten jobs. See [`JOBS.md`](JOBS.md) |
 | `app/core/push.py` | Encrypts and signs a web-push message. No key needed to import it |
 | `app/services/notifications.py` | Store-then-deliver, quiet hours, repeat delivery, urgency and TTL, removal |
 | `app/services/vitals.py` | Disk, memory, database size, scheduler heartbeat. A reading it cannot take is `None`, never zero |
+| `app/services/backups.py` | Dump, manifest, restore verification, staleness. Never deletes a copy — retention is the bucket's job |
+| `app/adapters/object_store.py` | The **only** module that imports a cloud storage client. Four methods over bytes, so the suite runs with no credentials |
 | `app/db/models.py` | The 14 ORM tables (typed `Mapped[]`) |
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` |
 | `app/scripts/create_user.py` | One-time interactive user seeding |

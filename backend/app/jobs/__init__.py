@@ -12,13 +12,14 @@ module, not the individual job files.
     housekeeping.py  retention_sweep, disk_watch
     brief.py         morning_brief, day_end_summary   (the only jobs that call a model)
     nudges.py        task_nudge, budget_watch, journal_nudge
+    backups.py       db_backup, restore_check, backup_watch
 
 Adding a job is one decorator in one file, plus an import here. Everything else — run
 recording, idempotence, failure isolation, the spending check, tracing, the Settings toggle,
 quiet hours and the push cap — comes from the registry and cannot be forgotten.
 """
 
-from app.jobs import brief, housekeeping, nudges  # noqa: F401  (registers the jobs)
+from app.jobs import backups, brief, housekeeping, nudges  # noqa: F401  (registers the jobs)
 from app.jobs.registry import (
     Job,
     JobResult,

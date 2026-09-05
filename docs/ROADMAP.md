@@ -222,20 +222,20 @@ that way.
 - **A weekly review.** `generated_reviews.kind='weekly'` already permits it.
 - **Memory hygiene.** A weekly job surfacing flagged duplicates and conflicts — the delivery
   mechanism the "Review conflicts" item below has been missing.
-- **Disk watch.** 10 GB, no backup. A push at 80% full is about twenty lines and is the
-  cheapest insurance this project can buy.
-- **A nightly `pg_dump`.** The deliberately-deferred backup finally has somewhere to live.
+- **Disk watch.** ~~10 GB, no backup.~~ Both since addressed: the disk is 30 GB (still
+  inside the free tier) and backups ship nightly.
 - **A stale in-progress nudge.** A task that has been `in_progress` for a fortnight.
 
 ## Deliberately deferred
 
-- **Database backup.** Everything Acero knows lives on a single 10 GB disk with no
-  off-box copy. This is a **priced, deliberate choice** rather than an oversight:
-  the data is currently recoverable by re-stating it, and the cost of losing it is
-  accepted until the Investments page ships, at which point the calculus changes.
-  Likely shape when it is scheduled: a nightly `pg_dump` in the compose stack,
-  copied off the VM, plus a **rehearsed restore** — a backup nobody has restored
-  from is a hope, not a backup.
+- ~~**Database backup.**~~ **Done, 2026-09-05.** The trigger fired exactly as written: the
+  Investments page changed the calculus, because its whole product is an append-only record
+  that cannot be re-stated. Shipped as `db_backup` (nightly `pg_dump` to Cloud Storage),
+  `restore_check` (a monthly *rehearsed restore* into a scratch database, compared against a
+  manifest written with each copy) and `backup_watch` (which reports the silence if either
+  stops). The accepted cost is now stated rather than open-ended: **up to 24 hours of work
+  can be lost**, because copies are nightly and full rather than continuous. Point-in-time
+  recovery is the upgrade, and its trigger is real money in the Investments ledger.
 
 ## Triggered work — scheduled by a measurement, not a date
 
