@@ -31,23 +31,46 @@ import pytest
 #: distance filter — only `ORDER BY ... LIMIT k` — so it cannot return zero rows if a
 #: matching row is in the database. The row was not in the database yet.
 #:
-#: **The live lead.** `SessionLocal` sets `autoflush=False` (`app/db/session.py`). With
-#: autoflush off, a row added to a session but not yet flushed is found by `db.get()` — the
-#: identity map answers without touching the database — and is invisible to a `SELECT`. That
-#: is exactly the observed asymmetry, and it also explains the older clue that the missing
-#: row was always the first-inserted one.
+#: **The autoflush lead, and why it was abandoned.** `SessionLocal` sets `autoflush=False`,
+#: so a row added but not flushed is found by `db.get()` (the identity map answers without a
+#: query) and is invisible to a `SELECT`. Measured on the production VM 2026-09-06:
+#: `SELECT before flush: False` / `after flush: True`. The mechanism is real — **and it
+#: cannot be this bug**, for two reasons that are worth writing down rather than
+#: rediscovering:
 #:
-#: **Ruled out already**, so nobody repeats the work: a fresh database; pgvector 0.8.5 vs
-#: 0.8.6; CI's file ordering; parallel workers (no xdist); venv drift; an HNSW index
-#: (`EXPLAIN` showed a sequential scan); and — added 2026-09-05 — tied cosine distances,
-#: which turned out to be a **real and separate** production bug, fixed in `05aedb0`, that
-#: did not cause these.
+#:   1. It is **deterministic**. Autoflush is off on every run, on every platform. A missing
+#:      flush would fail 3 times in 3, not 1 in 3.
+#:   2. `test_recall_orders_by_similarity_and_excludes_inactive` calls `db.commit()` before it
+#:      queries, so there is nothing left unflushed — and its symptom is not a missing row at
+#:      all. It is a **wrong order**: a fact at cosine distance 0 was ranked below one at
+#:      distance 1.0.
+#:
+#: **The better theory: approximate vector search.** Two HNSW indexes exist on
+#: `profile_facts.embedding` — `profile_facts_embedding_hnsw` (migration 002) and the partial
+#: `profile_facts_live_hnsw` (migration 006, added precisely so "HNSW can drive a scan"). HNSW
+#: is an *approximate* index: a graph traversal that can return a worse match first, or miss a
+#: row entirely, and its graph is built with randomisation. That single cause explains both
+#: symptoms — the wrong order in one test and the not-found in the other four — and it
+#: explains why the failure is intermittent and environment-dependent, which no deterministic
+#: cause can.
+#:
+#: ⚠ The earlier note that HNSW was "ruled out by `EXPLAIN` showing a sequential scan" was
+#: **wrong, and wrong in an instructive way**: that `EXPLAIN` was run on a developer machine,
+#: which is the environment where these tests *pass*. Measuring the healthy environment tells
+#: you nothing about the sick one. The planner's choice is what differs.
+#:
+#: **Ruled out**, so nobody repeats the work: a fresh database; pgvector 0.8.5 vs 0.8.6; CI's
+#: file ordering; parallel workers (no xdist); venv drift; and tied cosine distances — which
+#: turned out to be a **real and separate** production bug, fixed in `05aedb0`, that did not
+#: cause these.
 #:
 #: **To lift this.** Do not chase the intermittent failure; it cannot be reproduced where it
-#: can be debugged. Instead assert the mechanism directly: a test that adds a row without
-#: flushing and shows that `db.get` finds it while a `SELECT` does not, then a fix that makes
-#: the write path flush before any query depends on it. When that test exists and passes,
-#: delete this marker and these five come back.
+#: can be debugged. Confirm the planner first — `EXPLAIN (ANALYZE)` the recall query **in CI**
+#: (or on Linux against a CI-shaped database) and see whether it is an Index Scan on an HNSW
+#: index. If it is, the fix is one of: raise `hnsw.ef_search` for these queries, enable
+#: `hnsw.iterative_scan`, or accept exact search on a table this small. Whichever is chosen,
+#: it needs a test that pins the guarantee — *every stored fact within range is returned* —
+#: rather than a test that merely passes today.
 #:
 #: **Why switched off rather than left failing.** `deploy: needs: backend`, so an
 #: intermittently red suite means deploys stop at random — including the deploy carrying the

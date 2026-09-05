@@ -250,17 +250,22 @@ that way.
   query has no distance filter, only `ORDER BY … LIMIT`, so it cannot return nothing unless
   the row was not in the database yet.
 
-  The live lead is `autoflush=False` on `SessionLocal`: an unflushed row is found by
-  `db.get()` (the identity map answers without a query) and missed by a `SELECT`. Ruled out
-  already: fresh database, pgvector 0.8.5 vs 0.8.6, CI ordering, parallel workers, venv
-  drift, HNSW (`EXPLAIN` showed a sequential scan), and tied cosine distances — that last
-  one turned out to be a **real and separate** production bug, fixed in `05aedb0`, which did
-  not cause these.
+  The `autoflush=False` lead was measured on the VM (2026-09-06) and **abandoned**: the
+  mechanism is real, but it is deterministic, and one of the five commits before it queries
+  and fails on *ordering* rather than on a missing row. Nothing deterministic explains a
+  failure that happens one run in three.
 
-  **The way to lift it is not to chase the flake**, which cannot be reproduced where it can
-  be debugged. It is to assert the mechanism directly — a test that adds a row without
-  flushing and shows `db.get` finds it while a `SELECT` does not — and then make the write
-  path flush before anything queries it.
+  The better theory is **approximate vector search**. Two HNSW indexes sit on
+  `profile_facts.embedding`, and migration 006 exists precisely so HNSW drives the scan. HNSW
+  can return a worse match first or miss a row, and its graph is built with randomisation —
+  which explains both symptoms and the intermittency together. ⚠ The earlier claim that HNSW
+  was "ruled out by `EXPLAIN`" was wrong: that `EXPLAIN` was run on a developer machine,
+  which is the environment where these tests *pass*.
+
+  **The way to lift it is not to chase the flake.** Confirm the planner first — `EXPLAIN
+  (ANALYZE)` the recall query on Linux against a CI-shaped database. If it is an HNSW index
+  scan, the fix is `hnsw.ef_search`, `hnsw.iterative_scan`, or exact search on a table this
+  small — with a test pinning the guarantee that every stored fact within range comes back.
 
   ⚠ **If the lead is right, this is a live defect**, not merely a test problem: a fact could
   be stored and then not recalled. Switched off because `deploy: needs: backend` meant an
