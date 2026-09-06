@@ -31,13 +31,13 @@ from collections.abc import Callable
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
-from app.core.tools import journal, memory, tasks
+from app.core.tools import investments, journal, memory, tasks
 from app.db.models import Task
 from app.services.errors import Duplicate, Invalid, NotFound
 
 log = logging.getLogger(__name__)
 
-_MODULES = (tasks, journal, memory)
+_MODULES = (tasks, journal, memory, investments)
 
 #: The tool definitions handed to the model, in a stable order.
 TOOLS: list[dict] = [schema for module in _MODULES for schema in module.SCHEMAS]

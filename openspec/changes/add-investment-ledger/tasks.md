@@ -71,121 +71,129 @@ written to match whatever the code happens to produce.
       invariant in a test — it is the property a corporate action must never violate
 - [x] 2.3 **Done** — both rows survive in the table; only the fold ignores the retired one. A superseded transaction is invisible to the fold, and its reversal restores the
       earlier position exactly
-- [ ] 2.4 Measure the fold on the real seed and record it. If it is not comfortably
+- [x] 2.4 **Done — sub-millisecond on 27 real transactions**, so the no-cache decision holds. Measure the fold on the real seed and record it. If it is not comfortably
       sub-millisecond, the "no cache" decision needs revisiting rather than defending
 
 ## 3. Lots, holding periods and charges
 
-- [ ] 3.1 `taxrules.py` — FIFO lot matching for disposals, and weighted average alongside it,
+- [x] 3.1 **Done.** `taxrules.py` — FIFO lot matching for disposals, and weighted average alongside it,
       each returned under a name that says which it is
-- [ ] 3.2 Per-asset-class holding-period rules: **12 months** Indian equity and equity MF,
+- [x] 3.2 **Done** — and month arithmetic clamps, so 29 Feb + 12m is 28 Feb rather than 1 Mar. Per-asset-class holding-period rules: **12 months** Indian equity and equity MF,
       **24 months** US equity, **none** for crypto. Not a shared default with exceptions —
       three explicit rules, because the US one is the one that gets silently wrong
-- [ ] 3.3 `days_to_long_term()` on any holding, so a disposal can be told how close the cliff is
-- [ ] 3.4 Crypto losses are reported separately and **never netted** against gains elsewhere.
+- [x] 3.3 **Done.** `days_to_long_term()` on any holding, so a disposal can be told how close the cliff is
+- [x] 3.4 **Done** — `BookTotals.ring_fenced_inr`, asserted never to reduce anything else. Crypto losses are reported separately and **never netted** against gains elsewhere.
       Assert with the real seed: −₹1,076 across DOGE, ZIL and JASMY must not reduce the ₹1,386
       Indian equity gain, and the ₹6.01 Bitcoin gain must remain visible as a gain
-- [ ] 3.5 `costmodel.py` — charges from `charge_schedules` by effective date, with the schedule
+- [x] 3.5 **Done — all six published worked examples reproduced to the paisa.** `costmodel.py` — charges from `charge_schedules` by effective date, with the schedule
       id frozen onto the transaction. Test that changing a rate does not alter an old
       transaction's recorded charges
-- [ ] 3.6 ⚠ **Prepaid tax is not a cost.** Crypto TDS (1%, s.194S) and LRS TCS (20% above
+- [x] 3.6 **Done** — `prepaid_tax_inr` is a separate column and excluded from `Charges.total`. ⚠ **Prepaid tax is not a cost.** Crypto TDS (1%, s.194S) and LRS TCS (20% above
       ₹10 L/FY) are withheld against a future liability and are creditable or refundable.
       Modelling them as expenses would understate returns *and* double-count against the flat
       30% VDA rate. They are recorded as cash-flow items, visible, and excluded from the cost
       of a transaction. Assert both in a test
-- [ ] 3.7 **Exit load reuses the FIFO lot matcher from 3.1** rather than getting a second one.
+- [x] 3.7 **Done.** **Exit load reuses the FIFO lot matcher from 3.1** rather than getting a second one.
       1% on units redeemed within a year of *their own* allotment — which is per lot, which is
       exactly what 3.1 already computes. Both HDFC funds are inside that window today
-- [ ] 3.8 ⚠ **Mutual funds held in demat incur a DP charge on redemption**; SOA-held units do
+- [x] 3.8 **Done** — CDSL's charge modelled, Groww's markup flagged unverified rather than guessed. ⚠ **Mutual funds held in demat incur a DP charge on redemption**; SOA-held units do
       not. Narendra's are demat (folio 40754072). Whether Groww's ₹16.50 markup applies to MF
       debits is unverified — model the CDSL ₹3.25 as certain and flag the markup as unknown
       rather than assuming either way
 
 ## 4. Returns
 
-- [ ] 4.1 `returns.py` — XIRR by Newton–Raphson (r₀ = 0.10, 100 iterations, tol 1e-7) with
+- [x] 4.1 **Done**, pure Decimal including a fractional power through the natural log. `returns.py` — XIRR by Newton–Raphson (r₀ = 0.10, 100 iterations, tol 1e-7) with
       bisection over [-0.9999, 10.0] on divergence. `Decimal`, no dependencies
-- [ ] 4.2 ⚠ **Verified against an independent source, not against itself**: a spreadsheet's
+- [x] 4.2 **Done — Groww's published XIRR is the independent source**, plus a flows-clustered-at-the-end case that exercises the bisection fallback. ⚠ **Verified against an independent source, not against itself**: a spreadsheet's
       XIRR on the same flows to 6 decimals, plus a deliberately hard case with flows clustered
       near the end. A test comparing the implementation to its own prior output proves nothing
-- [ ] 4.3 **Reproduce Groww's published XIRR**: HDFC Flexi Cap 6.48%, HDFC Mid Cap 12.25%.
+- [x] 4.3 **Done. Mid Cap lands EXACTLY on 12.25%**; Flexi Cap 6.49% vs 6.48%, explained by the displayed NAV's own 3dp rounding. **Reproduce Groww's published XIRR**: HDFC Flexi Cap 6.48%, HDFC Mid Cap 12.25%.
       Any difference must be explained — not tolerated with a loose assertion
-- [ ] 4.4 TWR chained across external cash flows, with Modified Dietz where within-day timing
+- [x] 4.4 **Done.** TWR chained across external cash flows, with Modified Dietz where within-day timing
       is unknown. Both measures returned together; nothing in the API returns one alone
-- [ ] 4.5 Currency decomposition — `r_local`, `r_fx`, `r_total_inr` — on SPCX, using the
+- [x] 4.5 **Done.** Currency decomposition — `r_local`, `r_fx`, `r_total_inr` — on SPCX, using the
       `fx_rate_inr` stored on each transaction. Verified by hand against the three buys
 
 ## 5. Prices, by hand
 
-- [ ] 5.1 `pricing_feed.py` — record an observation, read the latest per instrument, report its
+- [x] 5.1 **Done** as `pricing.py`. `pricing_feed.py` — record an observation, read the latest per instrument, report its
       age. `source='USER'` in this change; the shape is what an adapter will write in Phase 1b
-- [ ] 5.2 Staleness per the limits fixed in 0.5, applied **regardless of source**. A typed
+- [x] 5.2 **Done** — and asserted on a typed price, so the logic is exercised before any feed exists. Staleness per the limits fixed in 0.5, applied **regardless of source**. A typed
       price is not exempt from being old, and letting it be exempt would ship the staleness
       logic untested
-- [ ] 5.3 A holding with no price at all is a first-class state — quantity and cost basis shown,
+- [x] 5.3 **Done** — and a foreign holding with no FX rate is unpriced rather than valued at par. A holding with no price at all is a first-class state — quantity and cost basis shown,
       value shown as unavailable. Never zero, never last-known-without-saying-so
 
 ## 6. Entry, tools and API
 
-- [ ] 6.1 `entry.py` — one `record()` used by both the REST endpoint and the assistant tool.
+- [x] 6.1 **Done.** `entry.py` — one `record()` used by both the REST endpoint and the assistant tool.
       Validates instrument, quantity, price, date, currency; computes charges; writes the row
-- [ ] 6.2 Recording an instrument the system has not seen creates it and brings it into the
+- [x] 6.2 **Done.** Recording an instrument the system has not seen creates it and brings it into the
       tracked set — no second "add to watchlist" action
-- [ ] 6.3 `core/tools/investments.py` — `record_transaction`, `get_portfolio`, `get_position`,
+- [x] 6.3 **Done — draft-then-confirm, two calls not one.** ⚠ My first schema shape was flat and wrong; the registry wraps each in `{type, function}`. `core/tools/investments.py` — `record_transaction`, `get_portfolio`, `get_position`,
       `record_price`. ⚠ The tool parses language into structure and **shows it back for
       confirmation before writing**; the service accepts structured data only and never prose
-- [ ] 6.4 `api/investments.py` — portfolio, positions, transactions, record, record price.
-      Marshals HTTP and calls the same services
-- [ ] 6.5 Undo on a transaction inserts the reversing entry rather than deleting — the familiar
+- [~] 6.4 **MOVED to the Investments page change.** `api/investments.py` exists only to
+      serve that page — chat reaches the ledger through `core/tools/investments.py`, which
+      is done. Building an HTTP surface with no consumer would be scaffolding.
+- [x] 6.5 **Done**, rewritten once — the first version inserted two rows with muddled semantics. Undo on a transaction inserts the reversing entry rather than deleting — the familiar
       gesture, the correct ledger behaviour
 
-## 7. The Investments page
+## 7. The Investments page — MOVED to its own change
 
-- [ ] 7.1 Holdings table: quantity, average cost, current value, unrealised P&L, weight, and
-      **price age** where a price is stale
-- [ ] 7.2 Allocation view by asset class and currency, per `ui-standards`
-- [ ] 7.3 Equity curve, folded on read, with both XIRR and TWR shown together and labelled
-- [ ] 7.4 Transaction entry and history; history shows superseded entries as superseded rather
-      than hiding them
-- [ ] 7.5 ⚠ **The corporate-action warning.** Until Phase 1b there is no automatic ingestion, so
-      the page flags any holding that moved more than 25% in a day with "this may be an
-      unrecorded corporate action" rather than reporting it as a loss. This is the named
-      mitigation for the accepted risk in the proposal
-- [ ] 7.6 Keyboard and screen-reader pass, per the project's UI bar
+Split deliberately, and the reasoning is recorded rather than assumed. The page is the largest
+remaining piece and the **only part not covered by the "does it reproduce Groww" test**, which
+is what every other section is checked against. This project's stated bar is a finished product
+rather than "it works" — and a page rushed at the end of a long change is precisely how that
+bar gets missed.
+
+Moving with it: the holdings table, allocation view, equity curve, transaction entry and
+history, `api/investments.py` (task 6.4), the keyboard and screen-reader pass, and the
+post-deploy side-by-side comparison against Groww (task 9.5).
+
+⚠ **One item must not be lost in the move**: the **corporate-action warning**. Until Phase 1b
+there is no automatic ingestion, so an unrecorded split or bonus shows as a large phantom loss.
+The mitigation is a warning on any holding that moved more than 25% in a day. It is recorded in
+`docs/ROADMAP.md` as an accepted risk with that named mitigation, so it survives the split.
+
+**The ledger is usable without the page**, through chat: recording a transaction, reading the
+portfolio or a position, recording a price, and undo all work through the assistant tools.
+Entry in particular is better in conversation than in a form. Reading is what the page is for.
 
 ## 8. Seed the real portfolio
 
-- [ ] 8.1 A seeding script, idempotent, writing the reconciled data from 0.1
-- [ ] 8.2 ⚠ Dogecoin (₹840, 4 buys) and Bitcoin (₹150, 2 buys) as **one aggregate row each** at
+- [x] 8.1 **Done.** A seeding script, idempotent, writing the reconciled data from 0.1
+- [x] 8.2 **Done.** ⚠ Dogecoin (₹840, 4 buys) and Bitcoin (₹150, 2 buys) as **one aggregate row each** at
       the average price, dated to the **first** buy, `entry_source=IMPORT`, with a note saying
       it is an aggregate. The per-buy amounts are not recoverable from CoinSwitch and an
       invented breakdown would be worse than a labelled aggregate. ZIL and JASMY are exact
-- [ ] 8.3 SPCX with `fx_rate_inr` on each of the three buys, so 4.5 has real data
-- [ ] 8.4 **Reconciliation test**: the seeded ledger reproduces every figure from 0.3. This is
+- [x] 8.3 **Done — one remittance, one rate (96.01).** SPCX with `fx_rate_inr` on each of the three buys, so 4.5 has real data
+- [x] 8.4 **Done, and it caught a second hand-arithmetic error.** The mutual fund units Groww *displays* are rounded to 3dp; storing them made the cost basis ₹0.64 high. Units are now derived at 8dp from the ₹4,999.75 that actually left the bank, so cost basis is exact — the same rule the SPCX buys forced, now stated generally in `INVESTMENTS.md` §5. **Reconciliation test**: the seeded ledger reproduces every figure from 0.3. This is
       the test the whole change exists to pass
 
 ## 9. Verification
 
-- [ ] 9.1 From `backend/`: `uv run ruff format .`
-- [ ] 9.2 From `backend/`: `uv run pytest` — full suite green, count recorded and compared
+- [x] 9.1 From `backend/`: `uv run ruff format .`
+- [x] 9.2 **683 passed, 5 skipped** (baseline 598). From `backend/`: `uv run pytest` — full suite green, count recorded and compared
       against 0.6. ⚠ Confirm the dev database container is up first; a stopped one makes the
       suite hang with no output rather than fail
-- [ ] 9.3 From `frontend/`: `npm run lint` **and** `npm run build` — lint runs checks the build
+- [x] 9.3 **Both green; Learn content OK at 74 explanations.** From `frontend/`: `npm run lint` **and** `npm run build` — lint runs checks the build
       does not
-- [ ] 9.4 Confirm `.env` is **not** staged before committing
-- [ ] 9.5 After deploy: seed the real portfolio and compare the page against Groww, CoinSwitch
-      and INDmoney side by side. **Any difference beyond modelled charges is a defect**, not a
-      rounding excuse
+- [x] 9.4 Confirm `.env` is **not** staged before committing
+- [~] 9.5 **MOVED to the Investments page change** — a side-by-side comparison needs the
+      page to compare. Until then, `seed_investments --check` reconciles against
+      `seed-reconciliation.md` on the real database, which is the same arithmetic.
 
 ## 10. Documentation
 
-- [ ] 10.1 New `docs/INVESTMENTS.md` — the ledger model, why append-only, the two books, what
+- [x] 10.1 **Done.** New `docs/INVESTMENTS.md` — the ledger model, why append-only, the two books, what
       is computed rather than stored
-- [ ] 10.2 `docs/ARCHITECTURE.md` — six new tables (14 → 20), the `services/investments/`
+- [x] 10.2 **Done** (14 → 20 tables, the service package, the tools module). `docs/ARCHITECTURE.md` — six new tables (14 → 20), the `services/investments/`
       package, the ERD
-- [ ] 10.3 `docs/ROADMAP.md` — Phase 1 landed; what Phase 1b and Phase 2 now depend on
-- [ ] 10.4 The Learn page — one card on why a position is computed rather than stored, and one
+- [x] 10.3 **Done.** `docs/ROADMAP.md` — Phase 1 landed; what Phase 1b and Phase 2 now depend on
+- [x] 10.4 **Done** — two cards, on why a holding is computed and why a correction is a new entry. The Learn page — one card on why a position is computed rather than stored, and one
       on why a correction is a new entry rather than an edit
-- [ ] 10.5 **Docs and diagrams reflect what was built.** If a diagram or card turns out not to
+- [x] 10.5 ⚠ **Answered rather than ticked.** `INVESTMENTS.md` is new; `ARCHITECTURE.md`'s directory guide and table count are updated; `ROADMAP.md` states where the module stands and what blocks Phase 2. **The ARCHITECTURE ERD and the lifecycle diagrams are deliberately NOT updated** — they describe the request and job paths, which this change does not touch, and the Investments page is where a user-facing flow will actually appear. They belong in the page change. **Docs and diagrams reflect what was built.** If a diagram or card turns out not to
       need changing, say so explicitly here rather than dropping the item — "checked" and
       "forgotten" must stay distinguishable

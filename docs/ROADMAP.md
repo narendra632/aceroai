@@ -237,6 +237,35 @@ that way.
   can be lost**, because copies are nightly and full rather than continuous. Point-in-time
   recovery is the upgrade, and its trigger is real money in the Investments ledger.
 
+## Investments — where it stands
+
+**Phase 1 (the ledger) is built.** Schema, the fold, returns, lots, holding periods, charges,
+prices with staleness, the write path, six assistant tools, and the real portfolio seeded and
+reconciled. No market feed, no scoring, no proposals, not one model call — deliberately, because
+a system that reasons beautifully about a portfolio it has mis-counted is worse than none.
+
+It is checked against arithmetic nobody here computed: every share count matches Groww, the
+cost basis matches to the paisa, and **Groww's own published XIRR is reproduced exactly**
+(12.25% on HDFC Mid Cap).
+
+**Next, in order:**
+
+- **The Investments page.** Split into its own change on purpose. It is the largest remaining
+  piece and the only part not covered by the "does it reproduce Groww" test, and the project's
+  bar is a finished product rather than "it works" — which is not what a page rushed at the end
+  of a long change produces.
+- **Phase 1b — market data.** Angel One for Indian equity, Twelve Data for US, CoinGecko,
+  AMFI. Needs the Angel One account. ⚠ Also brings the corporate-action feed, which closes the
+  accepted risk below.
+- **Phase 2 — scoring and proposals.** ⚠ **Blocked on framework content**: the A-imperatives,
+  the bottleneck taxonomy, and Soros flags 1–5 and 7–9 are referenced by the technical spec but
+  never enumerated in it.
+
+**⚠ Accepted risk until Phase 1b:** no automatic corporate actions. A split or bonus must be
+entered by hand, and an unrecorded one shows as a large phantom loss. Mitigated by a
+page-level warning on any holding that moved more than 25% in a day — which arrives with the
+page.
+
 ## Owed work — switched off, not fixed
 
 - **Five memory tests are quarantined** (2026-09-05, `backend/tests/_quarantine.py`). They

@@ -216,7 +216,15 @@ def test_every_schema_has_a_handler_and_every_handler_a_schema(db, user):
     names = {t["function"]["name"] for t in tools.TOOLS}
     assert names == set(tools._DISPATCH)
     assert {"remember_fact", "correct_fact", "forget_fact"} <= names
-    assert len(tools.TOOLS) == 10  # 7 existing + 3 memory
+    # A bare count is a deliberate tripwire: it catches a tool quietly disappearing, which
+    # the set comparisons above would not. Broken down so the next person to add a domain
+    # sees which number to change and why, rather than a naked integer.
+    assert len(tools.TOOLS) == 16, {
+        "tasks+journal": 7,
+        "memory": 3,
+        "investments": 6,
+        "actual": sorted(t["function"]["name"] for t in tools.TOOLS),
+    }
 
 
 def test_an_unknown_tool_is_an_error_not_a_crash(db, user):

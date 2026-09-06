@@ -66,9 +66,27 @@ real data before a line of code existed. Keep it as the worked example.
 | | 2026-03-06 | 4,999.75 | 23.229 | 215.237 |
 | | | **9,999.50** | **45.342** ✅ | avg NAV 220.54 |
 
-Units sum **exactly** to Groww's redeemable units on both funds. Both folio 40754072, Demat.
-Invested differs from Groww's rounded ₹15,000 / ₹10,000 by ₹0.75 / ₹0.50 — stamp duty
-rounding on each purchase.
+The **displayed** units sum exactly to Groww's redeemable units on both funds — a striking
+match, and the reason this section was trusted. Both folio 40754072, Demat.
+
+⚠ **Corrected 2026-09-06 by the seeding script.** Those displayed units are rounded to 3dp,
+and storing them makes the cost basis **₹0.64 too high** on Flexi Cap and ₹0.06 on Mid Cap.
+A mutual fund purchase is **amount-driven**: ₹4,999.75 left the bank after stamp duty, and
+the unit count is a consequence of it. So the ledger derives units at 8dp from the amount:
+
+| Fund | Units stored | Groww displays | Cost basis |
+|---|---:|---:|---:|
+| HDFC Flexi Cap | 6.80367536 | 6.804 | **₹14,999.25** ✅ exact |
+| HDFC Mid Cap | 45.34175488 | 45.342 | **₹9,999.50** ✅ exact |
+
+The units are 0.0003 below the displayed figure — worth about ₹0.74 — and the cost basis is
+exact. That is the right way round: returns and XIRR are computed from cost basis and cash
+flows, while a 0.0003 unit difference moves a valuation by less than a rupee.
+
+**This is the same rule the SPCX buys forced, and it generalises**: where the *amount* is the
+primary fact and units follow from it — mutual funds, fractional shares, crypto — store units
+at full precision and let the amount be exact. Where the *quantity* is primary — whole shares
+on an exchange — store the quantity.
 
 ---
 

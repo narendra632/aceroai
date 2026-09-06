@@ -1019,6 +1019,37 @@ export const CONCEPTS: Concept[] = [
     code: ["backend/app/services/backups.py", "backend/app/jobs/backups.py"],
     reads: [{ label: "How Acero does things unasked", href: "docs/JOBS.md" }],
   },
+  {
+    id: "ledger",
+    group: "data",
+    title: "Why a holding is never stored",
+    what: "What you own is worked out from your transactions every time it is asked for, rather than kept as a number.",
+    how: [
+      "Buying adds a transaction; nothing anywhere updates a 'shares held' figure",
+      "Quantity, cost, value and returns are recomputed on the spot from those entries",
+      "It costs a little arithmetic and removes the way trackers usually go wrong",
+      "Every wrong holding you have ever seen was a stored number that missed an update",
+    ],
+    measured: "Twenty-seven real transactions fold into positions in under a millisecond.",
+    code: ["backend/app/services/investments/portfolio.py"],
+    reads: [{ label: "The ledger", href: "docs/INVESTMENTS.md" }],
+  },
+  {
+    id: "append-only",
+    group: "data",
+    title: "A mistake is a new entry, not an edit",
+    what: "Nothing in the investment record can be changed or removed — a correction is added alongside what it corrects.",
+    how: [
+      "The database itself refuses to update or delete one of these entries",
+      "Undo still works: it adds an entry retiring the old one, and both stay visible",
+      "This is the opposite of how the rest of the app treats deleting, deliberately",
+      "The record exists to be judged later, and one that can be rewritten judges nobody",
+    ],
+    measured:
+      "A sale is an event; a typo is corrected by a counter-event, as a paper ledger works.",
+    code: ["backend/app/services/investments/entry.py"],
+    concepts: ["ledger"],
+  },
 ];
 
 // ---------------------------------------------------------------------------------

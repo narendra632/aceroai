@@ -159,8 +159,10 @@ the service worker even with the app closed. It has no access to the tool loop �
 | `app/services/notifications.py` | Store-then-deliver, quiet hours, repeat delivery, urgency and TTL, removal |
 | `app/services/vitals.py` | Disk, memory, database size, scheduler heartbeat. A reading it cannot take is `None`, never zero |
 | `app/services/backups.py` | Dump, manifest, restore verification, staleness. Never deletes a copy — retention is the bucket's job |
+| `app/services/investments/` | The ledger: `portfolio` (the fold), `pricing`, `returns`, `taxrules`, `costmodel`, `entry`. Transactions are facts; everything else is computed. See [`INVESTMENTS.md`](INVESTMENTS.md) |
+| `app/core/tools/investments.py` | Six tools, draft-then-confirm — the model never appends to the ledger in one call |
 | `app/adapters/object_store.py` | The **only** module that imports a cloud storage client. Four methods over bytes, so the suite runs with no credentials |
-| `app/db/models.py` | The 14 ORM tables (typed `Mapped[]`) |
+| `app/db/models.py` | The 20 ORM tables (typed `Mapped[]`) |
 | `app/db/session.py` | Engine (`pool_pre_ping`), `SessionLocal`, `Base`, `get_db` |
 | `app/scripts/create_user.py` | One-time interactive user seeding |
 | `app/scripts/verify_llm.py` | Legacy smoke test against the **Gemini Developer API** (`LLM_BASE_URL`/`LLM_API_KEY`) — **not** the provider layer the app uses |

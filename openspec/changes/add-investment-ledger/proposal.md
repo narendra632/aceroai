@@ -92,8 +92,16 @@ the trigger actually fires. `Numeric` throughout, never float. All timestamps `t
 `taxrules.py` (FIFO lots, holding periods, flags), `entry.py` (parsing and validating a
 recorded transaction). New `app/core/tools/investments.py`. New `app/api/investments.py`.
 
-**Frontend.** A new Investments page: holdings table, allocation view, equity curve,
-transaction entry and history. Charts follow `ui-standards`.
+**Frontend.** ⚠ **None — the Investments page was split into its own change during
+implementation.** It is the largest remaining piece and the only part not covered by the
+"does it reproduce Groww" test that every other section is checked against, and this project's
+bar is a finished product rather than "it works". `api/investments.py` moves with it, because
+it exists only to serve that page: chat reaches the ledger through `core/tools/investments.py`,
+and an HTTP surface with no consumer would be scaffolding.
+
+**The ledger is usable without the page**, through chat — recording a transaction, reading the
+portfolio or a position, recording a price, and undo. Entry is better in conversation than in
+a form; reading is what the page is for.
 
 **Data.** A seeding script for the reconciled real portfolio — 15 Groww transactions, 3
 SPCX buys, 4 crypto positions. ⚠ Two of those are honest aggregates: Dogecoin (₹840 across 4
