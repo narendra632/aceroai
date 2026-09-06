@@ -42,22 +42,22 @@ written to match whatever the code happens to produce.
       wording: **Decide and record the staleness limits per asset class** before they are needed —
       market hours, after close, mutual fund NAV, crypto. They must be a stated policy, not a
       number discovered while debugging
-- [ ] 0.6 Run the full suite and record the count
+- [x] 0.6 Baseline: **598 passed, 5 skipped** (the 5 are the quarantined memory tests)
 
 ## 1. Schema
 
-- [ ] 1.1 Migration 014: `instruments`, `portfolios`, `transactions`, `price_observations`,
+- [x] 1.1 **Done.** Migration 014: `instruments`, `portfolios`, `transactions`, `price_observations`,
       `fx_observations`, `charge_schedules`. `Numeric` throughout, never float; `Text` + CHECK
       rather than Postgres enums; all timestamps `timestamptz`
-- [ ] 1.2 `quantity Numeric(28,8)` and `price Numeric(20,6)` — 8 decimals so 0.00001978 BTC and
+- [x] 1.2 **Done** — verified in the database, a 5-share buy stores as `5.00000000`. `quantity Numeric(28,8)` and `price Numeric(20,6)` — 8 decimals so 0.00001978 BTC and
       0.862429 SPCX units are exact, 6 so a ₹0.0025 NAV and a $204.70 share both fit. A
       column that rounds a real holding is a column that lies on every read
-- [ ] 1.3 ⚠ **The append-only trigger.** A Postgres rule or trigger raising on UPDATE and
+- [ ] 1.3 **Trigger written and manually verified; the TEST is still owed.** Confirmed against the live database with savepoints: INSERT succeeds, UPDATE and DELETE each raise *"the transactions ledger is append-only: correct with a reversing entry carrying supersedes_id"*, and the row survives unchanged. One shared plpgsql function guards all three tables. ⚠ **The append-only trigger.** A Postgres rule or trigger raising on UPDATE and
       DELETE for `transactions`, `price_observations`, `fx_observations` — plus a test that
       *asserts the trigger actually fires*. A trigger nobody tests is a comment
 - [ ] 1.4 `supersedes_id` self-reference on `transactions`, and a `live` helper resolving to
       entries not superseded — one definition, as `services/memory.live` already does
-- [ ] 1.5 Verify up → down → up with rows present, and that the trigger is dropped and
+- [x] 1.5 **Done** — 15 tables and 0 trigger functions after downgrade, 21 tables and 3 triggers after re-upgrade, so the shared function is dropped and recreated correctly by both directions. Verify up → down → up with rows present, and that the trigger is dropped and
       recreated correctly by both directions
 - [ ] 1.6 Models in `db/models.py` with docstrings recording *why* append-only departs from the
       project's soft-delete convention
