@@ -431,3 +431,157 @@ class UserJobPref(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=now, onupdate=now
     )
+
+
+# --- the investment ledger (migration 014) -------------------------------------------
+#
+# ⚠ `Transaction`, `PriceObservation` and `FxObservation` are APPEND-ONLY, enforced by a
+# database trigger. This is the ONE place in this project where convention 6 — soft delete
+# with an undo toast — is deliberately not followed, and the reason is what the record is
+# for. Everywhere else a deletion is a user changing their mind about something they wrote.
+# Here the record exists to be judged against months later: what did I own in March, and
+# what did I believe when I bought it? A row that can be edited afterwards leaves that
+# question with no stable answer, and every review built on it becomes a story rather than a
+# measurement.
+#
+# So a sale is an EVENT and a mistake is a COUNTER-EVENT carrying `supersedes_id`, exactly
+# as a paper ledger works. The interface still offers undo; it inserts the reversing row.
+
+
+class Instrument(Base):
+    """Something that can be held. Created by recording a holding, never separately.
+
+    There is deliberately no "add to watchlist" action: a tracked set maintained apart from
+    holdings is a tracked set that will disagree with them, and the disagreement surfaces as
+    a filing nobody was watching.
+    """
+
+    __tablename__ = "instruments"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    symbol: Mapped[str] = mapped_column(sa.Text)
+    exchange: Mapped[str] = mapped_column(sa.Text)
+    isin: Mapped[str | None] = mapped_column(sa.Text)
+    amfi_scheme_code: Mapped[str | None] = mapped_column(sa.Text)
+    name: Mapped[str] = mapped_column(sa.Text)
+    asset_class: Mapped[str] = mapped_column(sa.Text)
+    currency: Mapped[str] = mapped_column(sa.Text)
+    sector: Mapped[str | None] = mapped_column(sa.Text)
+    is_tracked: Mapped[bool] = mapped_column(sa.Boolean, default=True)
+    #: Renames happen. HDFC Mid-Cap Opportunities Fund became HDFC Mid Cap Fund under SEBI's
+    #: naming standardisation, same ISIN — without both names an AMFI lookup looks broken.
+    aliases: Mapped[list[str] | None] = mapped_column(ARRAY(sa.Text))
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Portfolio(Base):
+    """A book of holdings.
+
+    `REAL` is what the user actually holds. `MIRROR` is what the system's own approved
+    decisions produce, and stays empty until proposals exist.
+
+    ⚠ They are **not nested**. The user holds things the system never suggested, and the
+    system suggests things the user does not act on. The difference between the two books is
+    the measurement this whole module exists to produce, and a single combined book would
+    destroy it.
+    """
+
+    __tablename__ = "portfolios"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(sa.Text)
+    kind: Mapped[str] = mapped_column(sa.Text)
+    base_currency: Mapped[str] = mapped_column(sa.Text, default="INR")
+    mode: Mapped[str] = mapped_column(sa.Text, default="BALANCED")
+    monthly_budget_inr: Mapped[Decimal] = mapped_column(sa.Numeric(14, 2), default=Decimal(30000))
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class ChargeSchedule(Base):
+    """The transaction-cost rates in force from a date.
+
+    Frozen onto each transaction when it is recorded, exactly as `core/pricing.py` freezes
+    model prices — because rates change, and recomputing March's charges at October's rates
+    would silently rewrite March's return.
+    """
+
+    __tablename__ = "charge_schedules"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(sa.Text)
+    venue: Mapped[str] = mapped_column(sa.Text)
+    effective_from: Mapped[dt.date] = mapped_column(sa.Date)
+    spec: Mapped[dict] = mapped_column(JSONB)
+    source_note: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Transaction(Base):
+    """One thing that happened to the book. **APPEND-ONLY — see the note above.**"""
+
+    __tablename__ = "transactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("portfolios.id"))
+    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    txn_type: Mapped[str] = mapped_column(sa.Text)
+    trade_date: Mapped[dt.date] = mapped_column(sa.Date)
+    quantity: Mapped[Decimal] = mapped_column(sa.Numeric(28, 8))
+    price: Mapped[Decimal] = mapped_column(sa.Numeric(20, 6))
+    currency: Mapped[str] = mapped_column(sa.Text)
+    #: Stored per transaction, never looked up later — the rate at the moment money moved is
+    #: a fact about that moment, and currency decomposition depends on it. 1.0 for INR.
+    fx_rate_inr: Mapped[Decimal] = mapped_column(sa.Numeric(18, 8), default=Decimal(1))
+    charges_inr: Mapped[Decimal] = mapped_column(sa.Numeric(18, 2), default=Decimal(0))
+    charge_schedule_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("charge_schedules.id")
+    )
+    #: ⚠ NOT a cost. Crypto TDS and LRS TCS are withheld against a future liability and are
+    #: creditable or refundable — booking them as expense would understate returns AND
+    #: double-count against the flat 30% VDA rate. Kept visible, kept out of `charges_inr`.
+    prepaid_tax_inr: Mapped[Decimal] = mapped_column(sa.Numeric(18, 2), default=Decimal(0))
+    entry_source: Mapped[str] = mapped_column(sa.Text)
+    entry_ref: Mapped[str | None] = mapped_column(sa.Text)
+    note: Mapped[str | None] = mapped_column(sa.Text)
+    #: The correction mechanism. A row pointing at another retires it; readers resolve to
+    #: rows nothing supersedes.
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("transactions.id"))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class PriceObservation(Base):
+    """What something was worth, according to someone, at a moment. **APPEND-ONLY.**
+
+    `source` is the column that makes a typed price and a fetched price the same kind of
+    fact. It is what lets the whole valuation and staleness machinery be built and proven
+    before any market-data feed exists.
+    """
+
+    __tablename__ = "price_observations"
+
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("instruments.id"), primary_key=True
+    )
+    observed_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), primary_key=True)
+    source: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    price: Mapped[Decimal] = mapped_column(sa.Numeric(20, 6))
+    currency: Mapped[str] = mapped_column(sa.Text)
+    quality: Mapped[str] = mapped_column(sa.Text, default="OK")
+    quarantine_reason: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class FxObservation(Base):
+    """An exchange rate at a moment. **APPEND-ONLY.**"""
+
+    __tablename__ = "fx_observations"
+
+    pair: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    observed_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), primary_key=True)
+    source: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    rate: Mapped[Decimal] = mapped_column(sa.Numeric(18, 8))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

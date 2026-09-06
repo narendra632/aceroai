@@ -5,21 +5,25 @@ The LLM is replaced with a fake async generator so tests never hit the network.
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.core.security import hash_password
 from app.db.models import (
     ChatSession,
     DailyUsage,
     GeneratedReview,
+    Instrument,
     JobRun,
     JournalEntry,
     Message,
     Notification,
+    Portfolio,
+    PriceObservation,
     ProfileFact,
     PushSubscription,
     Span,
     Task,
+    Transaction,
     Turn,
     User,
     UserJobPref,
@@ -70,6 +74,32 @@ def _purge(db):
         db.execute(delete(PushSubscription).where(PushSubscription.user_id == u.id))
         db.execute(delete(UserJobPref).where(UserJobPref.user_id == u.id))
         db.execute(delete(GeneratedReview).where(GeneratedReview.user_id == u.id))
+        # The investment ledger is APPEND-ONLY, enforced by a database trigger, so an
+        # ordinary DELETE raises. Test teardown is the one legitimate exception to that
+        # rule, and it is made explicit here rather than by weakening the trigger: the
+        # guarantee that matters is that *application code* cannot rewrite the record.
+        #
+        # Scoped to this user's books, like every other delete in this function — a
+        # TRUNCATE would destroy real ledger rows on a shared development database.
+        book_ids = [
+            b.id for b in db.execute(select(Portfolio).where(Portfolio.user_id == u.id)).scalars()
+        ]
+        if book_ids:
+            db.execute(text("ALTER TABLE transactions DISABLE TRIGGER transactions_append_only"))
+            try:
+                # Corrections point at what they replace, so children must go first or the
+                # self-referencing foreign key blocks the delete.
+                db.execute(
+                    delete(Transaction).where(
+                        Transaction.portfolio_id.in_(book_ids),
+                        Transaction.supersedes_id.isnot(None),
+                    )
+                )
+                db.execute(delete(Transaction).where(Transaction.portfolio_id.in_(book_ids)))
+            finally:
+                db.execute(text("ALTER TABLE transactions ENABLE TRIGGER transactions_append_only"))
+            db.execute(delete(Portfolio).where(Portfolio.user_id == u.id))
+
     db.execute(delete(User).where(User.email.in_(_ALL_TEST_EMAILS)))
     # `job_runs` has no user column, so it cannot be scoped by test email. It is scoped by
     # the TEST_PREFIX on either the job name or the occurrence key. Deleting every row would
@@ -78,6 +108,16 @@ def _purge(db):
     db.execute(
         delete(JobRun).where(
             JobRun.job_name.like(f"{TEST_PREFIX}%") | JobRun.occurrence_key.like(f"{TEST_PREFIX}%")
+        )
+    )
+    # `instruments` has no user column, so it cannot be scoped by test email. It is scoped by
+    # being ORPHANED instead: a real holding always has transactions behind it, so a row with
+    # none is a leftover. This matters because `instruments_unique_live` is unique on
+    # (exchange, symbol) — a surviving test row makes the next run fail on insert.
+    db.execute(
+        delete(Instrument).where(
+            ~Instrument.id.in_(select(Transaction.instrument_id)),
+            ~Instrument.id.in_(select(PriceObservation.instrument_id)),
         )
     )
     db.commit()

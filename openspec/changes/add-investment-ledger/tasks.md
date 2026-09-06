@@ -52,24 +52,24 @@ written to match whatever the code happens to produce.
 - [x] 1.2 **Done** — verified in the database, a 5-share buy stores as `5.00000000`. `quantity Numeric(28,8)` and `price Numeric(20,6)` — 8 decimals so 0.00001978 BTC and
       0.862429 SPCX units are exact, 6 so a ₹0.0025 NAV and a $204.70 share both fit. A
       column that rounds a real holding is a column that lies on every read
-- [ ] 1.3 **Trigger written and manually verified; the TEST is still owed.** Confirmed against the live database with savepoints: INSERT succeeds, UPDATE and DELETE each raise *"the transactions ledger is append-only: correct with a reversing entry carrying supersedes_id"*, and the row survives unchanged. One shared plpgsql function guards all three tables. ⚠ **The append-only trigger.** A Postgres rule or trigger raising on UPDATE and
+- [x] 1.3 **Done — trigger written, manually verified, and now tested.** Confirmed against the live database with savepoints: INSERT succeeds, UPDATE and DELETE each raise *"the transactions ledger is append-only: correct with a reversing entry carrying supersedes_id"*, and the row survives unchanged. One shared plpgsql function guards all three tables. ⚠ **The append-only trigger.** A Postgres rule or trigger raising on UPDATE and
       DELETE for `transactions`, `price_observations`, `fx_observations` — plus a test that
       *asserts the trigger actually fires*. A trigger nobody tests is a comment
-- [ ] 1.4 `supersedes_id` self-reference on `transactions`, and a `live` helper resolving to
+- [x] 1.4 **Done** — `portfolio.live()`, mirroring `services.memory.live`. `supersedes_id` self-reference on `transactions`, and a `live` helper resolving to
       entries not superseded — one definition, as `services/memory.live` already does
 - [x] 1.5 **Done** — 15 tables and 0 trigger functions after downgrade, 21 tables and 3 triggers after re-upgrade, so the shared function is dropped and recreated correctly by both directions. Verify up → down → up with rows present, and that the trigger is dropped and
       recreated correctly by both directions
-- [ ] 1.6 Models in `db/models.py` with docstrings recording *why* append-only departs from the
+- [x] 1.6 **Done.** Models in `db/models.py` with docstrings recording *why* append-only departs from the
       project's soft-delete convention
 
 ## 2. The fold
 
-- [ ] 2.1 `services/investments/portfolio.py` — `positions()` folds transactions into quantity,
+- [x] 2.1 **Done, and it reproduces Groww.** `services/investments/portfolio.py` — `positions()` folds transactions into quantity,
       cost basis and realised P&L. Pure function of the ledger, no stored state
-- [ ] 2.2 Handles every `txn_type` the ledger permits, including `SPLIT` and `BONUS`, which
+- [x] 2.2 **Done** — bonus/split conserve total cost basis, asserted. Handles every `txn_type` the ledger permits, including `SPLIT` and `BONUS`, which
       change quantity and per-unit cost while **conserving total cost basis**. Assert that
       invariant in a test — it is the property a corporate action must never violate
-- [ ] 2.3 A superseded transaction is invisible to the fold, and its reversal restores the
+- [x] 2.3 **Done** — both rows survive in the table; only the fold ignores the retired one. A superseded transaction is invisible to the fold, and its reversal restores the
       earlier position exactly
 - [ ] 2.4 Measure the fold on the real seed and record it. If it is not comfortably
       sub-millisecond, the "no cache" decision needs revisiting rather than defending
