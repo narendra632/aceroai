@@ -110,16 +110,39 @@ def _purge(db):
             JobRun.job_name.like(f"{TEST_PREFIX}%") | JobRun.occurrence_key.like(f"{TEST_PREFIX}%")
         )
     )
-    # `instruments` has no user column, so it cannot be scoped by test email. It is scoped by
-    # being ORPHANED instead: a real holding always has transactions behind it, so a row with
-    # none is a leftover. This matters because `instruments_unique_live` is unique on
-    # (exchange, symbol) — a surviving test row makes the next run fail on insert.
-    db.execute(
-        delete(Instrument).where(
-            ~Instrument.id.in_(select(Transaction.instrument_id)),
-            ~Instrument.id.in_(select(PriceObservation.instrument_id)),
+    # `instruments` and `price_observations` have no user column, so they cannot be scoped by
+    # test email. They are scoped by being ORPHANED instead: a real holding always has
+    # transactions behind it, so an instrument with none is a leftover.
+    #
+    # ⚠ Order matters, and getting it wrong is subtle. Prices must go FIRST: an instrument
+    # that still has a price observation is not orphaned, so it would survive teardown and
+    # then collide with the next test on `instruments_unique_live` — which is exactly what
+    # happened, and the failure appeared two tests later in an unrelated fixture.
+    #
+    # `price_observations` is append-only like `transactions`, so its trigger is lifted the
+    # same way and for the same reason: the guarantee that matters is that application code
+    # cannot rewrite the record.
+    #
+    # ⚠ Guarded by a cheap EXISTS check. `ALTER TABLE ... DISABLE TRIGGER` takes an ACCESS
+    # EXCLUSIVE lock, and this purge runs twice for every test in the suite — issuing that
+    # DDL unconditionally took the full run from 2.5 minutes to over ten. Almost no test
+    # touches the ledger, so the common path must not pay for the rare one.
+    orphaned = ~Instrument.id.in_(select(Transaction.instrument_id))
+    if db.execute(select(Instrument.id).where(orphaned).limit(1)).first() is not None:
+        db.execute(
+            text("ALTER TABLE price_observations DISABLE TRIGGER price_observations_append_only")
         )
-    )
+        try:
+            db.execute(
+                delete(PriceObservation).where(
+                    PriceObservation.instrument_id.in_(select(Instrument.id).where(orphaned))
+                )
+            )
+        finally:
+            db.execute(
+                text("ALTER TABLE price_observations ENABLE TRIGGER price_observations_append_only")
+            )
+        db.execute(delete(Instrument).where(orphaned))
     db.commit()
 
 
