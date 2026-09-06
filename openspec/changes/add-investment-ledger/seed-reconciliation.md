@@ -117,6 +117,44 @@ valuation date must be an explicit input.
 Both totals match INDmoney exactly. `BUY EXPIRED` and `BUY CANCELED` orders correctly excluded
 — the same reconciliation logic as the Kaynes case.
 
+### The rupee basis — one conversion, one rate, and it closes exactly
+
+INDmoney does not convert per trade. A rupee amount is remitted, becomes USD a day later, and
+trades are then paid from the USD balance. So **all three buys share one exchange rate**:
+
+| | |
+|---|---:|
+| Remitted | ₹14,955.00 |
+| Rate received | **96.01** |
+| USD credited | $155.77 ✅ *(₹14,955 ÷ 96.01 = 155.77)* |
+| Spent on shares | $155.31 |
+| **Residual** | **$0.46** |
+
+**That residual is fully explained, and explaining it validates the charge research.** INDmoney
+charges 0.25% brokerage + 18% GST per trade. Rounded to the cent per trade: $0.15 + $0.15 +
+$0.16 = **exactly $0.46**.
+
+So the USD cash balance is **$0.00**, not an unexplained fragment — and an independently
+sourced fee schedule reconciled a real account to the cent. That is a stronger confirmation of
+the rate than any published figure could be.
+
+| Date | USD | Rate | INR basis |
+|---|---:|---:|---:|
+| 2026-06-16 | 49.85 | 96.01 | 4,786.10 |
+| 2026-06-17 | 49.85 | 96.01 | 4,786.10 |
+| 2026-07-03 | 55.61 | 96.01 | 5,339.12 |
+| **Cost basis** | **155.31** | | **14,911.32** |
+| Fees | 0.46 | | 44.16 |
+| **Total** | **155.77** | | **14,955.48** vs ₹14,955 remitted — 48 paise, rounding |
+
+⚠ **`fx_rate_inr = 96.01` on all three transactions.** It is the rate actually received, which
+already contains the bank's markup — and Decision 8 wants the real rate, not a published one.
+Interbank USD/INR for mid-June 2026 would give the markup itself; worth fetching later, not
+needed now.
+
+⚠ **Future remittances get their own rate.** Narendra will state the amount and rate each time.
+This is not a per-trade lookup and must not become one.
+
 **⚠ Holding period is 24 months, not 12** → long-term from **2026-06-16 + 24m = 2028-06-16**.
 **⚠ Schedule FA** is calendar-year and needs the *peak* value during 2026; the window opened
 in June and is already partly historical.
@@ -160,12 +198,13 @@ anywhere in the portfolio, and the ₹6.01 must remain visible as a gain.
 | Indian equity | 62,527.85 | 63,914.00 | +1,386 (+2.22%) |
 | Mutual funds | 24,998.75 | 26,091.00 | +1,092 |
 | Crypto | 1,487.03 | 416.30 | −1,070.73 (−72%) |
-| US equity (SPCX) | $155.31 | $127.55 | −$27.76 (−17.87%) |
+| US equity (SPCX) | 14,911.32 | — | $155.31 → $127.55, −17.87% in USD |
 
-⚠ The US row is **deliberately left in USD here.** Converting it needs an FX rate, and the
-rate at each transaction is a stored fact this document does not have. Filling it in is task
-8.3, and doing it by guesswork now would put a fabricated number into the file the tests
-trust.
+The US row is now in rupees — ₹14,911.32 at the actual rate of 96.01. The current value is
+left blank on purpose: marking it needs today's USD/INR, which is a price observation and
+belongs in the ledger, not hardcoded into the fixture.
+
+**Total invested: ₹1,03,924.95** across four asset classes.
 
 ---
 

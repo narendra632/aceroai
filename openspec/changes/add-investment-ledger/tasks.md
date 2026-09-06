@@ -19,11 +19,27 @@ written to match whatever the code happens to produce.
       per-holding quantity and cost basis, portfolio totals per asset class, and the two XIRR
       figures Groww publishes — **HDFC Flexi Cap 6.48%** and **HDFC Mid Cap 12.25%**. These are
       arithmetic somebody else did, which makes them a far stronger test than any synthetic case
-- [ ] 0.4 ⚠ **Verify the charge rates against a current source** and record the date checked.
+- [x] 0.4 **Done — `docs/investments-transaction-costs.md`, verified 2026-09-06.** ⚠ **The
+      spec's assumption was wrong and it matters**: Groww delivery brokerage is **not** zero,
+      it is `min(₹20, 0.1%)` floored at ₹5, **on both legs** — that was Zerodha's ₹0 being
+      generalised. DP charge is **₹23.60** including GST, not ₹15.34. GST applies to the full
+      DP charge, not just Groww's markup. Exit load **1% within a year on both HDFC funds**,
+      and both his purchases are inside that window. Crypto TDS and LRS TCS are **prepaid tax,
+      not expense** — modelling them as cost would double-count against the flat 30%. FX markup
+      sits on the **remittance**, not per trade. **Five items remain unverifiable from public
+      sources** and need one contract note each; they are listed in §F of that document.
+      Measured consequence: a ₹13,422 → ₹15,000 round trip costs **₹88.64, a 0.66% break-even**
+      and 5.6% of the gain. Original wording: **Verify the charge rates against a current
+      source** and record the date checked.
       They are broker- and date-dependent, they will be wrong eventually, and a wrong rate
       quietly biases every return. Note that Narendra's Groww trades are delivery, so brokerage
       is 0 and the modelled cost is taxes and fees only
-- [ ] 0.5 **Decide and record the staleness limits per asset class** before they are needed —
+- [x] 0.5 **Decided 2026-09-06**: **30 min** during Indian market hours, **20 h** after close,
+      **48 h** for mutual fund NAV, **4 h** for crypto. The after-close figure looks like the
+      loosest and is the most correct — a closing price *is* the current price until the next
+      open, and flagging it at 30 min overnight would mark the whole portfolio stale every
+      evening, which is how a staleness signal becomes noise and stops being read. Original
+      wording: **Decide and record the staleness limits per asset class** before they are needed —
       market hours, after close, mutual fund NAV, crypto. They must be a stated policy, not a
       number discovered while debugging
 - [ ] 0.6 Run the full suite and record the count
@@ -72,6 +88,18 @@ written to match whatever the code happens to produce.
 - [ ] 3.5 `costmodel.py` — charges from `charge_schedules` by effective date, with the schedule
       id frozen onto the transaction. Test that changing a rate does not alter an old
       transaction's recorded charges
+- [ ] 3.6 ⚠ **Prepaid tax is not a cost.** Crypto TDS (1%, s.194S) and LRS TCS (20% above
+      ₹10 L/FY) are withheld against a future liability and are creditable or refundable.
+      Modelling them as expenses would understate returns *and* double-count against the flat
+      30% VDA rate. They are recorded as cash-flow items, visible, and excluded from the cost
+      of a transaction. Assert both in a test
+- [ ] 3.7 **Exit load reuses the FIFO lot matcher from 3.1** rather than getting a second one.
+      1% on units redeemed within a year of *their own* allotment — which is per lot, which is
+      exactly what 3.1 already computes. Both HDFC funds are inside that window today
+- [ ] 3.8 ⚠ **Mutual funds held in demat incur a DP charge on redemption**; SOA-held units do
+      not. Narendra's are demat (folio 40754072). Whether Groww's ₹16.50 markup applies to MF
+      debits is unverified — model the CDSL ₹3.25 as certain and flag the markup as unknown
+      rather than assuming either way
 
 ## 4. Returns
 
