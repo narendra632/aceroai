@@ -310,6 +310,14 @@ class BookTotals:
     #: cannot be set against any other gain — ever, in any year. A single netted figure would
     #: show a position the tax code does not permit, and would be planned against.
     ring_fenced_inr: Decimal = ZERO
+    #: ⚠ The same three figures for the WHOLE book, ring-fenced holdings included. The page
+    #: headline needs these: "invested" counts every holding, so putting it beside a value
+    #: that silently drops crypto reports a gain on a book that is down. Ring-fencing governs
+    #: which losses may offset which gains for TAX — it is not a claim about what is owned,
+    #: and `market_value_inr` above stays exactly as it was for that purpose.
+    invested_all_inr: Decimal = ZERO
+    market_value_all_inr: Decimal = ZERO
+    unrealised_all_inr: Decimal = ZERO
 
     @property
     def is_complete(self) -> bool:
@@ -320,6 +328,7 @@ def totals(valued: list[ValuedPosition]) -> BookTotals:
     from app.services.investments.taxrules import losses_are_ring_fenced
 
     invested = market = unrealised = realised = ring_fenced = ZERO
+    invested_all = market_all = unrealised_all = ZERO
     unpriced: list[str] = []
     stale: list[str] = []
 
@@ -330,6 +339,9 @@ def totals(valued: list[ValuedPosition]) -> BookTotals:
             continue
         if vp.mark and vp.mark.is_stale:
             stale.append(vp.symbol)
+        invested_all += vp.cost_basis_inr
+        market_all += vp.market_value_inr
+        unrealised_all += vp.unrealised_inr
         if losses_are_ring_fenced(vp.asset_class):
             ring_fenced += vp.unrealised_inr
             continue
@@ -345,4 +357,7 @@ def totals(valued: list[ValuedPosition]) -> BookTotals:
         unpriced=unpriced,
         stale=stale,
         ring_fenced_inr=ring_fenced,
+        invested_all_inr=invested_all,
+        market_value_all_inr=market_all,
+        unrealised_all_inr=unrealised_all,
     )

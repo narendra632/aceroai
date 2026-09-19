@@ -431,3 +431,19 @@ def test_the_time_weighted_figure_is_a_rolling_year():
         _points(values, start), [(start, D("-1000"))], window_days=None
     )
     assert lifetime.value == D("-0.5")
+
+
+def test_the_headline_total_covers_the_same_holdings_as_invested(db, book, user):
+    """⚠ Regression, spotted on the page by Narendra. "Invested" counts every holding and
+    "Current value" counted everything EXCEPT crypto, so a book that was down ₹667 reported
+    "+₹411 unrealised". Ring-fencing decides which losses may offset which gains for tax; it
+    is not a claim about what is owned."""
+    _price_everything(db, book)
+    view = overview.summary(db, book.id, user.id)
+    t = view.totals
+    priced = [h for h in view.holdings if h.market_value_inr is not None]
+    assert t.market_value_all_inr == sum(h.market_value_inr for h in priced)
+    assert t.unrealised_all_inr == t.market_value_all_inr - sum(h.cost_basis_inr for h in priced)
+    # The tax-facing figures still exclude crypto — that is what they are for.
+    assert t.market_value_inr < t.market_value_all_inr
+    assert t.ring_fenced_inr != 0

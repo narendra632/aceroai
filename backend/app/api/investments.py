@@ -56,6 +56,11 @@ def _totals_out(totals, cost_basis_inr: Decimal) -> TotalsOut:
             totals.unrealised_inr / totals.invested_inr if totals.invested_inr else None
         ),
         realised_inr=totals.realised_inr,
+        market_value_all_inr=totals.market_value_all_inr,
+        unrealised_all_inr=totals.unrealised_all_inr,
+        unrealised_all_pct=(
+            totals.unrealised_all_inr / totals.invested_all_inr if totals.invested_all_inr else None
+        ),
         ring_fenced_inr=totals.ring_fenced_inr,
         unpriced=totals.unpriced,
         stale=totals.stale,

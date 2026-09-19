@@ -264,6 +264,10 @@ def get_portfolio(db: Session, user_id: uuid.UUID, args: dict) -> dict:
         "invested_inr": str(round(totals.invested_inr, 2)),
         "value_inr": str(round(totals.market_value_inr, 2)),
         "unrealised_inr": str(round(totals.unrealised_inr, 2)),
+        # The whole book, crypto included — the same figures the page headlines, so the two
+        # never quote different totals for the same portfolio.
+        "portfolio_value_inr": str(round(totals.market_value_all_inr, 2)),
+        "portfolio_unrealised_inr": str(round(totals.unrealised_all_inr, 2)),
         "realised_inr": str(round(totals.realised_inr, 2)),
         # ⚠ Reported apart, never netted: under s.115BBH a crypto loss offsets nothing.
         "crypto_unrealised_inr": str(round(totals.ring_fenced_inr, 2)),

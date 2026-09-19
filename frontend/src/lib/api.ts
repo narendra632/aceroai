@@ -1030,6 +1030,11 @@ export type Totals = {
   unrealised_inr: string;
   unrealised_pct: Ratio | null;
   realised_inr: string;
+  /** The whole book, crypto included — what the headline shows. The three fields above
+   *  exclude ring-fenced holdings so they stay comparable with each other. */
+  market_value_all_inr: string;
+  unrealised_all_inr: string;
+  unrealised_all_pct: Ratio | null;
   /** Crypto, kept apart: under s.115BBH its losses offset nothing, ever. */
   ring_fenced_inr: string;
   /** Named, never counted — render these beside the total they are missing from. */

@@ -319,6 +319,9 @@ export default function InvestmentsView() {
     ];
   }).filter((s) => s.value > 0);
   const allocationTotal = allocation.reduce((sum, a) => sum + a.value, 0);
+  // Crypto's own cost and value, for the line that says why it is reported apart. Read from
+  // the server's subtotals — never summed here, which would be money arithmetic in a float.
+  const crypto = byClass.get("CRYPTO");
 
   const curvePoints =
     curve?.points.map((p) => ({
@@ -385,10 +388,16 @@ export default function InvestmentsView() {
               label="Invested"
               value={formatRupees(totals.cost_basis_inr)}
             />
+            {/* ⚠ `*_all_*`: the whole book, crypto included. The other fields exclude
+            ring-fenced holdings so they stay comparable with each other — and pairing one of
+            those with "Invested", which counts everything, reported a GAIN on a book that was
+            down. */}
             <Stat
               label="Current value"
               value={
-                totals.is_complete ? formatRupees(totals.market_value_inr) : "—"
+                totals.is_complete
+                  ? formatRupees(totals.market_value_all_inr)
+                  : "—"
               }
               hint={
                 totals.is_complete
@@ -400,17 +409,17 @@ export default function InvestmentsView() {
               label="Unrealised"
               value={
                 totals.is_complete
-                  ? `${directionGlyph(totals.unrealised_inr)} ${formatRupees(totals.unrealised_inr)}`
+                  ? `${directionGlyph(totals.unrealised_all_inr)} ${formatRupees(totals.unrealised_all_inr)}`
                   : "—"
               }
               className={
                 totals.is_complete
-                  ? directionClass(totals.unrealised_inr)
+                  ? directionClass(totals.unrealised_all_inr)
                   : undefined
               }
               hint={
                 totals.is_complete
-                  ? formatSignedPct(totals.unrealised_pct)
+                  ? formatSignedPct(totals.unrealised_all_pct)
                   : undefined
               }
             />
@@ -449,13 +458,22 @@ export default function InvestmentsView() {
             <div className="rounded-xl border border-border bg-card p-4">
               <p className="text-sm">
                 <span className="font-medium">Crypto, separately:</span>{" "}
+                {crypto && (
+                  <>
+                    {formatRupees(crypto.invested_inr)} invested, now{" "}
+                    {crypto.market_value_inr
+                      ? formatRupees(crypto.market_value_inr)
+                      : "unpriced"}{" "}
+                    ·{" "}
+                  </>
+                )}
                 <span className={directionClass(totals.ring_fenced_inr)}>
                   {formatRupees(totals.ring_fenced_inr)}
                 </span>{" "}
                 unrealised.
               </p>
               <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                Kept out of the figures above on purpose.
+                Counted in the totals above; kept out of tax netting.
                 <InfoTip label="Why crypto is separate">
                   Under s.115BBH a crypto loss cannot be set against any other
                   gain — not even a different crypto gain, not in a later year —

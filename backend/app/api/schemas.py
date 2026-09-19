@@ -630,6 +630,11 @@ class TotalsOut(BaseModel):
     unrealised_inr: Decimal
     unrealised_pct: Decimal | None
     realised_inr: Decimal
+    #: ⚠ The whole book, crypto included — what the page headline shows. The three fields
+    #: above exclude ring-fenced holdings so they stay comparable with each other.
+    market_value_all_inr: Decimal
+    unrealised_all_inr: Decimal
+    unrealised_all_pct: Decimal | None
     #: ⚠ Crypto, apart from everything else. Under s.115BBH its losses offset nothing, so a
     #: single netted figure would show a position the tax code does not permit.
     ring_fenced_inr: Decimal
