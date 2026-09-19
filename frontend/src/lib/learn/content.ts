@@ -1050,6 +1050,54 @@ export const CONCEPTS: Concept[] = [
     code: ["backend/app/services/investments/entry.py"],
     concepts: ["ledger"],
   },
+  {
+    id: "no-value-line",
+    group: "data",
+    title: "A chart that refuses to guess",
+    what: "The value line on the portfolio chart is drawn only on days when every holding had a recorded price.",
+    how: [
+      "Cost is exact every day — it comes from the transactions alone",
+      "Value needs a price per holding, and prices are only recorded sometimes",
+      "A total built from whichever prices exist steps whenever the coverage changes",
+      "That step is impossible to tell apart from the portfolio actually moving",
+      "So the line simply stops, and the chart says which range it covers",
+    ],
+    measured:
+      "With no prices recorded, the value line is absent entirely — and that is the correct answer.",
+    code: ["backend/app/services/investments/history.py"],
+    reads: [{ label: "INVESTMENTS.md", href: "docs/INVESTMENTS.md" }],
+    concepts: ["ledger"],
+  },
+  {
+    id: "money-as-text",
+    group: "data",
+    title: "Money travels as text",
+    what: "Every rupee figure is sent from the server as a string, because computers cannot store most decimals exactly.",
+    how: [
+      "0.1 + 0.2 is 0.30000000000000004 in ordinary computer arithmetic",
+      "The server computes in exact decimal, then sends the digits as text",
+      "The browser formats that text and never does sums on it",
+      "Anything that needs adding up is added up on the server instead",
+    ],
+    measured:
+      "Through the wrong path, 0.86242900 units of a share arrives as 0.862429 — the value survives, the precision does not.",
+    code: ["backend/app/api/investments.py", "frontend/src/lib/format.ts"],
+  },
+  {
+    id: "phantom-loss",
+    group: "data",
+    title: "The loss that never happened",
+    what: "When a company splits its shares the price halves overnight, and a portfolio that has not recorded the split shows a crash.",
+    how: [
+      "A 1-for-2 split doubles your shares and halves the price — you lost nothing",
+      "Until the exchange feed arrives, splits have to be recorded by hand",
+      "So the page flags any price that moved over 25% within four days",
+      "Recording the split silences the warning, because then it is explained",
+    ],
+    measured:
+      "Four days, not thirty: prices a month apart differ for ordinary reasons, and a warning that cries wolf stops being read.",
+    code: ["backend/app/services/investments/history.py"],
+  },
 ];
 
 // ---------------------------------------------------------------------------------

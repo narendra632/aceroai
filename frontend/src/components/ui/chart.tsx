@@ -355,3 +355,315 @@ export function Legend({ series, className }: { series: Series[]; className?: st
     </ul>
   );
 }
+
+// --- lines over time ----------------------------------------------------------------
+
+type LinesProps = {
+  /** One entry per day, in order. A `null` value means **not known** — see below. */
+  data: { day: string; values: Record<string, number | null> }[];
+  series: Series[];
+  height?: number;
+  format?: (n: number) => string;
+  /** Rendered under the frame — used to state the range a sparse series actually covers. */
+  note?: string;
+  className?: string;
+};
+
+/** Two or more series against ONE axis.
+ *
+ *  Not `StackedArea`, and the difference is not cosmetic: stacking adds the series
+ *  together, and these do not add up. A portfolio's value already contains what was
+ *  invested in it, so stacking them would draw a total that means nothing.
+ *
+ *  ⚠ A `null` BREAKS the path rather than bridging it. The value series here is null on
+ *  every day where a holding had no observed price, and joining across that gap would
+ *  invent a straight line through days nobody measured — which a reader cannot tell apart
+ *  from a portfolio that genuinely moved that way.
+ */
+export function Lines({
+  data,
+  series,
+  height = 220,
+  format = formatUSD,
+  note,
+  className,
+}: LinesProps) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const [hover, setHover] = React.useState<number | null>(null);
+
+  const pad = { top: 10, right: 12, bottom: 22, left: 60 };
+  const plotW = Math.max(0, width - pad.left - pad.right);
+  const plotH = height - pad.top - pad.bottom;
+
+  const present = data.flatMap((d) =>
+    series.map((s) => d.values[s.key]).filter((v): v is number => v != null),
+  );
+  const max = niceMax(Math.max(...present, 0));
+  const x = (i: number) => (data.length <= 1 ? plotW / 2 : (i / (data.length - 1)) * plotW);
+  const y = (v: number) => plotH - (v / max) * plotH;
+
+  /** Contiguous runs of known values, so a gap stays a gap. */
+  function runs(key: string): { i: number; v: number }[][] {
+    const out: { i: number; v: number }[][] = [];
+    let current: { i: number; v: number }[] = [];
+    data.forEach((d, i) => {
+      const v = d.values[key];
+      if (v == null) {
+        if (current.length) out.push(current);
+        current = [];
+        return;
+      }
+      current.push({ i, v });
+    });
+    if (current.length) out.push(current);
+    return out;
+  }
+
+  if (width === 0) return <div ref={ref} style={{ height }} className={className} />;
+
+  return (
+    <div ref={ref} className={cn("relative", className)}>
+      <svg
+        width={width}
+        height={height}
+        role="img"
+        aria-label={`${series.map((s) => s.label).join(" and ")} over ${data.length} days`}
+        onMouseLeave={() => setHover(null)}
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const px = e.clientX - rect.left - pad.left;
+          if (data.length === 0) return;
+          const i = Math.round((px / plotW) * (data.length - 1));
+          setHover(Math.max(0, Math.min(data.length - 1, i)));
+        }}
+      >
+        <g transform={`translate(${pad.left},${pad.top})`}>
+          {ticksFor(max).map((t) => (
+            <g key={t}>
+              <line
+                x1={0}
+                x2={plotW}
+                y1={y(t)}
+                y2={y(t)}
+                stroke="var(--chart-grid)"
+                strokeWidth={1}
+              />
+              <text
+                x={-8}
+                y={y(t)}
+                textAnchor="end"
+                dominantBaseline="middle"
+                fontSize={AXIS_FONT}
+                fill="var(--muted-foreground)"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {format(t)}
+              </text>
+            </g>
+          ))}
+
+          {series.map((s) =>
+            runs(s.key).map((run, ri) =>
+              run.length === 1 ? (
+                // A lone known day has no line to draw. Render the point, because one day
+                // of data is still data — the same choice StackedArea makes.
+                <circle
+                  key={`${s.key}-${ri}`}
+                  cx={x(run[0].i)}
+                  cy={y(run[0].v)}
+                  r={3}
+                  fill={s.color}
+                />
+              ) : (
+                <path
+                  key={`${s.key}-${ri}`}
+                  d={`M ${run.map((p) => `${x(p.i)},${y(p.v)}`).join(" L ")}`}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth={2}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              ),
+            ),
+          )}
+
+          {hover != null && (
+            <line
+              x1={x(hover)}
+              x2={x(hover)}
+              y1={0}
+              y2={plotH}
+              stroke="var(--chart-axis)"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+            />
+          )}
+          {hover != null &&
+            series.map((s) => {
+              const v = data[hover]?.values[s.key];
+              return v == null ? null : (
+                <circle
+                  key={s.key}
+                  cx={x(hover)}
+                  cy={y(v)}
+                  r={4}
+                  fill={s.color}
+                  stroke="var(--card)"
+                  strokeWidth={2}
+                />
+              );
+            })}
+
+          <line
+            x1={0}
+            x2={plotW}
+            y1={plotH}
+            y2={plotH}
+            stroke="var(--chart-axis)"
+            strokeWidth={1}
+          />
+          {data.map((d, i) =>
+            i % Math.max(1, Math.ceil(data.length / 6)) === 0 ? (
+              <text
+                key={d.day}
+                x={x(i)}
+                y={plotH + 15}
+                textAnchor="middle"
+                fontSize={AXIS_FONT}
+                fill="var(--muted-foreground)"
+              >
+                {formatDay(d.day)}
+              </text>
+            ) : null,
+          )}
+        </g>
+      </svg>
+
+      {hover != null && data[hover] && (
+        <div
+          className="pointer-events-none absolute top-2 z-10 min-w-44 rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-lg"
+          style={{
+            left: Math.min(Math.max(0, x(hover) + pad.left - 70), Math.max(0, width - 190)),
+          }}
+        >
+          <p className="font-medium text-popover-foreground">{formatDay(data[hover].day)}</p>
+          {series.map((s) => {
+            const v = data[hover].values[s.key];
+            return (
+              <p key={s.key} className="mt-1 flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <span
+                    className="inline-block size-2 rounded-full"
+                    style={{ background: s.color }}
+                    aria-hidden
+                  />
+                  {s.label}
+                </span>
+                <span
+                  className="text-popover-foreground"
+                  style={{ fontVariantNumeric: "tabular-nums" }}
+                >
+                  {/* "not recorded" rather than a dash: the reader must know the number is
+                      missing, not that the value was zero. */}
+                  {v == null ? "not recorded" : format(v)}
+                </span>
+              </p>
+            );
+          })}
+        </div>
+      )}
+
+      {note && <p className="mt-2 text-xs text-muted-foreground">{note}</p>}
+    </div>
+  );
+}
+
+// --- one hundred percent, in one bar --------------------------------------------------
+
+type StackedBarProps = {
+  segments: {
+    key: string;
+    label: string;
+    /** Used for GEOMETRY only — the width of the segment. */
+    value: number;
+    /** The exact text to show for it. Supplied when the figure is money, so the tooltip
+     *  never displays a number that has been through a float. */
+    display?: string;
+    color: string;
+  }[];
+  format?: (n: number) => string;
+  className?: string;
+};
+
+/** A single horizontal bar showing how a whole divides.
+ *
+ *  Not a pie: people compare adjacent slices badly, and eleven labels collide. Rank order
+ *  along a line is the thing the eye reads well, and it is also the question being asked —
+ *  what am I most exposed to?
+ *
+ *  ⚠ Whatever is excluded from `segments` must be named by the CALLER, next to this bar.
+ *  A part-to-whole chart asserts that it shows the whole, and here it frequently does not:
+ *  any holding without a price is missing from the denominator.
+ */
+export function StackedBar({ segments, format = formatUSD, className }: StackedBarProps) {
+  const [hover, setHover] = React.useState<string | null>(null);
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  if (total <= 0) return null;
+
+  const hovered = segments.find((s) => s.key === hover);
+
+  return (
+    <div className={cn("relative", className)}>
+      <div
+        className="flex h-8 w-full overflow-hidden rounded-md"
+        role="img"
+        aria-label={segments
+          .map((s) => `${s.label} ${Math.round((s.value / total) * 100)}%`)
+          .join(", ")}
+      >
+        {segments.map((s, i) => (
+          <div
+            key={s.key}
+            className="relative h-full transition-opacity"
+            style={{
+              width: `${(s.value / total) * 100}%`,
+              background: s.color,
+              // A 2px gap in the surface colour, so adjacent segments read as separate
+              // quantities rather than merging into one shape.
+              marginLeft: i === 0 ? 0 : 2,
+              opacity: hover && hover !== s.key ? 0.55 : 1,
+            }}
+            onMouseEnter={() => setHover(s.key)}
+            onMouseLeave={() => setHover(null)}
+            onFocus={() => setHover(s.key)}
+            onBlur={() => setHover(null)}
+            tabIndex={0}
+          >
+            {(s.value / total) > 0.12 && (
+              <span
+                className="absolute inset-0 flex items-center justify-center text-[11px] font-medium text-white"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {Math.round((s.value / total) * 100)}%
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {hovered && (
+        <div className="pointer-events-none absolute -top-1 left-0 z-10 -translate-y-full rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-lg">
+          <span className="font-medium text-popover-foreground">{hovered.label}</span>
+          <span
+            className="ml-3 text-muted-foreground"
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            {hovered.display ?? format(hovered.value)} ·{" "}
+            {((hovered.value / total) * 100).toFixed(1)}%
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -16,8 +16,9 @@ from decimal import Decimal as D
 import pytest
 from sqlalchemy import text
 
-from app.db.models import Instrument, Portfolio, Transaction
+from app.db.models import Portfolio, Transaction
 from app.services.investments import portfolio as pf
+from tests.conftest import make_instrument
 
 # --- the real seed --------------------------------------------------------------------
 
@@ -76,8 +77,8 @@ def book(db, user):
     """The real portfolio, seeded."""
     insts = {}
     for symbol, (exchange, name, asset_class, currency) in INSTRUMENTS.items():
-        inst = Instrument(
-            id=uuid.uuid4(),
+        inst = make_instrument(
+            db,
             symbol=symbol,
             exchange=exchange,
             name=name,

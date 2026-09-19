@@ -131,6 +131,13 @@ html,
 body,
 #root {
   height: 100%;
+  /* ⚠ The document itself is never the thing that scrolls. Every screen in this app owns
+     its own internal scroll region already, by design — this just makes that the one and
+     only way to scroll, rather than something each screen has to individually get right.
+     Belt-and-suspenders on top of the shell's own `overflow-hidden`: if anything anywhere
+     ever renders taller than the viewport, it is cut off here rather than pushing the
+     whole page (and the sidebar with it) into a second, competing scrollbar. */
+  overflow: hidden;
 }
 
 body {

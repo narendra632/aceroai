@@ -5,6 +5,7 @@ import {
   Brain,
   Check,
   Compass,
+  LineChart,
   ListTodo,
   LogOut,
   MessageSquare,
@@ -29,6 +30,7 @@ export type View =
   | "chat"
   | "tasks"
   | "journal"
+  | "investments"
   | "knowledge"
   | "insights"
   | "learn"
@@ -42,6 +44,9 @@ const NAV: {
   { view: "chat", label: "Chat", icon: MessageSquare },
   { view: "tasks", label: "Tasks", icon: ListTodo },
   { view: "journal", label: "Journal", icon: BookOpen },
+  // Not `Wallet` or `IndianRupee` — the page is about how holdings move over time, not
+  // about a balance, and the icon should say which.
+  { view: "investments", label: "Investments", icon: LineChart },
   { view: "knowledge", label: "Knowledge", icon: Brain },
   { view: "insights", label: "Insights", icon: Activity },
   // Not `Brain` — Knowledge already owns that, and two identical icons in one nav is a
@@ -171,7 +176,13 @@ export default function Sidebar({
           </div>
         </div>
 
-        <nav className="flex flex-col gap-1 px-3">
+        {/* ⚠ Scrollable, because the shell now clips the document rather than letting it
+            grow. Eight nav items plus the wordmark and the footer need ~555px, and on a
+            short window (a laptop with a lot of browser chrome, a phone in landscape) that
+            no longer overflows onto a scrolling page — it would simply be cut off, and the
+            sign-out button with it. `overflow-y-auto` lets this region give way instead.
+            On any normal window there is nothing to scroll and nothing looks different. */}
+        <nav className="no-scrollbar flex min-h-0 flex-col gap-1 overflow-y-auto px-3">
           {NAV.map(({ view: v, label, icon: Icon }) => (
             <button
               key={v}

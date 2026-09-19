@@ -11,10 +11,11 @@ from decimal import Decimal as D
 
 import pytest
 
-from app.db.models import Instrument, Portfolio
+from app.db.models import Portfolio
 from app.services.errors import Invalid
 from app.services.investments import entry, pricing
 from app.services.investments import portfolio as pf
+from tests.conftest import TEST_SOURCE, make_instrument
 
 
 @pytest.fixture
@@ -27,8 +28,8 @@ def book(db, user):
 
 @pytest.fixture
 def hdfc(db):
-    i = Instrument(
-        id=uuid.uuid4(),
+    i = make_instrument(
+        db,
         symbol="HDFCBANK",
         exchange="NSE",
         name="HDFC Bank",
@@ -102,8 +103,8 @@ def test_a_foreign_holding_without_a_rate_is_refused(db, book):
     """The rate is a fact about the moment money moved and cannot be looked up later with the
     same meaning. Guessing one would put a fictional number into the cost basis forever."""
     db.add(
-        Instrument(
-            id=uuid.uuid4(),
+        make_instrument(
+            db,
             symbol="SPCX",
             exchange="NASDAQ",
             name="SpaceX",
@@ -168,8 +169,8 @@ def test_a_renamed_fund_is_found_by_either_name(db, book):
     """HDFC Mid-Cap Opportunities Fund became HDFC Mid Cap Fund, same ISIN. Without alias
     matching, a lookup looks broken when only the label changed."""
     db.add(
-        Instrument(
-            id=uuid.uuid4(),
+        make_instrument(
+            db,
             symbol="HDFCMIDCAP",
             exchange="MF_IN",
             name="HDFC Mid Cap Fund",
@@ -233,18 +234,18 @@ def test_history_shows_superseded_entries_rather_than_hiding_them(db, book, hdfc
 def test_a_typed_price_and_a_fetched_price_are_the_same_kind_of_fact(db, hdfc):
     """`source` is the only difference — which is what lets Phase 1b change one column value
     and nothing else."""
-    pricing.record(db, hdfc.id, D("712.10"), "INR", source="USER")
+    pricing.record(db, hdfc.id, D("712.10"), "INR", source=f"{TEST_SOURCE}-USER")
     db.commit()
     mark = pricing.latest(db, [hdfc.id])[hdfc.id]
     assert mark.price == D("712.10")
-    assert mark.source == "USER"
+    assert mark.source == f"{TEST_SOURCE}-USER", "the source round-trips unchanged"
 
 
 def test_a_typed_price_goes_stale_exactly_like_a_dead_feed(db, hdfc):
     """⚠ Exempting typed prices would ship the staleness logic untested, to first run in
     anger against real market data."""
     old = dt.datetime.now(dt.UTC) - dt.timedelta(days=9)
-    pricing.record(db, hdfc.id, D("712.10"), "INR", source="USER", observed_at=old)
+    pricing.record(db, hdfc.id, D("712.10"), "INR", source=f"{TEST_SOURCE}-USER", observed_at=old)
     db.commit()
     mark = pricing.latest(db, [hdfc.id])[hdfc.id]
     assert mark.is_stale
@@ -292,8 +293,8 @@ def test_an_unpriced_holding_is_reported_as_unknown_not_as_zero(db, book, hdfc):
 def test_a_foreign_holding_without_a_rate_is_unpriced_rather_than_valued_at_par(db, book):
     """Silently treating a dollar as a rupee produces a plausible number that is never
     questioned — the worst shape an error can take."""
-    inst = Instrument(
-        id=uuid.uuid4(),
+    inst = make_instrument(
+        db,
         symbol="SPCX",
         exchange="NASDAQ",
         name="SpaceX",
@@ -316,7 +317,7 @@ def test_a_foreign_holding_without_a_rate_is_unpriced_rather_than_valued_at_par(
             fx_rate_inr=D("96.01"),
         ),
     )
-    pricing.record(db, inst.id, D("147.90"), "USD")
+    pricing.record(db, inst.id, D("147.90"), "USD", source=TEST_SOURCE)
     db.commit()
 
     marks = pricing.latest(db, [inst.id])
@@ -328,8 +329,8 @@ def test_a_foreign_holding_without_a_rate_is_unpriced_rather_than_valued_at_par(
 def test_crypto_is_totalled_apart_from_everything_else(db, book):
     """s.115BBH: a crypto loss offsets nothing. A single netted figure would show a position
     the tax code does not permit, and would be planned against."""
-    coin = Instrument(
-        id=uuid.uuid4(),
+    coin = make_instrument(
+        db,
         symbol="DOGE",
         exchange="CRYPTO",
         name="Dogecoin",
@@ -351,7 +352,7 @@ def test_crypto_is_totalled_apart_from_everything_else(db, book):
             trade_date=dt.date(2024, 11, 17),
         ),
     )
-    pricing.record(db, coin.id, D("8.96"), "INR")
+    pricing.record(db, coin.id, D("8.96"), "INR", source=TEST_SOURCE)
     db.commit()
 
     t = pricing.totals(pricing.value(pf.positions(db, book.id), pricing.latest(db, [coin.id])))

@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/useToast";
 import * as api from "@/lib/api";
 import NotificationSettings from "./NotificationSettings";
 import type { BudgetStatus, Settings, SettingsUpdate } from "@/lib/api";
-import { formatINR, formatUSD } from "@/lib/format";
+import { approxINRFromUSD, formatUSD } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -241,7 +241,7 @@ function SpendLimit({
         <strong className="font-medium">estimate</strong>, not your
         provider&rsquo;s bill.
         {limit != null &&
-          ` About ${formatINR(limit)} at the rate on the Insights page.`}
+          ` About ${approxINRFromUSD(limit)} at the rate on the Insights page.`}
       </p>
     </section>
   );

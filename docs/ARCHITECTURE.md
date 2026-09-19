@@ -35,7 +35,7 @@ flowchart TB
     PUSHSVC["Push service<br/><small>FCM / Mozilla / Apple</small>"]
 
     subgraph api ["FastAPI — backend/app/main.py"]
-        ROUTES["api/<br/><small>auth · chat SSE · tasks · journal · memory<br/>insights · settings · learn · notifications · jobs</small>"]
+        ROUTES["api/<br/><small>auth · chat SSE · tasks · journal · memory · investments<br/>insights · settings · learn · notifications · jobs</small>"]
         SCHED["jobs/scheduler<br/><small>one tick, every 5 min</small>"]
     end
 
@@ -153,13 +153,14 @@ the service worker even with the app closed. It has no access to the tool loop �
 | `app/api/memory.py` | Facts list/search/detail/edit/confirm/forget/restore/not-duplicate · graph · stats |
 | `app/api/learn.py` | The tuning values the Learn section quotes. Read-only, derived from `settings`, allow-listed |
 | `app/api/insights.py` | `overview` · `turns` · `turns/{id}` · `vitals` — read-only |
+| `app/api/investments.py` | `summary` (one fold) · `holdings/{symbol}` · `transactions` · `history` · draft-then-record · `reverse`. ⚠ No DELETE/PUT/PATCH exists — the ledger is append-only, and a test asserts the OpenAPI schema contains none |
 | `app/api/schemas.py` | Pydantic request/response models |
 | `app/jobs/` | Recurring work: `registry` (what a job is), `runner` (what is due, exactly once), `scheduler` (the tick), plus the ten jobs. See [`JOBS.md`](JOBS.md) |
 | `app/core/push.py` | Encrypts and signs a web-push message. No key needed to import it |
 | `app/services/notifications.py` | Store-then-deliver, quiet hours, repeat delivery, urgency and TTL, removal |
 | `app/services/vitals.py` | Disk, memory, database size, scheduler heartbeat. A reading it cannot take is `None`, never zero |
 | `app/services/backups.py` | Dump, manifest, restore verification, staleness. Never deletes a copy — retention is the bucket's job |
-| `app/services/investments/` | The ledger: `portfolio` (the fold), `pricing`, `returns`, `taxrules`, `costmodel`, `entry`. Transactions are facts; everything else is computed. See [`INVESTMENTS.md`](INVESTMENTS.md) |
+| `app/services/investments/` | The ledger: `portfolio` (the fold), `pricing`, `returns`, `taxrules`, `costmodel`, `entry`, `history` (value over time), `overview` (the one-fold assembly the page reads). Transactions are facts; everything else is computed. See [`INVESTMENTS.md`](INVESTMENTS.md) |
 | `app/core/tools/investments.py` | Six tools, draft-then-confirm — the model never appends to the ledger in one call |
 | `app/adapters/object_store.py` | The **only** module that imports a cloud storage client. Four methods over bytes, so the suite runs with no credentials |
 | `app/db/models.py` | The 20 ORM tables (typed `Mapped[]`) |

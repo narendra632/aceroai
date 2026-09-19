@@ -204,9 +204,12 @@
 
 ## Next (planned, in order)
 
-1. **Investments page** — Narendra has **local Markdown research files** describing
-   exactly how he wants this to work. **⚠ ASK HIM for those `.md` files when we
-   reach this feature** — do not design it before reading them.
+1. **Investments Phase 1b — market data.** Angel One for Indian equity, Twelve Data for US,
+   CoinGecko, AMFI for NAVs. Needs the Angel One account. ⚠ It carries three things the page
+   is waiting on: the **value line** on the chart (absent until prices exist), the
+   **time-weighted return** (which needs valuations at sub-period boundaries), and the
+   **corporate-action feed** that closes the accepted risk. It also owes the value half of
+   the Groww comparison.
 
 2. **MCP-powered real-world capabilities** — expose the tools Narendra actually
    uses through MCP so Acero can act in the real world, not just chat. The tool
@@ -250,10 +253,11 @@ cost basis matches to the paisa, and **Groww's own published XIRR is reproduced 
 
 **Next, in order:**
 
-- **The Investments page.** Split into its own change on purpose. It is the largest remaining
-  piece and the only part not covered by the "does it reproduce Groww" test, and the project's
-  bar is a finished product rather than "it works" — which is not what a page rushed at the end
-  of a long change produces.
+- ~~**The Investments page.**~~ **Built** (`add-investments-page`). Holdings, allocation, value
+  over time, entry with draft-then-confirm, the full history with corrections visible, and the
+  corporate-action warning. ⚠ **Half of its acceptance test is owed to Phase 1b:** holdings,
+  quantities and invested were checked against Groww line by line, and *value* cannot be
+  compared until prices exist.
 - **Phase 1b — market data.** Angel One for Indian equity, Twelve Data for US, CoinGecko,
   AMFI. Needs the Angel One account. ⚠ Also brings the corporate-action feed, which closes the
   accepted risk below.

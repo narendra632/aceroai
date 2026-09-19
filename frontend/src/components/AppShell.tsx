@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import Composer, { type ComposerHandle } from "./Composer";
 import JournalView from "./JournalView";
 import InsightsView from "./InsightsView";
+import InvestmentsView from "./InvestmentsView";
 import KnowledgeView from "./KnowledgeView";
 import LearnView from "./LearnView";
 import MessageList from "./MessageList";
@@ -327,6 +328,7 @@ export default function AppShell({
       "chat",
       "tasks",
       "journal",
+      "investments",
       "knowledge",
       "insights",
       "learn",
@@ -356,6 +358,10 @@ export default function AppShell({
       title: "Journal",
       subtitle: "What you wrote, and what Acero wrote back.",
     },
+    investments: {
+      title: "Investments",
+      subtitle: "What you hold, what it cost, and what it is worth.",
+    },
     knowledge: {
       title: "Knowledge",
       subtitle: "What Acero has learned about you, and how it connects.",
@@ -376,7 +382,24 @@ export default function AppShell({
   const page = TITLES[view];
 
   return (
-    <div className="flex h-full">
+    /* ⚠ `overflow-hidden` is the app's containment boundary, and it is load-bearing.
+     *
+     * `html`, `body` and `#root` are all `height: 100%`, but height is not a CAP — it sets a
+     * box's size, it does not stop a taller child painting outside it. Without a clip here,
+     * a view whose content wants more room than the viewport quietly grows the document, and
+     * you get two scrollbars at once: the browser's own, plus the view's own internal one.
+     * The sidebar rides along too, because it is stretched to this row's height and the row
+     * is no longer the height of the screen.
+     *
+     * Every view already owns an internal scroll region, so nothing here should ever need
+     * the document to scroll. Saying so explicitly means it cannot, whatever any one screen
+     * does — rather than each view being separately responsible for never tripping it, which
+     * is the arrangement that let the Investments page trip it.
+     *
+     * Safe for the mobile sidebar: it is `position: fixed`, and a fixed element is only
+     * clipped by an ancestor that establishes a containing block for it (transform, filter,
+     * will-change). This row has none. */
+    <div className="flex h-full overflow-hidden">
       <Sidebar
         email={email}
         view={view}
@@ -392,7 +415,7 @@ export default function AppShell({
         onLogout={onLogout}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-border px-3 py-2.5 md:hidden">
           <Button
             variant="ghost"
@@ -490,6 +513,8 @@ export default function AppShell({
           <TasksView />
         ) : view === "journal" ? (
           <JournalView />
+        ) : view === "investments" ? (
+          <InvestmentsView />
         ) : view === "insights" ? (
           <InsightsView />
         ) : view === "knowledge" ? (

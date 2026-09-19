@@ -964,3 +964,305 @@ export async function getVitals(): Promise<Vitals> {
   if (!r.ok) throw new Error("Could not read the server's condition");
   return r.json();
 }
+
+// --- investments ---
+//
+// ⚠ Every money field below is typed `string`, and that is deliberate rather than lazy. The
+// server computes each figure in exact decimal and serialises it as a quoted string; typing
+// it as `number` here would invite a component to add two of them, which is float arithmetic
+// on money. If something needs to be summed, it is summed on the server.
+
+/** A ratio, not a percentage: "0.0734" means 7.34%. Format with `formatSignedPct`. */
+export type Ratio = string;
+
+export type Mark = {
+  price: string;
+  currency: string;
+  observed_at: string;
+  source: string;
+  age_text: string;
+  is_stale: boolean;
+};
+
+export type SuspiciousMove = {
+  on: string;
+  previous: string;
+  current: string;
+  change: Ratio;
+  gap_days: number;
+  direction: "rose" | "fell";
+};
+
+export type AssetClass = "EQUITY_IN" | "EQUITY_US" | "MF_IN" | "CRYPTO";
+
+export type Holding = {
+  instrument_id: string;
+  symbol: string;
+  name: string;
+  asset_class: AssetClass;
+  currency: string;
+  quantity: string;
+  average_cost: string | null;
+  cost_basis: string;
+  cost_basis_inr: string;
+  realised_inr: string;
+  charges_inr: string;
+  prepaid_tax_inr: string;
+  /** null means "not known" — never zero, and never a stale figure shown as current. */
+  market_value_inr: string | null;
+  unrealised_inr: string | null;
+  unrealised_pct: Ratio | null;
+  mark: Mark | null;
+  days_to_long_term: number | null;
+  losses_ring_fenced: boolean;
+  suspicious_move: SuspiciousMove | null;
+  lots: number;
+};
+
+export type Totals = {
+  /** ⚠ What every holding cost — what a person means by "invested". Exact whether or not
+   *  anything has a price. Use THIS for a headline, never `invested_inr`. */
+  cost_basis_inr: string;
+  /** Cost of the priced, non-ring-fenced holdings only, so it stays comparable with
+   *  `market_value_inr`. **Zero on a book with no prices** — never label it "Invested". */
+  invested_inr: string;
+  market_value_inr: string;
+  unrealised_inr: string;
+  unrealised_pct: Ratio | null;
+  realised_inr: string;
+  /** Crypto, kept apart: under s.115BBH its losses offset nothing, ever. */
+  ring_fenced_inr: string;
+  /** Named, never counted — render these beside the total they are missing from. */
+  unpriced: string[];
+  stale: string[];
+  is_complete: boolean;
+};
+
+export type PortfolioReturn = {
+  kind: "money_weighted" | "time_weighted";
+  label: string;
+  measures: string;
+  value: Ratio | null;
+  /** Present exactly when `value` is null. Show it — never hide the measure. */
+  unavailable_because: string | null;
+  covers_from: string | null;
+  covers_to: string | null;
+};
+
+/** A subtotal, computed on the server. ⚠ Never sum holdings in the browser to get one:
+ *  that is float arithmetic on money, right after the server took care to be exact. */
+export type AssetTotal = {
+  asset_class: AssetClass;
+  holdings: number;
+  invested_inr: string;
+  /** null when any holding in the class has no price — the same rule as the book total. */
+  market_value_inr: string | null;
+};
+
+export type InvestmentSummary = {
+  portfolio_id: string;
+  name: string;
+  kind: string;
+  as_of: string;
+  holdings: Holding[];
+  totals: Totals;
+  by_asset_class: AssetTotal[];
+  unpriced_cost_inr: string;
+  returns: PortfolioReturn[];
+};
+
+export type Lot = {
+  trade_date: string;
+  quantity: string;
+  unit_cost: string;
+  fx_rate_inr: string;
+  cost_inr: string;
+  days_held: number;
+  long_term_on: string | null;
+  is_long_term: boolean;
+  days_remaining: number | null;
+};
+
+export type IfSoldNow = {
+  at_price: string;
+  quantity: string;
+  realised_inr: string;
+  long_term_inr: string;
+  short_term_inr: string;
+  weighted_average_realised_inr: string;
+  /** True on a full disposal, where both bases relieve the whole cost basis and agree. */
+  bases_agree: boolean;
+};
+
+export type CurrencySplit = { local: Ratio; fx: Ratio; total_inr: Ratio };
+
+export type InvestmentTransaction = {
+  id: string;
+  instrument_id: string;
+  symbol: string;
+  txn_type: string;
+  trade_date: string;
+  quantity: string;
+  price: string;
+  currency: string;
+  fx_rate_inr: string | null;
+  charges_inr: string;
+  prepaid_tax_inr: string;
+  net_inr: string;
+  entry_source: string;
+  note: string | null;
+  created_at: string;
+  supersedes_id: string | null;
+  /** Set when a later entry replaced this one. The row stays visible, marked. */
+  superseded_by_id: string | null;
+};
+
+export type Observation = {
+  observed_at: string;
+  price: string;
+  currency: string;
+  source: string;
+  quality: string;
+};
+
+export type HoldingDetail = {
+  holding: Holding;
+  lots: Lot[];
+  if_sold_now: IfSoldNow | null;
+  currency_split: CurrencySplit | null;
+  transactions: InvestmentTransaction[];
+  observations: Observation[];
+  moves: SuspiciousMove[];
+};
+
+export type CurvePoint = {
+  day: string;
+  invested_inr: string;
+  /** null wherever a price was missing for any open holding. Never interpolate it. */
+  value_inr: string | null;
+  priced: number;
+  open_holdings: number;
+};
+
+export type Curve = {
+  points: CurvePoint[];
+  covered_from: string | null;
+  covered_to: string | null;
+  /** ⚠ How many days actually carry a value, against how many are plotted. First-and-last
+   *  is not enough: coverage can have a hole in the middle, and "covered from X to Y" would
+   *  then claim a continuity the data does not have. */
+  covered_days: number;
+  total_days: number;
+  moves: SuspiciousMove[];
+};
+
+export type DraftInput = {
+  symbol: string;
+  txn_type: string;
+  quantity: string;
+  price: string;
+  trade_date: string;
+  exchange?: string | null;
+  name?: string | null;
+  asset_class?: string | null;
+  currency?: string | null;
+  fx_rate_inr?: string | null;
+};
+
+export type Draft = {
+  symbol: string;
+  name: string;
+  exchange: string;
+  asset_class: string;
+  txn_type: string;
+  trade_date: string;
+  quantity: string;
+  price: string;
+  currency: string;
+  fx_rate_inr: string;
+  charges_inr: string;
+  prepaid_tax_inr: string;
+  gross_inr: string;
+  net_inr: string;
+  warnings: string[];
+  creates_instrument: boolean;
+};
+
+/** Thrown when the server rejects an entry, carrying its reason so the form can show it
+ *  rather than a generic failure. */
+export class EntryRejected extends Error {}
+
+async function investmentError(r: Response, fallback: string): Promise<never> {
+  let detail = fallback;
+  try {
+    const body = await r.json();
+    if (typeof body?.detail === "string") detail = body.detail;
+  } catch {
+    // A non-JSON error body is still a failure; the fallback wording covers it.
+  }
+  throw new EntryRejected(detail);
+}
+
+export async function getInvestmentSummary(): Promise<InvestmentSummary> {
+  const r = await req("/api/investments/summary");
+  if (!r.ok) throw new Error("could not load the portfolio");
+  return r.json();
+}
+
+export async function getHolding(symbol: string): Promise<HoldingDetail> {
+  const r = await req(`/api/investments/holdings/${encodeURIComponent(symbol)}`);
+  if (!r.ok) throw new Error("could not load that holding");
+  return r.json();
+}
+
+export async function listInvestmentTransactions(): Promise<
+  InvestmentTransaction[]
+> {
+  const r = await req("/api/investments/transactions");
+  if (!r.ok) throw new Error("could not load the transaction history");
+  return r.json();
+}
+
+export async function getInvestmentHistory(since?: string): Promise<Curve> {
+  const r = await req(`/api/investments/history${since ? `?since=${since}` : ""}`);
+  if (!r.ok) throw new Error("could not load the value history");
+  return r.json();
+}
+
+/** Step one: what the server understood, costed and validated. Writes nothing. */
+export async function draftTransaction(input: DraftInput): Promise<Draft> {
+  const r = await req("/api/investments/transactions/draft", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  if (!r.ok) return investmentError(r, "that entry could not be costed");
+  return r.json();
+}
+
+/** Step two. Sends the same raw inputs, not the draft — the server re-costs it, so a
+ *  charge figure can never arrive from the client. */
+export async function recordTransaction(
+  input: DraftInput,
+): Promise<InvestmentTransaction> {
+  const r = await req("/api/investments/transactions", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  if (!r.ok) return investmentError(r, "that entry could not be recorded");
+  return r.json();
+}
+
+/** Correct a mistaken entry. ⚠ This is not a delete and not an undo: it records a new
+ *  entry that supersedes the original, and the original stays in the record. Word it that
+ *  way wherever it is offered. */
+export async function reverseTransaction(
+  id: string,
+  note?: string,
+): Promise<InvestmentTransaction> {
+  const r = await req(`/api/investments/transactions/${id}/reverse`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? null }),
+  });
+  if (!r.ok) return investmentError(r, "that entry could not be reversed");
+  return r.json();
+}

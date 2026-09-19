@@ -19,7 +19,7 @@ from decimal import Decimal
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.db.models import Instrument, PriceObservation
+from app.db.models import FxObservation, Instrument, PriceObservation
 
 ZERO = Decimal(0)
 
@@ -160,6 +160,38 @@ def latest(
             is_stale=age > limit,
             limit=limit,
         )
+    return out
+
+
+def latest_fx(db: Session) -> dict[str, Decimal]:
+    """The newest rate for each currency against INR, keyed by the foreign currency.
+
+    Shaped for `value()`, which wants `{"USD": rate}`. ⚠ A currency with no observation is
+    simply absent, and `value()` then reports the holding **unpriced** rather than valuing it
+    at par. That is the intended path, not a gap: treating a dollar as a rupee produces a
+    plausible number nobody questions.
+    """
+    newest = (
+        sa.select(
+            FxObservation.pair,
+            sa.func.max(FxObservation.observed_at).label("observed_at"),
+        )
+        .group_by(FxObservation.pair)
+        .subquery()
+    )
+    rows = db.execute(
+        sa.select(FxObservation).join(
+            newest,
+            sa.and_(
+                FxObservation.pair == newest.c.pair,
+                FxObservation.observed_at == newest.c.observed_at,
+            ),
+        )
+    ).scalars()
+    out: dict[str, Decimal] = {}
+    for row in rows:
+        if row.pair.endswith("INR"):
+            out[row.pair[:-3]] = row.rate
     return out
 
 

@@ -1,0 +1,283 @@
+"""HTTP for the Investments page.
+
+Thin by design: every figure here comes from `services/investments/`, which the assistant's
+tools also call. A rule implemented in only one of the two is a rule the other one skips.
+
+⚠ Two things this module must never do:
+
+* **Return a bare dict.** Every route declares a response model, because `jsonable_encoder`
+  turns a `Decimal` into a float and money stops being exact on the way out.
+* **Trust a costed draft from the client.** `POST /transactions` takes the same raw inputs as
+  the draft route and re-runs `entry.prepare`, so charges and validation are computed
+  server-side both times. Accepting a client's own draft would let a bug — or a doctored
+  request — write a transaction with zero charges.
+"""
+
+import datetime as dt
+import uuid
+from decimal import Decimal
+
+import sqlalchemy as sa
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user
+from app.api.schemas import (
+    AssetTotalOut,
+    CurveOut,
+    DraftIn,
+    DraftOut,
+    HoldingDetailOut,
+    HoldingOut,
+    ReverseIn,
+    SummaryOut,
+    TotalsOut,
+    TransactionOut,
+)
+from app.db.models import Instrument, Transaction, User
+from app.db.session import get_db
+from app.services.errors import NotFound
+from app.services.investments import entry, history, overview
+
+router = APIRouter(prefix="/api/investments", tags=["investments"])
+
+ZERO = Decimal(0)
+
+
+def _totals_out(totals, cost_basis_inr: Decimal) -> TotalsOut:
+    return TotalsOut(
+        cost_basis_inr=cost_basis_inr,
+        invested_inr=totals.invested_inr,
+        market_value_inr=totals.market_value_inr,
+        unrealised_inr=totals.unrealised_inr,
+        unrealised_pct=(
+            totals.unrealised_inr / totals.invested_inr if totals.invested_inr else None
+        ),
+        realised_inr=totals.realised_inr,
+        ring_fenced_inr=totals.ring_fenced_inr,
+        unpriced=totals.unpriced,
+        stale=totals.stale,
+        is_complete=totals.is_complete,
+    )
+
+
+def _transactions_out(db: Session, portfolio_id: uuid.UUID) -> list[TransactionOut]:
+    rows = list(
+        db.execute(
+            sa.select(Transaction, Instrument.symbol)
+            .join(Instrument, Transaction.instrument_id == Instrument.id)
+            .where(Transaction.portfolio_id == portfolio_id)
+            .order_by(Transaction.trade_date.desc(), Transaction.created_at.desc())
+        ).all()
+    )
+    # Which rows have been superseded, and by what. Resolved here rather than per row so the
+    # history is one query regardless of how many corrections it contains.
+    replaced_by = {t.supersedes_id: t.id for t, _ in rows if t.supersedes_id is not None}
+    return [
+        TransactionOut(
+            id=t.id,
+            instrument_id=t.instrument_id,
+            symbol=symbol,
+            txn_type=t.txn_type,
+            trade_date=t.trade_date,
+            quantity=t.quantity,
+            price=t.price,
+            currency=t.currency,
+            fx_rate_inr=t.fx_rate_inr,
+            charges_inr=t.charges_inr or ZERO,
+            prepaid_tax_inr=t.prepaid_tax_inr or ZERO,
+            net_inr=overview.cash_effect_inr(t),
+            entry_source=t.entry_source,
+            note=t.note,
+            created_at=t.created_at,
+            supersedes_id=t.supersedes_id,
+            superseded_by_id=replaced_by.get(t.id),
+        )
+        for t, symbol in rows
+    ]
+
+
+@router.get("/summary")
+def get_summary(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SummaryOut:
+    """Holdings, marks, totals and both returns — one walk over the ledger.
+
+    Split across four routes these would run the fold four times and could disagree with
+    each other if a write landed between them.
+    """
+    book = overview.real_book(db, user.id)
+    view = overview.summary(db, book.id, user.id)
+    return SummaryOut(
+        portfolio_id=view.portfolio_id,
+        name=view.name,
+        kind=view.kind,
+        as_of=view.as_of,
+        holdings=[HoldingOut.model_validate(h) for h in view.holdings],
+        totals=_totals_out(view.totals, view.cost_basis_inr),
+        by_asset_class=[AssetTotalOut.model_validate(a) for a in view.by_asset_class],
+        unpriced_cost_inr=view.unpriced_cost_inr,
+        returns=view.returns,
+    )
+
+
+@router.get("/holdings/{symbol}")
+def get_holding(
+    symbol: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> HoldingDetailOut:
+    """One holding: its lots, where each sits against its boundary, what selling would mean,
+    the currency split where it is foreign, and its own transactions and observed prices."""
+    book = overview.real_book(db, user.id)
+    detail = overview.holding_detail(db, book.id, user.id, symbol)
+    return HoldingDetailOut(
+        holding=HoldingOut.model_validate(detail.holding),
+        lots=detail.lots,
+        if_sold_now=detail.if_sold_now,
+        currency_split=detail.currency_split,
+        transactions=[
+            t
+            for t in _transactions_out(db, book.id)
+            if t.instrument_id == detail.holding.instrument_id
+        ],
+        observations=detail.observations,
+        moves=detail.moves,
+    )
+
+
+@router.get("/transactions")
+def list_transactions(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[TransactionOut]:
+    """The whole ledger, newest first — **including superseded rows.**
+
+    They are marked rather than filtered. Hiding them would make the history tidier and
+    destroy the property the append-only design exists for: seeing what you believed at the
+    time, and that you corrected it.
+    """
+    book = overview.real_book(db, user.id)
+    return _transactions_out(db, book.id)
+
+
+@router.get("/history")
+def get_history(
+    since: dt.date | None = None,
+    until: dt.date | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CurveOut:
+    """Cost and value over time, plus any movement too large to be a price movement."""
+    book = overview.real_book(db, user.id)
+    points = history.curve(db, book.id, since=since, until=until)
+    covered = history.covered_range(points)
+    return CurveOut(
+        points=points,
+        covered_from=covered[0] if covered else None,
+        covered_to=covered[1] if covered else None,
+        covered_days=sum(1 for point in points if point.value_inr is not None),
+        total_days=len(points),
+        moves=history.suspicious_moves(db, book.id),
+    )
+
+
+def _draft(db: Session, portfolio_id: uuid.UUID, body: DraftIn) -> entry.Draft:
+    return entry.prepare(
+        db,
+        portfolio_id,
+        symbol=body.symbol,
+        txn_type=body.txn_type,
+        quantity=body.quantity,
+        price=body.price,
+        trade_date=body.trade_date,
+        exchange=body.exchange,
+        name=body.name,
+        asset_class=body.asset_class,
+        currency=body.currency,
+        fx_rate_inr=body.fx_rate_inr,
+    )
+
+
+def _draft_out(draft: entry.Draft) -> DraftOut:
+    return DraftOut(
+        symbol=draft.instrument_symbol,
+        name=draft.instrument_name,
+        exchange=draft.exchange,
+        asset_class=draft.asset_class,
+        txn_type=draft.txn_type,
+        trade_date=draft.trade_date,
+        quantity=draft.quantity,
+        price=draft.price,
+        currency=draft.currency,
+        fx_rate_inr=draft.fx_rate_inr,
+        charges_inr=draft.charges_inr,
+        prepaid_tax_inr=draft.prepaid_tax_inr,
+        gross_inr=draft.gross_inr,
+        net_inr=draft.net_inr,
+        warnings=draft.warnings,
+        creates_instrument=draft.creates_instrument,
+    )
+
+
+@router.post("/transactions/draft")
+def draft_transaction(
+    body: DraftIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DraftOut:
+    """Validate and cost a transaction **without writing it.**
+
+    The first of two steps on purpose. What comes back is what will be recorded — charges,
+    prepaid tax, net rupees, every warning — so a person confirms a real thing rather than an
+    intention.
+    """
+    book = overview.real_book(db, user.id)
+    return _draft_out(_draft(db, book.id, body))
+
+
+@router.post("/transactions", status_code=status.HTTP_201_CREATED)
+def record_transaction(
+    body: DraftIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TransactionOut:
+    """Write it.
+
+    ⚠ Takes the same raw inputs as the draft route and re-runs `prepare`. It deliberately
+    does **not** accept a costed draft: charges the client could set are charges the client
+    could set wrong.
+    """
+    book = overview.real_book(db, user.id)
+    txn = entry.record(db, book.id, _draft(db, book.id, body), entry_source="FORM")
+    db.commit()
+    return next(t for t in _transactions_out(db, book.id) if t.id == txn.id)
+
+
+@router.post("/transactions/{txn_id}/reverse")
+def reverse_transaction(
+    txn_id: uuid.UUID,
+    body: ReverseIn | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TransactionOut:
+    """Correct a mistaken entry by recording the entry that supersedes it.
+
+    ⚠ There is no DELETE route on this router, and there never will be. The ledger is
+    append-only, and an endpoint whose name promises deletion would be a lie in the OpenAPI
+    schema before it was one in the interface.
+    """
+    book = overview.real_book(db, user.id)
+    # Scope the id to this user's book before touching it: an id is not an authorisation.
+    owned = db.execute(
+        sa.select(Transaction.id).where(
+            Transaction.id == txn_id, Transaction.portfolio_id == book.id
+        )
+    ).scalar_one_or_none()
+    if owned is None:
+        raise NotFound("transaction")
+
+    correction = entry.reverse(db, txn_id, note=body.note if body else None)
+    db.commit()
+    return next(t for t in _transactions_out(db, book.id) if t.id == correction.id)

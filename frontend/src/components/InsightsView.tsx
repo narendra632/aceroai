@@ -16,7 +16,7 @@ import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { Waterfall } from "@/components/ui/waterfall";
 import {
   USD_TO_INR,
-  formatINR,
+  approxINRFromUSD,
   formatMs,
   formatUSD,
   localDayKey,
@@ -287,7 +287,7 @@ export default function InsightsView() {
                   hint={
                     // Rupees at a fixed rate — a convenience, not an authoritative
                     // conversion, so it is marked approximate.
-                    `≈ ${formatINR(Number(s.cost_usd))} · ` +
+                    `≈ ${approxINRFromUSD(Number(s.cost_usd))} · ` +
                     (s.unpriced > 0
                       ? `${s.unpriced} call${s.unpriced > 1 ? "s" : ""} unpriced`
                       : `${s.calls} calls`)

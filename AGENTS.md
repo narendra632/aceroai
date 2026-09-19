@@ -84,7 +84,7 @@ incremental change.
                         memory, insights, learn). learn.py is read-only and serves an
                         ALLOW-LISTED set of tuning values — never settings.model_dump()
 - backend/app/jobs/     registry, runner, scheduler + the seven scheduled jobs
-- backend/app/db/       models.py (14 tables), session.py
+- backend/app/db/       models.py (20 tables), session.py
 - frontend/src/         Vite SPA — components/, hooks/, lib/api.ts
 - frontend/src/lib/learn/  the Learn section's content as typed data. Numbers are
                         written as {placeholders} and resolved from /api/learn/constants;
@@ -101,8 +101,8 @@ one writer) · adaptive reasoning · tasks + journal with assistant tool-use ·
 multi-provider LLM + Settings · observability + monthly spend cap ·
 hosting with auto-deploy on push to `main`.
 
-**Not built yet:** journal semantic search, database backups, MCP, the Investments
-page.
+**Not built yet:** journal semantic search, MCP, live market data (Investments
+Phase 1b), scoring and proposals (Phase 2).
 
 Status detail and what comes next live in **`docs/ROADMAP.md`** — the one place
 that owns it. Do not restate progress here; this file owns *conventions*.

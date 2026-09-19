@@ -11,6 +11,7 @@ from app.core.security import hash_password
 from app.db.models import (
     ChatSession,
     DailyUsage,
+    FxObservation,
     GeneratedReview,
     Instrument,
     JobRun,
@@ -43,6 +44,61 @@ _ALL_TEST_EMAILS = (TEST_EMAIL, OTHER_EMAIL)
 #: own synthetic job is identified by NAME, while a test exercising a real job (the
 #: retention sweep) keeps that job's name and marks the OCCURRENCE instead.
 TEST_PREFIX = "pytest-job-"
+
+#: Observations written by a test. Neither `price_observations` nor `fx_observations` has a
+#: user column, and since `make_instrument` shares instrument rows with the real book they
+#: cannot be scoped by orphanhood either. So the marker lives in `source`: **any test writing
+#: a price or an FX rate MUST use a source starting with "pytest"**, or the row survives
+#: teardown and prices somebody else's portfolio.
+#:
+#: ⚠ This is why `pricing.record`'s default of "USER" is never right in a test. A leaked
+#: observation does not fail where it was written — it fails in an unrelated test two files
+#: later, on a primary-key collision nobody connects to the real cause.
+FX_TEST_SOURCE = "pytest"
+TEST_SOURCE = FX_TEST_SOURCE
+
+FX_TEST_SOURCE_MATCH = FxObservation.source.like(f"{FX_TEST_SOURCE}%")
+PRICE_TEST_SOURCE_MATCH = PriceObservation.source.like(f"{TEST_SOURCE}%")
+
+
+def make_instrument(db, *, symbol, exchange, name, asset_class, currency, **extra):
+    """Get-or-create an instrument, for test fixtures.
+
+    ⚠ Get-or-create rather than a plain insert, because `instruments` has no user column and
+    therefore no way to scope one test's instruments from another's — or from the REAL book.
+    Seeding the development database with the actual portfolio (which is the only way to look
+    at the Investments page with data in it) then made every fixture using a real symbol fail
+    on `instruments_unique_live`, and the failure appeared as ninety-odd unrelated errors.
+
+    A test suite that only passes when the developer's database is empty of real data is a
+    suite that will be switched off. Positions are folded per PORTFOLIO, so sharing an
+    instrument row with the real book changes no assertion.
+    """
+    import uuid as _uuid
+
+    from app.db.models import Instrument as _Instrument
+
+    existing = db.execute(
+        select(_Instrument).where(
+            _Instrument.symbol == symbol,
+            _Instrument.exchange == exchange,
+            _Instrument.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    inst = _Instrument(
+        id=_uuid.uuid4(),
+        symbol=symbol,
+        exchange=exchange,
+        name=name,
+        asset_class=asset_class,
+        currency=currency,
+        **extra,
+    )
+    db.add(inst)
+    return inst
 
 
 def _purge(db):
@@ -143,6 +199,45 @@ def _purge(db):
                 text("ALTER TABLE price_observations ENABLE TRIGGER price_observations_append_only")
             )
         db.execute(delete(Instrument).where(orphaned))
+
+    # Prices a test wrote on an instrument SHARED with the real book. Those instruments are
+    # not orphaned, so the sweep above never reaches them, and the row would collide on
+    # `price_observations_pkey` the next time a test recorded the same instant.
+    if (
+        db.execute(
+            select(PriceObservation.instrument_id).where(PRICE_TEST_SOURCE_MATCH).limit(1)
+        ).first()
+        is not None
+    ):
+        db.execute(
+            text("ALTER TABLE price_observations DISABLE TRIGGER price_observations_append_only")
+        )
+        try:
+            db.execute(delete(PriceObservation).where(PRICE_TEST_SOURCE_MATCH))
+        finally:
+            db.execute(
+                text("ALTER TABLE price_observations ENABLE TRIGGER price_observations_append_only")
+            )
+
+    # `fx_observations` has neither a user nor an instrument to scope by — its key is
+    # (pair, observed_at, source). So tests mark their rows in `source` and only those are
+    # removed, the same way `job_runs` is scoped by TEST_PREFIX.
+    #
+    # ⚠ This was missing until a rate written by one test turned up inside another test's
+    # portfolio curve, valuing a holding nobody had priced. Nothing had ever written an FX
+    # observation before, so the gap was invisible rather than absent — which is the usual
+    # shape of a teardown bug.
+    if (
+        db.execute(select(FxObservation.pair).where(FX_TEST_SOURCE_MATCH).limit(1)).first()
+        is not None
+    ):
+        db.execute(text("ALTER TABLE fx_observations DISABLE TRIGGER fx_observations_append_only"))
+        try:
+            db.execute(delete(FxObservation).where(FX_TEST_SOURCE_MATCH))
+        finally:
+            db.execute(
+                text("ALTER TABLE fx_observations ENABLE TRIGGER fx_observations_append_only")
+            )
     db.commit()
 
 

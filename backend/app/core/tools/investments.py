@@ -18,7 +18,7 @@ from decimal import Decimal, InvalidOperation
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.db.models import Portfolio, User
+from app.db.models import Portfolio
 from app.services.errors import Invalid, NotFound
 from app.services.investments import entry, pricing, taxrules
 from app.services.investments import portfolio as pf
@@ -32,10 +32,23 @@ from app.services.investments import portfolio as pf
 _PENDING: dict[str, tuple[uuid.UUID, entry.Draft]] = {}
 
 
-def _book(db: Session, user: User, kind: str = "REAL") -> Portfolio:
+def _book(db: Session, user_id: uuid.UUID, kind: str = "REAL") -> Portfolio:
+    """⚠ Takes a user **id**, not a User.
+
+    `tools.execute` passes `user_id: uuid.UUID` to every handler — that is the dispatcher's
+    contract, and every other tool module follows it. This file was written against a `User`
+    object and did `user.id`, so all six investment tools raised
+    `AttributeError: 'UUID' object has no attribute 'id'` on their first line and reported
+    "the portfolio service failed" to the user.
+
+    It shipped because the tool tests only asserted that the schemas registered. A test that
+    never invokes a handler cannot discover that no handler can run — which is why
+    `test_investments_tools.py` now calls every one of them through `execute`, the same path
+    the model takes.
+    """
     book = db.execute(
         sa.select(Portfolio).where(
-            Portfolio.user_id == user.id, Portfolio.kind == kind, Portfolio.deleted_at.is_(None)
+            Portfolio.user_id == user_id, Portfolio.kind == kind, Portfolio.deleted_at.is_(None)
         )
     ).scalar_one_or_none()
     if book is None:
@@ -179,8 +192,8 @@ SCHEMAS: list[dict] = [
 ]
 
 
-def record_transaction(db: Session, user: User, args: dict) -> dict:
-    book = _book(db, user)
+def record_transaction(db: Session, user_id: uuid.UUID, args: dict) -> dict:
+    book = _book(db, user_id)
     draft = entry.prepare(
         db,
         book.id,
@@ -206,7 +219,7 @@ def record_transaction(db: Session, user: User, args: dict) -> dict:
     }
 
 
-def confirm_transaction(db: Session, user: User, args: dict) -> dict:
+def confirm_transaction(db: Session, user_id: uuid.UUID, args: dict) -> dict:
     handle = str(args["handle"])
     pending = _PENDING.pop(handle, None)
     if pending is None:
@@ -220,8 +233,8 @@ def confirm_transaction(db: Session, user: User, args: dict) -> dict:
     }
 
 
-def get_portfolio(db: Session, user: User, args: dict) -> dict:
-    book = _book(db, user)
+def get_portfolio(db: Session, user_id: uuid.UUID, args: dict) -> dict:
+    book = _book(db, user_id)
     positions = pf.positions(db, book.id)
     marks = pricing.latest(db, [p.instrument_id for p in positions])
     valued = pricing.value(positions, marks, fx_inr=_fx_rates(db, positions, marks))
@@ -257,8 +270,8 @@ def get_portfolio(db: Session, user: User, args: dict) -> dict:
     }
 
 
-def get_position(db: Session, user: User, args: dict) -> dict:
-    book = _book(db, user)
+def get_position(db: Session, user_id: uuid.UUID, args: dict) -> dict:
+    book = _book(db, user_id)
     inst = entry.find_instrument(db, str(args["symbol"]).strip())
     if inst is None:
         raise NotFound(f"nothing held or tracked called {args['symbol']!r}")
@@ -295,7 +308,7 @@ def get_position(db: Session, user: User, args: dict) -> dict:
     }
 
 
-def record_price(db: Session, user: User, args: dict) -> dict:
+def record_price(db: Session, user_id: uuid.UUID, args: dict) -> dict:
     inst = entry.find_instrument(db, str(args["symbol"]).strip())
     if inst is None:
         raise NotFound(f"nothing held or tracked called {args['symbol']!r}")
@@ -305,8 +318,8 @@ def record_price(db: Session, user: User, args: dict) -> dict:
     return {"symbol": inst.symbol, "price": str(price), "currency": inst.currency}
 
 
-def undo_transaction(db: Session, user: User, args: dict) -> dict:
-    book = _book(db, user)
+def undo_transaction(db: Session, user_id: uuid.UUID, args: dict) -> dict:
+    book = _book(db, user_id)
     handle = str(args["handle"]).strip()
     match = next(
         (t for t in entry.history(db, book.id) if str(t.id).startswith(handle)),

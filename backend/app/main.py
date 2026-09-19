@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, chat, insights, journal, learn, memory, tasks
+from app.api import auth, chat, insights, investments, journal, learn, memory, tasks
 from app.api import jobs as jobs_api
 from app.api import notifications as notifications_api
 from app.api import settings as settings_api
@@ -122,6 +122,7 @@ app.include_router(tasks.router)
 app.include_router(journal.router)
 app.include_router(memory.router)
 app.include_router(insights.router)
+app.include_router(investments.router)
 app.include_router(learn.router)
 app.include_router(settings_api.router)
 app.include_router(notifications_api.router)

@@ -122,7 +122,10 @@ def test_spans_are_pruned_while_their_turn_survives(db, user):
     _span(db, old)
     _span(db, recent)
 
-    assert retention.prune_spans(db) == 1
+    # ⚠ At least one, not exactly one: the count is database-wide, and the dev database holds
+    # real traces that age past the limit on their own. After twelve idle days this read 1 in
+    # isolation and more in a full run. The scoped assertion below is the real check.
+    assert retention.prune_spans(db) >= 1
 
     # Scoped to this test's turns: the dev database this suite runs against also holds real
     # traces, which a bare `select(Span)` would sweep up.

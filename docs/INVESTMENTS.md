@@ -248,17 +248,118 @@ is honest where an invented breakdown would not be.
 - **No scoring, proposals or gates.** Phase 2, and it needs the framework documents.
 - **No automatic corporate actions** — they need the exchange feed. Until then a split or
   bonus is entered by hand as a `SPLIT`/`BONUS` transaction, which conserves total cost basis.
-  ⚠ **Accepted risk:** an unrecorded corporate action shows as a large phantom loss. The
-  mitigation is a page-level warning on any holding that moved more than 25% in a day, which
-  arrives with the Investments page.
+  ⚠ **Accepted risk, now mitigated:** an unrecorded corporate action shows as a large phantom
+  loss. The page flags any holding whose price moved more than 25% between two observations
+  four days or fewer apart — see §12.
 - **No valuation cache.** The fold is fast; a cache that is never wrong is also never tested.
 - **No tax computation.** Holding periods, lots and flags — yes. A liability figure — never.
-- **No Investments page yet.** Split into its own change so it gets a proper design pass
-  rather than being rushed at the end of a long one.
+- **No way to type a price.** ⚠ A hand-entry screen was designed and then cut on Narendra's
+  instruction once the Angel One feed moved into the same week: it would have been obsolete
+  before it was reviewed. The consequence is accepted and visible — until the feed lands the
+  page shows what the book **cost** and not what it is **worth**.
 
 ---
 
-## 11. Where the code is
+## 11. The page
+
+Everything above is reachable by asking. The page is what makes it something you *look* at —
+and reviewing a portfolio is looking, not querying. A conversation answers the question you
+thought to ask; a page raises the one you did not.
+
+Three rules run through every part of it, and they are all about honesty rather than layout.
+
+### Money never becomes a float
+
+Every displayed figure — **including percentages** — is computed in `Decimal` on the server
+and crosses the wire as a **quoted JSON string**. The browser converts to a number only for
+chart geometry, never for anything a person reads.
+
+Pydantic already does the right thing for a `Decimal` field on a response model. ⚠ But
+`jsonable_encoder` — the path a route takes when it returns a bare dict — turns
+`Decimal("0.86242900")` into `0.862429`. The value survives; the **scale** does not, and once
+it is a JS number the client cannot format or combine it faithfully. Hence the rule with no
+exceptions: **every investments route declares a response model.**
+
+The client types every money field as `string`, so a component that tries to add two figures
+fails to compile. If something needs summing, it is summed on the server.
+
+### What a figure leaves out is stated beside it
+
+- An unpriced holding shows **no value** and says why — never a zero, never a stale figure
+  presented as current.
+- A total that excludes holdings **lists them**, at the same size as the figure. A caveat in
+  a tooltip is a caveat nobody reads.
+- Crypto is reported on its own line. Under s.115BBH its losses offset nothing, so netting it
+  in would display a position the tax code does not permit.
+- Where only one measure of return can be computed, the page shows it **labelled with what it
+  measures** and names the missing one and why. It never labels a lone figure "return".
+
+### Nothing on the chart is invented
+
+Value over time is two folds with opposite characters:
+
+| Line | Source | Density |
+|---|---|---:|
+| **Invested** | transactions alone | exact, every day, from the first trade |
+| **Value** | observed prices, carried forward | only on days where **every** open holding has one |
+
+⚠ The strictness is the point. A line drawn from whatever prices happened to exist steps
+every time *coverage* changes, and a reader cannot tell that step apart from a real movement
+in the portfolio. Nothing is interpolated across a gap, and the frame states the range the
+value line actually covers.
+
+**On a book with no observed prices the value line is simply absent** — which is a correct
+answer, not a broken chart. The invested line still draws, and it is the exact record of
+money going in.
+
+### Correction, on a record that cannot be edited
+
+The rest of the app deletes with an Undo toast. The ledger has no delete, so the page's
+correction action records the reversing `ADJUSTMENT` and says what actually happened:
+
+> **Reversed. The original entry stays in the record.**
+
+Not *"Deleted · Undo"* — that would tell the user something false about the one record in the
+system whose worth depends on being unrewritable. Superseded rows stay visible, struck
+through, labelled with what replaced them.
+
+### One fold, one endpoint
+
+`GET /api/investments/summary` returns holdings, marks, totals and both returns together,
+because they are not four queries — they are one walk over the ledger. Four endpoints would
+run that walk four times, and the four answers could disagree if a write landed between them.
+
+⚠ Measured while building it: re-folding the ledger for every day of the chart costs
+**6,265 ms** over 659 days, against **3.3 ms** for the incremental walk. 1,887× — the
+difference between a chart and a timeout, and the naive version is the one you write without
+thinking about it.
+
+---
+
+## 12. The corporate-action warning
+
+Until the exchange feed arrives, a split or bonus nobody recorded appears as a catastrophic
+loss in a position that has lost nothing — the one failure mode of this module that produces
+a large, alarming, entirely fictional number.
+
+The page flags a holding when two observations **four calendar days or fewer apart** differ by
+more than **25%**.
+
+Two restrictions keep it from becoming noise, and both matter:
+
+- **The gap limit.** Observations far apart differ for ordinary reasons. Comparing prices a
+  month apart and calling it a single-day move would fire constantly — the same way a
+  30-minute staleness limit overnight would mark the whole portfolio stale every evening.
+- **A recorded action explains itself.** If a `SPLIT` or `BONUS` sits in the window, the
+  corporate action *is* recorded and there is nothing to warn about.
+
+⚠ **Known limitation, stated rather than hidden:** a 1:4 bonus moves the price about 20% and
+will not trip this. The threshold sits where false positives are rare, because the real fix is
+the feed, not a lower number.
+
+---
+
+## 13. Where the code is
 
 ```
 backend/app/services/investments/
@@ -269,12 +370,25 @@ backend/app/services/investments/
   costmodel.py   charges from a dated schedule
   entry.py       the one write path, shared by API and tools
 
+  history.py     value over time, and movements too large to be price moves
+  overview.py    the one-fold assembly the page and the API read from
+
+backend/app/api/investments.py          summary · holding · transactions · history · entry
 backend/app/core/tools/investments.py   six tools, draft-then-confirm
 backend/app/scripts/seed_investments.py the real portfolio
 backend/alembic/versions/…014_investment_ledger.py
+backend/alembic/versions/…015_form_entry_source.py
+
+frontend/src/components/InvestmentsView.tsx   the page
+frontend/src/components/PositionSheet.tsx     one holding, in full
+frontend/src/components/TransactionEntry.tsx  entry and history
+frontend/src/lib/investments.ts               display rules, in one place
 ```
 
 Tests: `test_investments_ledger.py` (the fold, against Groww),
+`test_investments_history.py` (the curve's absences, the corporate-action flag),
+`test_investments_overview.py` (the assembly, and which return can be computed),
+`test_investments_api.py` (exact money over the wire, ownership, no way to delete),
 `test_investments_returns_and_costs.py` (XIRR against Groww, charges against the reference),
 `test_investments_entry.py` (validation, correction, staleness),
 `test_investments_seed.py` (the script).

@@ -553,3 +553,273 @@ class ReviewOut(BaseModel):
     created_at: dt.datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- investments -------------------------------------------------------------------------
+#
+# ⚠ Every monetary field here is `Decimal`, and every route that returns one MUST declare its
+# response model. Pydantic serialises a Decimal to an exact quoted JSON string; FastAPI's
+# `jsonable_encoder` — the path taken when a route returns a bare dict — turns it into a
+# float, and `Decimal("0.86242900")` comes out as `0.862429`. The value survives, the scale
+# does not, and once it is a JS number the client can no longer format or combine it
+# faithfully. There is no stylistic latitude in this.
+
+
+class MarkOut(BaseModel):
+    """A price, with everything needed to decide whether to believe it."""
+
+    price: Decimal
+    currency: str
+    observed_at: dt.datetime
+    source: str
+    age_text: str
+    is_stale: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SuspiciousMoveOut(BaseModel):
+    """A move too large and too fast to be a price move."""
+
+    on: dt.date
+    previous: Decimal
+    current: Decimal
+    change: Decimal
+    gap_days: int
+    direction: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HoldingOut(BaseModel):
+    instrument_id: uuid.UUID
+    symbol: str
+    name: str
+    asset_class: str
+    currency: str
+    quantity: Decimal
+    average_cost: Decimal | None
+    cost_basis: Decimal
+    cost_basis_inr: Decimal
+    realised_inr: Decimal
+    charges_inr: Decimal
+    prepaid_tax_inr: Decimal
+    #: ⚠ None means "not known", never zero. A holding whose worth is unknown must say so.
+    market_value_inr: Decimal | None
+    unrealised_inr: Decimal | None
+    unrealised_pct: Decimal | None
+    mark: MarkOut | None
+    days_to_long_term: int | None
+    losses_ring_fenced: bool
+    suspicious_move: SuspiciousMoveOut | None
+    lots: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TotalsOut(BaseModel):
+    """A portfolio total that is honest about what it could not include."""
+
+    #: ⚠ What every holding cost — the figure a person means by "invested". Exact whether or
+    #: not anything has a price. Use THIS for the headline, never `invested_inr`.
+    cost_basis_inr: Decimal
+    #: Cost of the priced, non-ring-fenced holdings only, so it stays comparable with
+    #: `market_value_inr`. Zero on a book with no prices.
+    invested_inr: Decimal
+    market_value_inr: Decimal
+    unrealised_inr: Decimal
+    unrealised_pct: Decimal | None
+    realised_inr: Decimal
+    #: ⚠ Crypto, apart from everything else. Under s.115BBH its losses offset nothing, so a
+    #: single netted figure would show a position the tax code does not permit.
+    ring_fenced_inr: Decimal
+    #: Named, never counted — the interface must list these beside the total they are absent
+    #: from, at the same prominence.
+    unpriced: list[str]
+    stale: list[str]
+    is_complete: bool
+
+
+class ReturnOut(BaseModel):
+    """One measure of return, or a plain statement of why it is missing."""
+
+    kind: str
+    label: str
+    measures: str
+    value: Decimal | None
+    unavailable_because: str | None
+    covers_from: dt.date | None
+    covers_to: dt.date | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AssetTotalOut(BaseModel):
+    """One asset class, subtotalled on the server.
+
+    ⚠ A subtotal is a displayed monetary figure. Summing it in the browser would do money
+    arithmetic in binary floating point right after the server took care to be exact.
+    """
+
+    asset_class: str
+    holdings: int
+    invested_inr: Decimal
+    market_value_inr: Decimal | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SummaryOut(BaseModel):
+    portfolio_id: uuid.UUID
+    name: str
+    kind: str
+    as_of: dt.datetime
+    holdings: list[HoldingOut]
+    totals: TotalsOut
+    by_asset_class: list[AssetTotalOut]
+    #: What the holdings that cannot be valued originally cost.
+    unpriced_cost_inr: Decimal
+    returns: list[ReturnOut]
+
+
+class LotOut(BaseModel):
+    trade_date: dt.date
+    quantity: Decimal
+    unit_cost: Decimal
+    fx_rate_inr: Decimal
+    cost_inr: Decimal
+    days_held: int
+    long_term_on: dt.date | None
+    is_long_term: bool
+    days_remaining: int | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IfSoldNowOut(BaseModel):
+    at_price: Decimal
+    quantity: Decimal
+    realised_inr: Decimal
+    long_term_inr: Decimal
+    short_term_inr: Decimal
+    weighted_average_realised_inr: Decimal
+    #: True on a full disposal, where both bases relieve the entire cost basis and therefore
+    #: agree. They diverge on a partial sale.
+    bases_agree: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CurrencySplitOut(BaseModel):
+    """A foreign holding's return taken apart — all three, never just the total."""
+
+    local: Decimal
+    fx: Decimal
+    total_inr: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TransactionOut(BaseModel):
+    id: uuid.UUID
+    instrument_id: uuid.UUID
+    symbol: str
+    txn_type: str
+    trade_date: dt.date
+    quantity: Decimal
+    price: Decimal
+    currency: str
+    fx_rate_inr: Decimal | None
+    charges_inr: Decimal
+    prepaid_tax_inr: Decimal
+    net_inr: Decimal
+    entry_source: str
+    note: str | None
+    created_at: dt.datetime
+    #: ⚠ Superseded rows stay visible. Hiding them would destroy the property the append-only
+    #: design exists for: seeing what you believed at the time.
+    supersedes_id: uuid.UUID | None
+    superseded_by_id: uuid.UUID | None
+
+
+class ObservationOut(BaseModel):
+    observed_at: dt.datetime
+    price: Decimal
+    currency: str
+    source: str
+    quality: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HoldingDetailOut(BaseModel):
+    holding: HoldingOut
+    lots: list[LotOut]
+    if_sold_now: IfSoldNowOut | None
+    currency_split: CurrencySplitOut | None
+    transactions: list[TransactionOut]
+    observations: list[ObservationOut]
+    moves: list[SuspiciousMoveOut]
+
+
+class CurvePointOut(BaseModel):
+    day: dt.date
+    invested_inr: Decimal
+    #: ⚠ None on any day where even one open holding lacks a price. Nothing is interpolated,
+    #: and a total is never assembled from partial coverage.
+    value_inr: Decimal | None
+    priced: int
+    open_holdings: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CurveOut(BaseModel):
+    points: list[CurvePointOut]
+    covered_from: dt.date | None
+    covered_to: dt.date | None
+    #: ⚠ How many days actually carry a value, against how many are plotted. The first and
+    #: last covered day are not enough on their own: coverage can have a hole in the middle
+    #: — buy something and leave it unpriced for a week — and "covered from X to Y" would
+    #: then claim a continuity the data does not have.
+    covered_days: int
+    total_days: int
+    moves: list[SuspiciousMoveOut]
+
+
+class DraftIn(BaseModel):
+    symbol: str
+    txn_type: str
+    quantity: Decimal
+    price: Decimal
+    trade_date: dt.date
+    exchange: str | None = None
+    name: str | None = None
+    asset_class: str | None = None
+    currency: str | None = None
+    fx_rate_inr: Decimal | None = None
+
+
+class DraftOut(BaseModel):
+    """What was understood, costed and validated — before anything is written."""
+
+    symbol: str
+    name: str
+    exchange: str
+    asset_class: str
+    txn_type: str
+    trade_date: dt.date
+    quantity: Decimal
+    price: Decimal
+    currency: str
+    fx_rate_inr: Decimal
+    charges_inr: Decimal
+    prepaid_tax_inr: Decimal
+    gross_inr: Decimal
+    net_inr: Decimal
+    warnings: list[str]
+    creates_instrument: bool
+
+
+class ReverseIn(BaseModel):
+    note: str | None = None
