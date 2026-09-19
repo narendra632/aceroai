@@ -463,6 +463,11 @@ class Instrument(Base):
     exchange: Mapped[str] = mapped_column(sa.Text)
     isin: Mapped[str | None] = mapped_column(sa.Text)
     amfi_scheme_code: Mapped[str | None] = mapped_column(sa.Text)
+    #: Angel One's numeric instrument ID — the same number as `FinInstrmId` in NSE's bhavcopy,
+    #: which is where it is read from. Migration 016.
+    angel_token: Mapped[str | None] = mapped_column(sa.Text)
+    #: CoinGecko's slug ("bitcoin"). A ticker is not unique across coins; this is.
+    coingecko_id: Mapped[str | None] = mapped_column(sa.Text)
     name: Mapped[str] = mapped_column(sa.Text)
     asset_class: Mapped[str] = mapped_column(sa.Text)
     currency: Mapped[str] = mapped_column(sa.Text)

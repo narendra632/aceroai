@@ -29,6 +29,7 @@ from app.api.schemas import (
     DraftOut,
     HoldingDetailOut,
     HoldingOut,
+    PriceRefreshOut,
     ReverseIn,
     SummaryOut,
     TotalsOut,
@@ -38,6 +39,7 @@ from app.db.models import Instrument, Transaction, User
 from app.db.session import get_db
 from app.services.errors import NotFound
 from app.services.investments import entry, history, overview
+from app.services.marketdata import feed
 
 router = APIRouter(prefix="/api/investments", tags=["investments"])
 
@@ -120,6 +122,23 @@ def get_summary(
         unpriced_cost_inr=view.unpriced_cost_inr,
         returns=view.returns,
     )
+
+
+@router.post("/prices/refresh")
+def refresh_prices(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PriceRefreshOut:
+    """Fetch live prices for holdings whose price is stale, and only those.
+
+    The page calls this in the background when it opens and reloads if anything was written,
+    so the figures appear at once and freshen a moment later. The assistant's portfolio tools
+    call the same `feed.refresh_stale` — one implementation, two callers.
+
+    Never fails because a source did: an unreachable source is named in `failed`.
+    """
+    report = feed.refresh_stale(db)
+    return PriceRefreshOut(written=sum(report.written.values()), failed=sorted(report.failed))
 
 
 @router.get("/holdings/{symbol}")

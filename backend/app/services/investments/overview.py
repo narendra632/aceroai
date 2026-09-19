@@ -31,6 +31,17 @@ ZERO = Decimal(0)
 #: period, and chaining a single point produces a confident zero.
 MIN_TWR_DAYS = 2
 
+#: The window the time-weighted return is reported over.
+#:
+#: ⚠ **Not since the first purchase**, and the reason is arithmetic rather than taste. Chained
+#: returns never forget: this book fell 73% in its first fifteen months, when it held ₹990 of
+#: crypto, so the since-start figure is -74% and needs a **290% gain** to reach zero. It would
+#: stay deeply negative through years of good decisions — a number that cannot respond to what
+#: the user does next is one they will learn to ignore. A rolling year is what fund factsheets
+#: report, for the same reason. The since-start figure is still computed, and stated in the
+#: explanation, because hiding it would be the opposite mistake.
+TWR_WINDOW_DAYS = 365
+
 
 @dataclass(frozen=True)
 class Return:
@@ -48,6 +59,31 @@ class Return:
     unavailable_because: str | None = None
     covers_from: dt.date | None = None
     covers_to: dt.date | None = None
+    #: One short line under the figure — the same fact in rupees, at a glance.
+    headline: str | None = None
+    #: The figure in one plain sentence, in the user's own rupees. ⚠ Not decoration: a
+    #: percentage labelled "XIRR" means nothing to someone who has not met the term, and a
+    #: number that is not understood is not information. Built from the same values as the
+    #: figure itself, so the sentence can never disagree with it.
+    explanation: str | None = None
+
+
+def _rupees(amount: Decimal) -> str:
+    """₹1,03,924.93 — Indian digit grouping, two decimals, sign in front."""
+    sign = "-" if amount < 0 else ""
+    whole, _, paise = f"{abs(amount):.2f}".partition(".")
+    head, tail = whole[:-3], whole[-3:]
+    groups = []
+    while len(head) > 2:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    if head:
+        groups.insert(0, head)
+    return f"{sign}₹{','.join([*groups, tail])}.{paise}"
+
+
+def _pct_words(rate: Decimal) -> str:
+    return f"{abs(rate) * 100:.2f}%"
 
 
 @dataclass
@@ -283,11 +319,84 @@ def _money_weighted(
     rate = returns.xirr([*flows, (dt.date.today(), terminal)])
     if rate is None:
         return Return(kind, label, measures, None, "the cash flows do not converge on a rate")
-    return Return(kind, label, measures, rate, covers_from=flows[0][0], covers_to=dt.date.today())
+
+    put_in = -sum((a for _, a in flows if a < 0), ZERO)
+    taken_out = sum((a for _, a in flows if a > 0), ZERO)
+    so_far = (
+        f"You have put in {_rupees(put_in)}"
+        + (f" and taken out {_rupees(taken_out)}" if taken_out else "")
+        + f"; what you hold is worth {_rupees(terminal)} today."
+    )
+    verb = "grows" if rate >= 0 else "shrinks"
+    explanation = (
+        f"{so_far} Allowing for how long each rupee has been in, that is the same as a "
+        f"savings account that {verb} by {_pct_words(rate)} a year."
+    )
+    return Return(
+        kind,
+        label,
+        measures,
+        rate,
+        covers_from=flows[0][0],
+        covers_to=dt.date.today(),
+        headline=f"{_rupees(put_in)} in → {_rupees(terminal)} today",
+        explanation=explanation,
+    )
 
 
-def _time_weighted(points: list[history.Point], flows: list[tuple[dt.date, Decimal]]) -> Return:
-    """Chained across sub-periods delimited by cash flows.
+def _twr_over(
+    run: list[history.Point], by_day: dict[dt.date, Decimal], first_flow_day: dt.date | None
+) -> Decimal | None:
+    """Chain one stretch of days.
+
+    ⚠ **One sub-period per day**, with any purchase counted from the START of its day:
+
+        day's return = value today / (value yesterday + money added today) - 1
+
+    The ledger has a value for every day of the run, so nothing about timing needs to be
+    assumed. This replaced sub-periods cut at each purchase with Modified Dietz's default 0.5
+    weight — which treated every purchase as though made HALFWAY through its period, when the
+    periods were cut at purchases and so every one fell at the END. On the real book that was
+    not a rounding error: a five-month stretch holding ₹915 of crypto fell 58% and was
+    reported as -15.6%.
+
+    `flows` are signed from the investor's side (money out is negative); a purchase ADDS to
+    the portfolio, so the sign flips crossing the boundary. A sale does the reverse.
+    """
+    periods = [
+        returns.SubPeriod(
+            start_value=prev.value_inr,
+            end_value=point.value_inr,
+            net_flow=-by_day.get(point.day, ZERO),
+            flow_weight=Decimal(1),
+        )
+        for prev, point in zip(run, run[1:], strict=False)
+    ]
+    # ⚠ The very first purchase is a purchase day like any other. When the stretch starts on
+    # the day money first went in, that day is chained from nothing: worth that evening ÷ paid.
+    # Without this the first day's loss — the price paid above the market, the charges — was
+    # dropped while every later purchase day's was counted. On the real book that silently left
+    # out a 10.5% first-day loss (₹989.99 paid for crypto worth ₹886.01 that evening).
+    if run[0].day == first_flow_day:
+        periods.insert(
+            0,
+            returns.SubPeriod(
+                start_value=ZERO,
+                end_value=run[0].value_inr,
+                net_flow=-by_day[run[0].day],
+                flow_weight=Decimal(1),
+            ),
+        )
+    return returns.twr(periods)
+
+
+def _time_weighted(
+    points: list[history.Point],
+    flows: list[tuple[dt.date, Decimal]],
+    *,
+    window_days: int | None = TWR_WINDOW_DAYS,
+) -> Return:
+    """How the holdings themselves moved, over a rolling year — see `TWR_WINDOW_DAYS`.
 
     ⚠ Computable only over days the value series actually covers, which is why this is the
     measure that goes missing first. It needs a valuation at each boundary, and a valuation
@@ -297,8 +406,8 @@ def _time_weighted(points: list[history.Point], flows: list[tuple[dt.date, Decim
     kind, label = "time_weighted", "TWR"
     measures = "the ideas — with the effect of cash-flow timing removed"
 
-    run = _longest_valued_run(points)
-    if len(run) < MIN_TWR_DAYS:
+    full = _longest_valued_run(points)
+    if len(full) < MIN_TWR_DAYS:
         return Return(
             kind,
             label,
@@ -311,35 +420,57 @@ def _time_weighted(points: list[history.Point], flows: list[tuple[dt.date, Decim
     by_day: dict[dt.date, Decimal] = {}
     for day, amount in flows:
         by_day[day] = by_day.get(day, ZERO) + amount
+    first_flow_day = min(by_day) if by_day else None
 
-    periods: list[returns.SubPeriod] = []
-    start = run[0]
-    pending = ZERO
-    for point in run[1:]:
-        flow = by_day.get(point.day, ZERO)
-        pending += flow
-        if flow != ZERO:
-            periods.append(
-                returns.SubPeriod(
-                    start_value=start.value_inr,
-                    end_value=point.value_inr,
-                    # `flows` are signed from the investor's side: money out is negative. A
-                    # purchase ADDS to the portfolio, so the sign flips crossing the boundary.
-                    net_flow=-pending,
-                )
-            )
-            start, pending = point, ZERO
-    if start is not run[-1]:
-        periods.append(
-            returns.SubPeriod(
-                start_value=start.value_inr, end_value=run[-1].value_inr, net_flow=-pending
-            )
-        )
+    windowed = window_days is not None and len(full) > window_days + 1
+    run = full[-(window_days + 1) :] if windowed else full
 
-    rate = returns.twr(periods)
+    rate = _twr_over(run, by_day, first_flow_day)
     if rate is None:
         return Return(kind, label, measures, None, "no complete sub-period to chain")
-    return Return(kind, label, measures, rate, covers_from=run[0].day, covers_to=run[-1].day)
+
+    hundred = (Decimal(100) * (1 + rate)).quantize(Decimal(1))
+    span = "12 months" if windowed else f"since {full[0].day:%d %b %Y}"
+    headline = f"₹100 → ₹{hundred} over {span}"
+
+    explanation = (
+        "It counts only how your holdings moved, ignoring how much money was in them — so a "
+        "stretch when you held a little counts as much as one when you held a lot. "
+    )
+    if windowed:
+        lifetime = _twr_over(full, by_day, first_flow_day)
+        if lifetime is not None and lifetime < 0:
+            back = ((1 / (1 + lifetime)) - 1) if lifetime > -1 else None
+            explanation += (
+                f"Since your first purchase on {full[0].day:%d %b %Y} it is "
+                f"{_pct_words(lifetime)} down"
+                + (
+                    f", which would need a {_pct_words(back)} gain to get back to level"
+                    if back
+                    else ""
+                )
+                + " — chained returns never forget an early fall, so that figure stays "
+                "negative for years whatever you do next. This card is the rolling year, "
+                "which is what a fund factsheet reports."
+            )
+        elif lifetime is not None:
+            explanation += (
+                f"Since your first purchase on {full[0].day:%d %b %Y} it is "
+                f"{_pct_words(lifetime)} {'up' if lifetime >= 0 else 'down'}."
+            )
+    else:
+        explanation += "How your money itself has done is the other figure."
+
+    return Return(
+        kind,
+        label,
+        measures,
+        rate,
+        covers_from=run[0].day,
+        covers_to=run[-1].day,
+        headline=headline,
+        explanation=explanation,
+    )
 
 
 def _longest_valued_run(points: list[history.Point]) -> list[history.Point]:

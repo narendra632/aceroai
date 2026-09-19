@@ -204,18 +204,11 @@
 
 ## Next (planned, in order)
 
-1. **Investments Phase 1b — market data.** Angel One for Indian equity, Twelve Data for US,
-   CoinGecko, AMFI for NAVs. Needs the Angel One account. ⚠ It carries three things the page
-   is waiting on: the **value line** on the chart (absent until prices exist), the
-   **time-weighted return** (which needs valuations at sub-period boundaries), and the
-   **corporate-action feed** that closes the accepted risk. It also owes the value half of
-   the Groww comparison.
-
-2. **MCP-powered real-world capabilities** — expose the tools Narendra actually
+1. **MCP-powered real-world capabilities** — expose the tools Narendra actually
    uses through MCP so Acero can act in the real world, not just chat. The tool
    registry (`core/tools/`) was shaped with this in mind.
 
-3. **Beyond** — additional features as they come up; this list grows over time.
+2. **Beyond** — additional features as they come up; this list grows over time.
 
 ### Small things the jobs change made cheap
 
@@ -258,17 +251,19 @@ cost basis matches to the paisa, and **Groww's own published XIRR is reproduced 
   corporate-action warning. ⚠ **Half of its acceptance test is owed to Phase 1b:** holdings,
   quantities and invested were checked against Groww line by line, and *value* cannot be
   compared until prices exist.
-- **Phase 1b — market data.** Angel One for Indian equity, Twelve Data for US, CoinGecko,
-  AMFI. Needs the Angel One account. ⚠ Also brings the corporate-action feed, which closes the
-  accepted risk below.
+- ~~**Phase 1b — market data.**~~ **Built** (`add-market-data`, 2026-09-19). NSE's own
+  bhavcopy for Indian closes, Angel One for live NSE prices, Twelve Data for SPCX and USD/INR,
+  CoinGecko for crypto, AMFI for NAVs; history fills itself; the value line and the
+  time-weighted return now exist. See `docs/INVESTMENTS.md` §14. ⚠ **Owed:** the value half of
+  the Groww comparison, and two reachability checks from the VM (Angel One and NSE refuse
+  some cloud IPs) — `openspec/changes/add-market-data/tasks.md` §8.
 - **Phase 2 — scoring and proposals.** ⚠ **Blocked on framework content**: the A-imperatives,
   the bottleneck taxonomy, and Soros flags 1–5 and 7–9 are referenced by the technical spec but
   never enumerated in it.
 
-**⚠ Accepted risk until Phase 1b:** no automatic corporate actions. A split or bonus must be
-entered by hand, and an unrecorded one shows as a large phantom loss. Mitigated by a
-page-level warning on any holding that moved more than 25% in a day — which arrives with the
-page.
+**⚠ Accepted risk, narrowed by Phase 1b:** a split or bonus is still entered by hand, and an
+unrecorded one shows as a phantom loss. Now a share-changing action on a held NSE stock is
+*announced* a few days before its ex-date, and the 25% move warning stays as the backstop.
 
 ## Owed work — switched off, not fixed
 

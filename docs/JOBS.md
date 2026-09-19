@@ -64,6 +64,9 @@ Each job says how late it may still run.
 | `db_backup` | 02:30 | +6 h | A night skipped in silence is a night with no copy |
 | `restore_check` | 1st, 04:00 | +12 h | Monthly; a day late proves the same thing |
 | `backup_watch` | 10:00 | +6 h | It reports a silence, so it must not join one |
+| `prices_daily` | 07:30 | +12 h | Fills every missing close; late is as good as on time |
+| `prices_india_close` | 19:00 weekdays | +12 h | NSE's file is out by ~18:30; tomorrow's run also catches up |
+| `corporate_actions_watch` | 20:00 weekdays | +12 h | Actions are announced days before their ex-date |
 
 ⚠ **A trap, found by measurement.** The window must be *shorter than the gap between runs*.
 A daily job with a 24-hour window can never be missed — its occurrences are 24 hours apart,

@@ -229,6 +229,20 @@ class Settings(BaseSettings):
     span_retention_days: int = 30
     turn_retention_days: int = 400  # over a year, so year-on-year comparisons stay live
 
+    # --- market data (Investments Phase 1b) ---
+    # Empty disables that provider: its holdings stay manually priced and are shown as such.
+    # Import never requires these — CI has none.
+    #
+    # Angel One is a read-only price pipe on an account that is never funded or traded. The
+    # adapter only knows the URLs for login, quote and candles; there is no order code to
+    # misuse. The MPIN and TOTP secret together are a full login — never log them.
+    angel_one_api_key: str = ""
+    angel_one_client_code: str = ""
+    angel_one_mpin: str = ""
+    angel_one_totp_secret: str = ""  # the text under the QR code, not a 6-digit code
+    coingecko_api_key: str = ""  # Demo plan; attribution "Price data by CoinGecko" required
+    twelve_data_api_key: str = ""  # Basic plan: US equities + USD/INR
+
     # --- production ---
     app_env: str = "dev"  # "prod" enables the startup secret check
     # The auth cookie. In prod behind HTTPS with a cross-site frontend (Vercel),

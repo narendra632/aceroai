@@ -1,7 +1,55 @@
-"""Test fixtures. Uses the real Postgres (models need PG-only types), but scopes
-all data to dedicated test emails so a shared dev DB's real rows are untouched.
-The LLM is replaced with a fake async generator so tests never hit the network.
+"""Test fixtures. Uses the real Postgres (models need PG-only types), in a database of its
+own. The LLM is replaced with a fake async generator so tests never hit the network.
+
+⚠ **The suite runs in `<database>_test`, never in the development database.** It used to
+share the dev database and scope its rows by test emails and "pytest" source prefixes. That
+held while the dev database was nearly empty, and failed three separate ways once it held a
+real life: seeded instruments collided with fixtures, real traces aged past the retention
+limit and were counted by a retention test, and — the one that forced this — the first real
+price feed gave HDFCBANK a close from yesterday, so eighteen tests that price a fictional
+book on real symbols saw a real price instead of their own. Every one of those was a test
+correctly assuming it controlled its own data. Now it does.
+
+The scoping below is kept: it is what keeps one test from seeing another's rows.
 """
+
+# ruff: noqa: E402 - the test database must be chosen before any app module creates an engine
+
+# --- a database of its own. Must run before anything imports app.db.session. ---------------
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from sqlalchemy import create_engine, make_url
+from sqlalchemy import text as _sql
+
+from app.config import settings
+
+_dev_url = make_url(settings.database_url)
+if not (_dev_url.database or "").endswith("_test"):
+    _test_url = _dev_url.set(database=f"{_dev_url.database}_test")
+    settings.database_url = _test_url.render_as_string(hide_password=False)
+
+    _admin = create_engine(_dev_url, isolation_level="AUTOCOMMIT")
+    with _admin.connect() as conn:
+        exists = conn.execute(
+            _sql("SELECT 1 FROM pg_database WHERE datname = :n"), {"n": _test_url.database}
+        ).first()
+        if not exists:
+            conn.execute(_sql(f'CREATE DATABASE "{_test_url.database}"'))
+    _admin.dispose()
+
+# Migrated in a subprocess on every run (a no-op when already at head): alembic's env.py
+# calls logging.fileConfig, which would disable every logger already created in this process.
+_backend = Path(__file__).resolve().parents[1]
+subprocess.run(
+    [sys.executable, "-m", "alembic", "upgrade", "head"],
+    cwd=_backend,
+    env={**os.environ, "DATABASE_URL": settings.database_url},
+    check=True,
+    capture_output=True,
+)
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,7 +105,6 @@ TEST_PREFIX = "pytest-job-"
 FX_TEST_SOURCE = "pytest"
 TEST_SOURCE = FX_TEST_SOURCE
 
-FX_TEST_SOURCE_MATCH = FxObservation.source.like(f"{FX_TEST_SOURCE}%")
 PRICE_TEST_SOURCE_MATCH = PriceObservation.source.like(f"{TEST_SOURCE}%")
 
 
@@ -227,18 +274,56 @@ def _purge(db):
     # portfolio curve, valuing a holding nobody had priced. Nothing had ever written an FX
     # observation before, so the gap was invisible rather than absent — which is the usual
     # shape of a teardown bug.
-    if (
-        db.execute(select(FxObservation.pair).where(FX_TEST_SOURCE_MATCH).limit(1)).first()
-        is not None
-    ):
+    #
+    # Since the suite moved to a database of its own, every rate in it is a test's: the market
+    # data tests write under real source names ("TWELVE_DATA"), so all rows go, not only
+    # "pytest"-marked ones.
+    if db.execute(select(FxObservation.pair).limit(1)).first() is not None:
         db.execute(text("ALTER TABLE fx_observations DISABLE TRIGGER fx_observations_append_only"))
         try:
-            db.execute(delete(FxObservation).where(FX_TEST_SOURCE_MATCH))
+            db.execute(delete(FxObservation))
         finally:
             db.execute(
                 text("ALTER TABLE fx_observations ENABLE TRIGGER fx_observations_append_only")
             )
     db.commit()
+
+
+@pytest.fixture(autouse=True)
+def no_market_data_network(monkeypatch):
+    """⚠ No test reaches a real price source.
+
+    The developer's `.env` holds live market-data keys, and the portfolio tools refresh stale
+    prices before answering — so without this, a tool test would log in to Angel One and
+    spend Twelve Data's daily allowance. The keys are blanked, and any HTTP client the market
+    data code builds fails instantly unless a test hands it a mock transport of its own.
+    """
+    import httpx
+
+    from app.services.marketdata import angel_one
+    from app.services.marketdata import http as md_http
+
+    for key in (
+        "angel_one_api_key",
+        "angel_one_client_code",
+        "angel_one_mpin",
+        "angel_one_totp_secret",
+        "coingecko_api_key",
+        "twelve_data_api_key",
+    ):
+        monkeypatch.setattr(settings, key, "")
+
+    def refuse(request):
+        raise httpx.ConnectError("tests do not reach real price sources", request=request)
+
+    monkeypatch.setattr(
+        md_http, "client", lambda: httpx.Client(transport=httpx.MockTransport(refuse))
+    )
+    monkeypatch.setattr(md_http, "BACKOFF", (0.0, 0.0))
+    monkeypatch.setattr(md_http, "_down_until", {})
+    angel_one.reset_session()
+    yield
+    angel_one.reset_session()
 
 
 @pytest.fixture

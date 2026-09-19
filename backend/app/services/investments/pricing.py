@@ -15,6 +15,7 @@ import datetime as dt
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -39,9 +40,20 @@ STALE_AFTER: dict[str, dt.timedelta] = {
     "CRYPTO": dt.timedelta(hours=4),
 }
 
-#: Indian market hours, local. Used only to pick which staleness limit applies — not to decide
-#: whether anything may run.
-_IN_OPEN, _IN_CLOSE = dt.time(9, 15), dt.time(15, 30)
+#: Each market's hours, **in its own timezone**. Used only to pick which staleness limit
+#: applies — not to decide whether anything may run.
+#:
+#: ⚠ This used to compare the UTC clock against Indian hours, and applied Indian hours to US
+#: stocks too. Nothing showed it while every price was typed; the first real feed did —
+#: "open" and "closed" were five and a half hours out for NSE and wrong entirely for Nasdaq.
+_SESSIONS: dict[str, tuple[ZoneInfo, dt.time, dt.time]] = {
+    "EQUITY_IN": (ZoneInfo("Asia/Kolkata"), dt.time(9, 15), dt.time(15, 30)),
+    "EQUITY_US": (ZoneInfo("America/New_York"), dt.time(9, 30), dt.time(16, 0)),
+}
+#: A fund's NAV is struck after the Indian close; AMFI's publication deadline is 23:00.
+_NAV_TZ, _NAV_PUBLISHED = ZoneInfo("Asia/Kolkata"), dt.time(23, 0)
+#: Slack on "since the last close": an observation stamped at the close itself is current.
+_GRACE = dt.timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -70,15 +82,46 @@ class Mark:
         return f"{seconds // 86400} days old"
 
 
+def _last_weekday_at(local: dt.datetime, moment: dt.time) -> dt.datetime:
+    """The most recent weekday `moment` at or before `local`, in `local`'s timezone."""
+    day = local.date()
+    if local.time() < moment:
+        day -= dt.timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= dt.timedelta(days=1)
+    return dt.datetime.combine(day, moment, local.tzinfo)
+
+
 def staleness_limit(asset_class: str, *, at: dt.datetime | None = None) -> dt.timedelta:
-    """The limit for this asset class right now, accounting for whether the market is open."""
+    """The limit for this asset class right now.
+
+    ⚠ **A closing price is current until the next session opens** — overnight, over a weekend,
+    across a holiday that falls between. So after the close the limit is "since the last
+    close", never less than the stated floor. A fixed 20 hours meant Friday's close went stale
+    at noon on Saturday and every stock in the book spent the weekend marked stale, which is
+    the fastest way to teach a reader to ignore the word.
+
+    The same holds for a fund: Friday's NAV is the latest that exists until Monday evening.
+    """
     at = at or dt.datetime.now(dt.UTC)
-    if asset_class in ("MF_IN", "CRYPTO"):
-        return STALE_AFTER[asset_class]
-    weekday = at.weekday() < 5
-    local = at.time()
-    open_now = weekday and _IN_OPEN <= local <= _IN_CLOSE
-    return STALE_AFTER[f"{asset_class}_{'OPEN' if open_now else 'CLOSED'}"]
+    if asset_class == "CRYPTO":
+        return STALE_AFTER["CRYPTO"]
+    if asset_class == "MF_IN":
+        local = at.astimezone(_NAV_TZ)
+        # The newest NAV that can exist is the last business day whose publication deadline
+        # has passed. Anything at least that recent is current.
+        # Measured from the START of that day, because a NAV is one number per date: when in
+        # the evening it happened to be read (and so stamped) says nothing about its age.
+        newest_day = _last_weekday_at(local, _NAV_PUBLISHED).date()
+        day_start = dt.datetime.combine(newest_day, dt.time(0, 0), _NAV_TZ)
+        return max(STALE_AFTER["MF_IN"], at - day_start)
+
+    tz, opens, closes = _SESSIONS.get(asset_class, _SESSIONS["EQUITY_IN"])
+    local = at.astimezone(tz)
+    if local.weekday() < 5 and opens <= local.time() <= closes:
+        return STALE_AFTER[f"{asset_class}_OPEN"]
+    last_close = _last_weekday_at(local, closes)
+    return max(STALE_AFTER[f"{asset_class}_CLOSED"], at - last_close + _GRACE)
 
 
 def record(

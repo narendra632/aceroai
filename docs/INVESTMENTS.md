@@ -1,8 +1,8 @@
 # INVESTMENTS.md — the ledger, and why it is shaped this way
 
-> **Phase 1 of the Investments module: the bookkeeper, with no analyst on top of it.**
-> No market feed, no scoring, no proposals, not one model call. Scoring and proposals are
-> Phase 2; live prices are Phase 1b.
+> **Phases 1 and 1b of the Investments module: the bookkeeper, fed real prices, with no
+> analyst on top of it.** No scoring, no proposals, not one model call — those are Phase 2.
+> Where prices come from is §14.
 
 ---
 
@@ -77,7 +77,8 @@ single combined book would silently discard it.
 A price is a row carrying `source`, `observed_at` and a quality flag. **A price you typed and
 a price an adapter fetched are the same kind of fact**, differing only in `source` — which is
 what let all of valuation, staleness and returns be built and proven before any market feed
-exists. Phase 1b changes one column's value and nothing else.
+exists. Phase 1b did change one column's value and nothing else — and then found the
+staleness rule below had been wrong all along, which no typed price could have shown.
 
 **Staleness applies regardless of source.** A price typed nine days ago is exactly as stale as
 a dead feed's. Exempting typed prices would have shipped the staleness logic untested, to run
@@ -86,9 +87,15 @@ first in anger against real market data.
 | Asset | Stale after | Why that number |
 |---|---|---|
 | Indian equity, market open | 30 min | It moves every few seconds |
-| Indian equity, after close | **20 h** | ⚠ The closing price **is** the current price until the next open. Flagging it at 30 min overnight would mark the whole portfolio stale every evening — which is how a staleness signal becomes noise and stops being read |
-| Mutual fund NAV | 48 h | Publishes once daily; 24 h would cry wolf every weekend |
+| Indian equity, after close | **until the next open** (never under 20 h) | ⚠ The closing price **is** the current price until the next open — overnight, and over a weekend. Flagging it at 30 min overnight would mark the whole portfolio stale every evening, which is how a staleness signal becomes noise and stops being read |
+| US equity | the same two rules, in **New York** hours | |
+| Mutual fund NAV | **until the next business day's NAV** (never under 48 h) | Publishes once daily; Friday's NAV is the latest that exists until Monday evening |
 | Crypto | 4 h | Trades 24/7, so there is no settled price to fall back on |
+
+⚠ **Each market's hours are read in its own timezone.** Until the first real feed, this rule
+compared the UTC clock against Indian hours (5½ hours out), applied Indian hours to Nasdaq,
+and let Friday's close go stale at Saturday lunchtime. Every price was typed, so nothing
+showed it. `pricing.staleness_limit`; tests in `test_investments_entry.py`.
 
 **An unpriced holding reports `None`, never zero**, and never a last-known value shown
 silently as current. A foreign holding with no exchange rate is reported *unpriced* rather
@@ -140,6 +147,31 @@ matter because all three are invisible:
 Newton–Raphson with a bisection fallback, pure `Decimal`, no dependencies. `quantstats` and
 `pyfolio` were rejected: pandas + numpy + scipy + matplotlib + seaborn + yfinance on a 1 GB
 box, for about ten formulas worth 150 lines.
+
+**TWR is chained daily**, because the value series has every day: each day's return is
+`value today ÷ (value yesterday + money added today)`, the purchase counted from the start of
+its day, and the first purchase day chained from nothing (`worth that evening ÷ paid`). ⚠ It
+was once cut at each purchase with Modified Dietz's default 0.5 weight — which treated every
+purchase as made halfway through its period when every one fell at the end — and it skipped
+the first purchase day. On the real book those turned **-74.37%** into **-18.85%**.
+
+**TWR is reported over a rolling year**, not since the first purchase. ⚠ Chained returns
+never forget: this book fell 73% in its first fifteen months, when it held ₹990 of crypto, so
+the since-start figure is **-74%** and needs a **290% gain** to reach zero. It would stay
+deeply negative through years of good decisions, and a number that cannot respond to what the
+user does next is one they stop reading. A factsheet reports a rolling year for the same
+reason. The since-start figure is still computed and stated in the explanation, because
+hiding it would be the opposite mistake.
+
+**Each figure carries a sentence in rupees** (`Return.explanation`), because a percentage
+labelled "XIRR" means nothing to someone meeting the term. XIRR is *per year*: "you have put
+in ₹X and it is worth ₹Y; that is a savings account that shrinks by 1.79% a year". TWR is a
+*total since a date*: "₹100 → ₹40 over 12 months". The page says which is which — "per year", "12 months to
+<date>" — before it shows either number, and only the elaboration sits behind an "i".
+
+Checked on the real book (2026-09-19): each rupee grown at the reported XIRR from its own
+purchase date sums to today's value to the paisa; the TWR equals an independent hand chain
+(first day -10.5%, crypto-only stretch to Feb 2026 -73.1%, everything since -4.6%).
 
 **Currency is decomposed on every non-INR holding** — `r_local`, `r_fx`, `r_total_inr` — using
 the rate stored on each transaction. Without it, a weakening rupee silently credits the system
@@ -244,19 +276,16 @@ is honest where an invented breakdown would not be.
 
 ## 10. What is deliberately absent
 
-- **No market feed.** Prices are typed. Phase 1b.
 - **No scoring, proposals or gates.** Phase 2, and it needs the framework documents.
-- **No automatic corporate actions** — they need the exchange feed. Until then a split or
-  bonus is entered by hand as a `SPLIT`/`BONUS` transaction, which conserves total cost basis.
-  ⚠ **Accepted risk, now mitigated:** an unrecorded corporate action shows as a large phantom
-  loss. The page flags any holding whose price moved more than 25% between two observations
-  four days or fewer apart — see §12.
+- **No automatic corporate-action transactions.** A split or bonus on a held NSE stock is
+  *announced* (§14) and then entered by hand as a `SPLIT`/`BONUS` transaction, which
+  conserves total cost basis. Writing it automatically would mean parsing a ratio out of
+  NSE's free text into an append-only ledger with nobody reading it. An unrecorded action
+  still shows as a phantom loss, and the page still flags any 25% move — see §12.
 - **No valuation cache.** The fold is fast; a cache that is never wrong is also never tested.
 - **No tax computation.** Holding periods, lots and flags — yes. A liability figure — never.
-- **No way to type a price.** ⚠ A hand-entry screen was designed and then cut on Narendra's
-  instruction once the Angel One feed moved into the same week: it would have been obsolete
-  before it was reviewed. The consequence is accepted and visible — until the feed lands the
-  page shows what the book **cost** and not what it is **worth**.
+- **No screen for typing a price.** Cut once the feed was a week away; prices now arrive
+  by themselves (§14). The assistant's `record_price` tool still records one by hand.
 
 ---
 
@@ -392,3 +421,69 @@ Tests: `test_investments_ledger.py` (the fold, against Groww),
 `test_investments_returns_and_costs.py` (XIRR against Groww, charges against the reference),
 `test_investments_entry.py` (validation, correction, staleness),
 `test_investments_seed.py` (the script).
+
+---
+
+## 14. Where prices come from (Phase 1b)
+
+Every source was **called live before anything was designed around it** — the results are
+§0 of `openspec/changes/add-market-data/tasks.md`. Nothing here rests on documentation alone.
+
+| Holdings | Daily close | Live price | Key |
+|---|---|---|---|
+| NSE equities | **NSE bhavcopy** — the exchange's own file | **Angel One** quote | Angel One |
+| Mutual funds | **AMFI** `NAVAll.txt`; history via mfapi.in | — (one NAV a day) | none |
+| US equities + USD/INR | **Twelve Data** daily series | Twelve Data quote | Twelve Data |
+| Crypto | **CoinGecko** daily history | CoinGecko price | CoinGecko |
+
+**Why NSE closes do not come from Angel One.** While this was being built, Angel's API host
+refused connections for over an hour while its other hosts answered, and its forum shows the
+same unexplained outages for years. The bhavcopy needs no login, matched Angel's closes to
+the paisa, and its `FinInstrmId` column *is* Angel's instrument token — so Angel's 35 MB
+instrument master is never parsed on a 1 GB server. Angel is asked only for what a broker
+uniquely has: the price while the market is open. If NSE's file cannot be fetched for a day,
+Angel's daily candles fill it.
+
+**Angel One cannot trade from here.** `marketdata/angel_one.py` contains exactly three route
+addresses — login, quote, candles — and a test asserts it names no others. SmartAPI's order,
+holdings and GTT routes live on the same host; none of their addresses exist in this
+codebase. The app's registered static IP (a SEBI rule from April 2026) gates orders only.
+
+**History fills itself.** `feed.fill_closes` fills every missing day from a holding's first
+trade to today, and every write is `ON CONFLICT DO NOTHING`, so a re-run writes nothing. The
+first run on any database *is* the backfill. A holiday's 404 is not remembered anywhere: once
+a later close exists, the gap is behind the starting point.
+
+⚠ **CoinGecko's free plan returns 365 days.** Days older than that come from **Binance's
+public market data** (`data-api.binance.vision`, keyless): the USDT close × that day's
+USD/INR from Twelve Data, stamped like CoinGecko's. On 17 overlapping days the two agreed to
+a median 0.1% (largest 0.7%), so the join is invisible. The value line and the TWR now start
+at the first purchase, 17 Nov 2024. Real prices, never a line drawn between the purchase
+price and the first known day: that would put an invented history under both figures.
+
+Note what the market price shows for crypto: the INR paid on CoinSwitch was above the global
+price (DOGE ~14%, ZIL ~4.5%), so the holding was worth less than it cost on the evening it was
+bought. That is real — it is what the premium cost — and it is in both returns.
+
+**Stamps.** A close is stamped when its market closed (15:30 IST, 16:00 New York) and a NAV
+at 21:00 IST on its date, so each lands on the right calendar day for the value curve.
+Angel's candles say `T00:00+05:30`; only the date is taken.
+
+**Live prices are fetched only when stale.** The page draws from what is recorded, then calls
+`POST /api/investments/prices/refresh` in the background and reloads if anything was written.
+The assistant's `get_portfolio` calls the same `feed.refresh_stale`. A source that fails is
+left alone for 10 minutes, so repeated opens do not each wait out its timeout.
+
+| Job | When (IST) | Does |
+|---|---|---|
+| `prices_india_close` | 19:00 weekdays | NSE closes |
+| `prices_daily` | 07:30 daily | US closes, USD/INR, fund NAVs, crypto |
+| `corporate_actions_watch` | 20:00 weekdays | Announces a split, bonus or consolidation on a held stock, once |
+
+⚠ NSE's corporate-action feed names **companies, not symbols**, and only covers ex-dates a
+few days ahead. Matching is by normalised name prefix of at least 8 characters, so "HDFC
+Bank" never claims "HDFC Life". A server down for several days running could miss an action;
+the 25% move warning (§12) is the backstop.
+
+Code: `backend/app/services/marketdata/` — one module per source, plus `feed.py`, the only
+writer — and `backend/app/jobs/prices.py`.

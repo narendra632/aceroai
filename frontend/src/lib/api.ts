@@ -1047,6 +1047,10 @@ export type PortfolioReturn = {
   unavailable_because: string | null;
   covers_from: string | null;
   covers_to: string | null;
+  /** One short line under the figure — the same fact in rupees. */
+  headline: string | null;
+  /** The longer note, shown behind an "i" rather than on the card. */
+  explanation: string | null;
 };
 
 /** A subtotal, computed on the server. ⚠ Never sum holdings in the browser to get one:
@@ -1206,6 +1210,21 @@ async function investmentError(r: Response, fallback: string): Promise<never> {
 export async function getInvestmentSummary(): Promise<InvestmentSummary> {
   const r = await req("/api/investments/summary");
   if (!r.ok) throw new Error("could not load the portfolio");
+  return r.json();
+}
+
+export type PriceRefresh = {
+  /** New prices recorded. Zero is the usual, healthy answer: nothing was stale. */
+  written: number;
+  /** Sources that could not be reached. Their holdings keep their last price, shown stale. */
+  failed: string[];
+};
+
+/** Fetch live prices for stale holdings only. The page calls this in the background on open
+ *  and reloads if anything was written — figures appear at once and freshen a moment later. */
+export async function refreshPrices(): Promise<PriceRefresh> {
+  const r = await req("/api/investments/prices/refresh", { method: "POST" });
+  if (!r.ok) throw new Error("could not refresh prices");
   return r.json();
 }
 

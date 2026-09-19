@@ -17,6 +17,7 @@ import {
   directionGlyph,
   longTermText,
   num,
+  sourceLabel,
   unpricedReason,
 } from "@/lib/investments";
 
@@ -117,7 +118,7 @@ export default function PositionSheet({ symbol, detail, loading, onClose }: Prop
                   <Row
                     label="Last price"
                     value={formatPrice(holding.mark.price, holding.currency)}
-                    hint={`${holding.mark.age_text}${holding.mark.is_stale ? " · stale" : ""} · ${holding.mark.source.toLowerCase()}`}
+                    hint={`${holding.mark.age_text}${holding.mark.is_stale ? " · stale" : ""} · ${sourceLabel(holding.mark.source)}`}
                   />
                   <Row label="Value" value={formatRupees(holding.market_value_inr)} />
                   <Row

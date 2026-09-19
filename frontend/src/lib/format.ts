@@ -156,3 +156,13 @@ export function formatDateFull(iso: string): string {
     year: "numeric",
   });
 }
+
+/** An axis label that cannot be misread. ⚠ Over a long range "May 23" is ambiguous — it is
+ *  both a day and, to some readers, a month and year — and a chart spanning three years with
+ *  bare day-month labels leaves the reader guessing which year they are looking at. */
+export function formatAxisDay(iso: string, spanDays: number): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00`);
+  return spanDays > 240
+    ? d.toLocaleDateString(undefined, { month: "short", year: "numeric" })
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}

@@ -91,17 +91,33 @@ def seeded(db, user):
 # --- access ------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "method,path",
-    [
-        ("get", "/api/investments/summary"),
-        ("get", "/api/investments/holdings/KAYNES"),
-        ("get", "/api/investments/transactions"),
-        ("get", "/api/investments/history"),
-        ("post", "/api/investments/transactions/draft"),
-        ("post", "/api/investments/transactions"),
-    ],
-)
+def _investment_routes() -> list[tuple[str, str]]:
+    """Every route on the router, read from the app itself.
+
+    ⚠ This was a hand-written list, and it had already fallen behind: the reverse route was
+    never on it, and the price-refresh route would not have been either. A list of "every
+    route" that someone has to remember to extend is a list of the routes someone remembered.
+    """
+    from app.main import app as _app
+
+    # From the OpenAPI schema, not `app.routes`: FastAPI 0.139 wraps included routers, and
+    # `app.routes` then lists none of their paths — this loop found zero routes and the test
+    # quietly checked nothing.
+    out = set()
+    for path, methods in _app.openapi()["paths"].items():
+        if not path.startswith("/api/investments"):
+            continue
+        concrete = path.replace("{symbol}", "KAYNES").replace(
+            "{txn_id}", "00000000-0000-0000-0000-000000000000"
+        )
+        for method in methods:
+            out.add((method, concrete))
+    if not out:
+        raise RuntimeError("found no investment routes — the discovery itself is broken")
+    return sorted(out)
+
+
+@pytest.mark.parametrize("method,path", _investment_routes())
 def test_every_route_requires_a_session(client, method, path):
     call = getattr(client, method)
     response = call(path, json={}) if method == "post" else call(path)

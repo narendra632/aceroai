@@ -22,6 +22,7 @@ from app.db.models import Portfolio
 from app.services.errors import Invalid, NotFound
 from app.services.investments import entry, pricing, taxrules
 from app.services.investments import portfolio as pf
+from app.services.marketdata import feed
 
 #: Drafts awaiting confirmation, keyed by a short handle the model quotes back.
 #:
@@ -235,6 +236,10 @@ def confirm_transaction(db: Session, user_id: uuid.UUID, args: dict) -> dict:
 
 def get_portfolio(db: Session, user_id: uuid.UUID, args: dict) -> dict:
     book = _book(db, user_id)
+    # The same refresh the page runs when it opens: live prices for stale holdings only, so
+    # the assistant never answers from a price the page would have shown as stale. A source
+    # that is down is not an error here — the answer says which prices are stale instead.
+    feed.refresh_stale(db)
     positions = pf.positions(db, book.id)
     marks = pricing.latest(db, [p.instrument_id for p in positions])
     valued = pricing.value(positions, marks, fx_inr=_fx_rates(db, positions, marks))
@@ -251,6 +256,7 @@ def get_portfolio(db: Session, user_id: uuid.UUID, args: dict) -> dict:
                 "value_inr": str(round(v.market_value_inr, 2)) if v.is_priced else None,
                 "unrealised_inr": str(round(v.unrealised_inr, 2)) if v.is_priced else None,
                 "price_age": v.mark.age_text if v.mark else None,
+                "price_source": v.mark.source if v.mark else None,
                 "price_is_stale": v.mark.is_stale if v.mark else None,
             }
             for v in valued

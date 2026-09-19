@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { formatDay, formatUSD } from "@/lib/format";
+import { formatAxisDay, formatDateFull, formatUSD } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /* Charts, written directly as SVG.
@@ -72,6 +72,8 @@ export function StackedArea({
 }: StackedAreaProps) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = React.useState<number | null>(null);
+  // How many days the axis spans, so a long range labels its years. Points are daily.
+  const spanDays = data.length;
 
   const pad = { top: 8, right: 8, bottom: 22, left: 52 };
   const plotW = Math.max(0, width - pad.left - pad.right);
@@ -213,7 +215,7 @@ export function StackedArea({
                 fontSize={AXIS_FONT}
                 fill="var(--muted-foreground)"
               >
-                {formatDay(d.day)}
+                {formatAxisDay(d.day, spanDays)}
               </text>
             ) : null,
           )}
@@ -227,7 +229,7 @@ export function StackedArea({
             left: Math.min(Math.max(0, x(hover) + pad.left - 70), Math.max(0, width - 170)),
           }}
         >
-          <p className="font-medium text-popover-foreground">{formatDay(data[hover].day)}</p>
+          <p className="font-medium text-popover-foreground">{formatDateFull(data[hover].day)}</p>
           {series.map((s) => (
             <p key={s.key} className="mt-1 flex items-center justify-between gap-3">
               <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -390,6 +392,8 @@ export function Lines({
 }: LinesProps) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = React.useState<number | null>(null);
+  // How many days the axis spans, so a long range labels its years. Points are daily.
+  const spanDays = data.length;
 
   const pad = { top: 10, right: 12, bottom: 22, left: 60 };
   const plotW = Math.max(0, width - pad.left - pad.right);
@@ -533,7 +537,7 @@ export function Lines({
                 fontSize={AXIS_FONT}
                 fill="var(--muted-foreground)"
               >
-                {formatDay(d.day)}
+                {formatAxisDay(d.day, spanDays)}
               </text>
             ) : null,
           )}
@@ -547,7 +551,7 @@ export function Lines({
             left: Math.min(Math.max(0, x(hover) + pad.left - 70), Math.max(0, width - 190)),
           }}
         >
-          <p className="font-medium text-popover-foreground">{formatDay(data[hover].day)}</p>
+          <p className="font-medium text-popover-foreground">{formatDateFull(data[hover].day)}</p>
           {series.map((s) => {
             const v = data[hover].values[s.key];
             return (

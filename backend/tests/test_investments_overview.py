@@ -15,7 +15,7 @@ import pytest
 
 from app.db.models import FxObservation, Portfolio, Transaction
 from app.services.errors import NotFound
-from app.services.investments import overview, pricing
+from app.services.investments import history, overview, pricing
 from tests.conftest import FX_TEST_SOURCE, TEST_SOURCE, make_instrument
 
 TODAY = dt.date.today()
@@ -357,3 +357,77 @@ def test_the_detail_carries_the_instruments_own_transactions_and_prices(db, book
 def test_an_unknown_symbol_is_not_found(db, book, user):
     with pytest.raises(NotFound):
         overview.holding_detail(db, book.id, user.id, "NOSUCH")
+
+
+def _points(values: list[str | None], start: dt.date) -> list[history.Point]:
+    return [
+        history.Point(
+            day=start + dt.timedelta(days=i),
+            invested_inr=D("0"),
+            value_inr=D(v) if v is not None else None,
+            priced=1,
+            open_holdings=1,
+        )
+        for i, v in enumerate(values)
+    ]
+
+
+def test_a_purchase_at_the_end_of_a_fall_does_not_dilute_the_fall():
+    """⚠ Regression, from the real book. ₹1,000 falls to ₹600 over four days; on the fifth,
+    ₹10,000 is added. The picks lost 40% — the time-weighted return must say about -40%.
+
+    The old version cut periods at purchases and weighted each purchase at 0.5, as if made
+    halfway through its period. That counted the ₹10,000 as invested during the fall and
+    reported -8%. On the real book it turned -58% into -15.6%.
+    """
+    start = dt.date(2026, 1, 1)
+    points = _points(["1000", "900", "800", "700", "600", "10500"], start)
+    flows = [(start + dt.timedelta(days=5), D("-10000"))]
+    twr = overview._time_weighted(points, flows)
+    assert twr.value == D("10500") / D("10600") * D("600") / D("1000") - 1
+    assert D("-0.41") < twr.value < D("-0.40")
+
+
+def test_a_purchase_day_counts_the_new_money_from_that_morning():
+    """Flat book, ₹1,000 added, the combined ₹2,000 ends the day at ₹2,200: +10% on the day."""
+    start = dt.date(2026, 1, 1)
+    points = _points(["1000", "2200"], start)
+    twr = overview._time_weighted(points, [(start + dt.timedelta(days=1), D("-1000"))])
+    assert twr.value == D("0.1")
+
+
+def test_the_first_purchase_day_counts_like_any_other():
+    """⚠ Regression. ₹1,000 paid, worth ₹900 that evening, flat after: the picks are -10%.
+    The first day used to be skipped — the chain started from the evening's ₹900 — while every
+    later purchase day was counted, so the first purchase's loss simply vanished."""
+    start = dt.date(2026, 1, 1)
+    points = _points(["900", "900"], start)
+    twr = overview._time_weighted(points, [(start, D("-1000"))])
+    assert twr.value == D("-0.1")
+
+
+def test_a_run_that_starts_after_the_first_purchase_starts_from_its_first_value():
+    """When prices only exist from later on, nothing before them is assumed."""
+    start = dt.date(2026, 1, 10)
+    points = _points(["900", "990"], start)
+    twr = overview._time_weighted(points, [(dt.date(2026, 1, 1), D("-1000"))])
+    assert twr.value == D("0.1")
+
+
+def test_the_time_weighted_figure_is_a_rolling_year():
+    """⚠ Since-inception chaining never forgets: this book's first months (₹990 of crypto,
+    -73%) would hold the figure near -74% through years of good decisions, and a number that
+    cannot respond to what the user does next is one they stop reading. A rolling year is what
+    a factsheet reports. The since-start figure is not hidden — it is in the explanation."""
+    start = dt.date(2025, 1, 1)
+    # A 50% fall in the first month, then flat for well over a year.
+    values = ["1000", "500"] + ["500"] * 400
+    twr = overview._time_weighted(_points(values, start), [(start, D("-1000"))])
+    assert twr.value == 0, "the old fall is outside the window"
+    assert twr.covers_to is not None and (twr.covers_to - twr.covers_from).days == 365
+    assert "50.00% down" in (twr.explanation or ""), "the since-start figure must still be said"
+
+    lifetime = overview._time_weighted(
+        _points(values, start), [(start, D("-1000"))], window_days=None
+    )
+    assert lifetime.value == D("-0.5")

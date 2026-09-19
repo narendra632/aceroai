@@ -354,6 +354,41 @@ name that does not exist, run `python -m app.jobs.run db_backup`, and confirm th
 notification reaches your phone. Then set it back. An alarm nobody has ever set off is the
 same class of thing as a backup nobody has ever restored.
 
+### Market data (Investments prices)
+
+Prices arrive by themselves once the keys are in the server `.env` — the same six lines as
+your laptop's, copied by hand, never committed:
+
+```
+ANGEL_ONE_API_KEY=        # smartapi.angelone.in > My Profile > My API
+ANGEL_ONE_CLIENT_CODE=
+ANGEL_ONE_MPIN=
+ANGEL_ONE_TOTP_SECRET=    # the text under the QR code on the Enable TOTP page
+COINGECKO_API_KEY=        # Demo plan
+TWELVE_DATA_API_KEY=      # Basic plan
+```
+
+Restart the api after adding them. Nothing needs running by hand: the first `prices_daily`
+(07:30) and `prices_india_close` (19:00 weekdays) **are** the backfill — each fills every
+missing day since the first trade. To fill immediately instead of waiting, on the VM:
+`docker compose -f docker-compose.prod.yml exec api uv run python -m app.jobs.run prices_daily --force`
+(and the same with `prices_india_close`).
+
+⚠ **Two hosts refuse some cloud IPs.** Check both from the VM before relying on them:
+
+```bash
+curl -s -o /dev/null -m 15 -w "%{http_code}\n" https://apiconnect.angelone.in/
+curl -s -o /dev/null -m 15 -A "Mozilla/5.0" -w "%{http_code}\n" \
+  https://nsearchives.nseindia.com/content/RSS/Corporate_action.xml
+```
+
+Any number other than `000` means reachable. If Angel One is `000`, live NSE prices are
+missing but closes still arrive from NSE. If NSE is `000`, closes come from Angel's candles
+instead. If both are `000`, Indian stocks stay on their last price, shown as stale.
+
+The Angel One app's registered static IP must be the VM's external IP (it only gates orders,
+which this app never places — but it can only be changed once a week, so set it right).
+
 ### Trace retention
 
 `turns` and `spans` are written on every model call — including the ones nobody sees, so

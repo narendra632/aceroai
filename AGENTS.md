@@ -46,7 +46,12 @@ incremental change.
     like tests. `ARCHITECTURE.md` describes only what is built; anything
     planned goes in `ROADMAP.md`. Never annotate a doc `(planned — Feature N)`:
     each one becomes a lie on ship, and nothing forces a revisit.
-14. **No shortcuts on UI/UX.** The bar is a finished product, not "it works" —
+14. **Tests run in their own database** (`<db>_test`, created and migrated by
+    `tests/conftest.py`), never the development one — which holds a real life, and
+    once broke eighteen tests by giving HDFCBANK a real price. Tests never reach the
+    network: market-data keys are blanked and HTTP clients refuse unless a test
+    supplies a mock transport.
+15. **No shortcuts on UI/UX.** The bar is a finished product, not "it works" —
     no raw native controls where a themed one is needed, no destructive action
     without confirmation, no silent success. Known gaps: `docs/UI-AUDIT.md`.
 

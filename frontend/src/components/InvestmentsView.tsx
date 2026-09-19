@@ -3,6 +3,7 @@ import { AlertTriangle, Wallet } from "lucide-react";
 
 import PositionSheet from "@/components/PositionSheet";
 import TransactionEntry from "@/components/TransactionEntry";
+import { InfoTip } from "@/components/InfoTip";
 import { Button } from "@/components/ui/button";
 import { Legend, Lines, StackedBar, type Series } from "@/components/ui/chart";
 import {
@@ -20,6 +21,7 @@ import type {
   InvestmentTransaction,
 } from "@/lib/api";
 import {
+  formatDateFull,
   formatPrice,
   formatQuantity,
   formatRupees,
@@ -34,6 +36,7 @@ import {
   groupByAssetClass,
   longTermText,
   num,
+  sourceLabel,
 } from "@/lib/investments";
 
 /* The portfolio, as something you look at.
@@ -54,6 +57,7 @@ const RANGES = [
   { key: "3m", label: "3M", days: 90 },
   { key: "6m", label: "6M", days: 182 },
   { key: "1y", label: "1Y", days: 365 },
+  { key: "3y", label: "3Y", days: 1095 },
   { key: "all", label: "All", days: null },
 ] as const;
 
@@ -212,6 +216,9 @@ export default function InvestmentsView() {
     setLoading(false);
   }, [loadBook, loadCurve]);
 
+  // Bumped when a background refresh records new prices, so both halves reload once.
+  const [pricesVersion, setPricesVersion] = useState(0);
+
   // Two effects, so the range control genuinely only touches the chart. `loadBook` has no
   // dependencies and so runs once; `loadCurve` changes with the range and so runs again.
   useEffect(() => {
@@ -220,7 +227,29 @@ export default function InvestmentsView() {
 
   useEffect(() => {
     void loadCurve();
-  }, [loadCurve]);
+  }, [loadCurve, pricesVersion]);
+
+  // ⚠ Live prices are fetched AFTER the page has drawn, never before. The page shows what is
+  // recorded at once — with each price's age — and freshens a moment later if anything was
+  // stale. Waiting on the refresh first would make every open as slow as the slowest price
+  // source, and an unreachable one would hold the page hostage for its timeout.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .refreshPrices()
+      .then((r) => {
+        if (!cancelled && r.written > 0) setPricesVersion((v) => v + 1);
+      })
+      // A failed refresh changes nothing: the recorded prices are already on screen, aged.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (pricesVersion > 0) void loadBook();
+  }, [pricesVersion, loadBook]);
 
   useEffect(() => {
     if (!openSymbol) return;
@@ -425,11 +454,14 @@ export default function InvestmentsView() {
                 </span>{" "}
                 unrealised.
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Kept out of the figures above on purpose. Under s.115BBH a
-                crypto loss cannot be set against any other gain — not even a
-                different crypto gain, not in a later year — so a single netted
-                number would show a position the tax code does not allow.
+              <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                Kept out of the figures above on purpose.
+                <InfoTip label="Why crypto is separate">
+                  Under s.115BBH a crypto loss cannot be set against any other
+                  gain — not even a different crypto gain, not in a later year —
+                  so a single netted number would show a position the tax code
+                  does not allow.
+                </InfoTip>
               </p>
             </div>
           )}
@@ -441,18 +473,43 @@ export default function InvestmentsView() {
                 key={r.kind}
                 className="rounded-xl border border-border bg-card p-4"
               >
-                <p className="text-xs text-muted-foreground">
-                  {r.label} · {r.measures}
-                </p>
+                {/* ⚠ What the number IS stays on the card: one of these is per year and the
+                    other a total over a window, and two bare percentages invite being read as
+                    the same kind of number. Only the elaboration hides behind the "i". */}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {r.kind === "money_weighted"
+                        ? "How your money has done"
+                        : "How your picks have done"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {r.kind === "money_weighted"
+                        ? "per year"
+                        : r.covers_from
+                          ? `12 months to ${formatDateFull(r.covers_to ?? r.covers_from)}`
+                          : "over the period"}{" "}
+                      · {r.label}
+                    </p>
+                  </div>
+                  {r.explanation && (
+                    <InfoTip label={`What ${r.label} means`}>{r.explanation}</InfoTip>
+                  )}
+                </div>
                 {r.value != null ? (
-                  <p
-                    className={`mt-1 text-xl font-semibold ${directionClass(r.value)}`}
-                    style={{ fontVariantNumeric: "tabular-nums" }}
-                  >
-                    {formatSignedPct(r.value)}
-                  </p>
+                  <>
+                    <p
+                      className={`mt-2 text-xl font-semibold ${directionClass(r.value)}`}
+                      style={{ fontVariantNumeric: "tabular-nums" }}
+                    >
+                      {formatSignedPct(r.value)}
+                    </p>
+                    {r.headline && (
+                      <p className="mt-1 text-xs text-muted-foreground">{r.headline}</p>
+                    )}
+                  </>
                 ) : (
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <p className="mt-2 text-sm text-muted-foreground">
                     Not available — {r.unavailable_because}.
                   </p>
                 )}
@@ -672,7 +729,10 @@ export default function InvestmentsView() {
                               {h.mark ? (
                                 <>
                                   {formatPrice(h.mark.price, h.currency)}
-                                  <span className="block text-xs text-muted-foreground">
+                                  <span
+                                    className="block text-xs text-muted-foreground"
+                                    title={`Price from ${sourceLabel(h.mark.source)}`}
+                                  >
                                     {h.mark.age_text}
                                     {h.mark.is_stale ? " · stale" : ""}
                                   </span>

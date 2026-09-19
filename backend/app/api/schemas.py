@@ -650,6 +650,10 @@ class ReturnOut(BaseModel):
     unavailable_because: str | None
     covers_from: dt.date | None
     covers_to: dt.date | None
+    #: One short line under the figure — the same fact in rupees.
+    headline: str | None = None
+    #: The longer plain-language note, shown behind an "i" rather than on the card.
+    explanation: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -772,6 +776,15 @@ class CurvePointOut(BaseModel):
     open_holdings: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PriceRefreshOut(BaseModel):
+    """What a live refresh did. The page reloads its figures when `written` is non-zero."""
+
+    #: New observations recorded. Zero is the common, healthy answer: nothing was stale.
+    written: int
+    #: Sources that could not be reached. Their holdings keep their last price, shown stale.
+    failed: list[str]
 
 
 class CurveOut(BaseModel):

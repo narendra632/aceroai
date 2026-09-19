@@ -19,7 +19,13 @@ recording, idempotence, failure isolation, the spending check, tracing, the Sett
 quiet hours and the push cap — comes from the registry and cannot be forgotten.
 """
 
-from app.jobs import backups, brief, housekeeping, nudges  # noqa: F401  (registers the jobs)
+from app.jobs import (  # noqa: F401  (registers the jobs)
+    backups,
+    brief,
+    housekeeping,
+    nudges,
+    prices,
+)
 from app.jobs.registry import (
     Job,
     JobResult,

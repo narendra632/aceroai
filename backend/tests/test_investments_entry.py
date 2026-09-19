@@ -8,6 +8,7 @@ and show it back; by the time this code runs, the data is structured and confirm
 import datetime as dt
 import uuid
 from decimal import Decimal as D
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -252,26 +253,57 @@ def test_a_typed_price_goes_stale_exactly_like_a_dead_feed(db, hdfc):
     assert "days old" in mark.age_text
 
 
+_IST = ZoneInfo("Asia/Kolkata")
+_NY = ZoneInfo("America/New_York")
+
+
 def test_the_staleness_limit_depends_on_whether_the_market_is_open(db):
     """The after-close limit looks like the loosest and is the most correct: a closing price
     IS the current price until the next open. Flagging it at 30 minutes overnight would mark
-    everything stale every evening, and an alarm that fires nightly stops being read."""
-    monday_noon = dt.datetime(2026, 9, 7, 11, 0, tzinfo=dt.UTC)
-    monday_night = dt.datetime(2026, 9, 7, 20, 0, tzinfo=dt.UTC)
+    everything stale every evening, and an alarm that fires nightly stops being read.
+
+    ⚠ Times are given in the market's own zone. This test once called 11:00 UTC "Monday
+    noon" — which is 16:30 in Mumbai, after the close — and so enshrined a rule that read the
+    UTC clock against Indian hours."""
+    monday_noon = dt.datetime(2026, 9, 7, 12, 0, tzinfo=_IST)
+    monday_night = dt.datetime(2026, 9, 7, 20, 0, tzinfo=_IST)
     assert pricing.staleness_limit("EQUITY_IN", at=monday_noon) == dt.timedelta(minutes=30)
     assert pricing.staleness_limit("EQUITY_IN", at=monday_night) == dt.timedelta(hours=20)
 
 
-def test_a_weekend_uses_the_closed_limit(db):
-    saturday = dt.datetime(2026, 9, 5, 11, 0, tzinfo=dt.UTC)
-    assert pricing.staleness_limit("EQUITY_IN", at=saturday) == dt.timedelta(hours=20)
+def test_a_weekend_keeps_fridays_close_current(db):
+    """Friday's close is the current price until Monday's open. A fixed 20 hours made every
+    stock in the book stale from Saturday lunchtime."""
+    friday_close = dt.datetime(2026, 9, 4, 15, 30, tzinfo=_IST)
+    for at in (
+        dt.datetime(2026, 9, 5, 18, 0, tzinfo=_IST),  # Saturday evening
+        dt.datetime(2026, 9, 7, 9, 0, tzinfo=_IST),  # Monday, before the open
+    ):
+        assert at - friday_close <= pricing.staleness_limit("EQUITY_IN", at=at)
+    monday_open = dt.datetime(2026, 9, 7, 9, 45, tzinfo=_IST)
+    assert monday_open - friday_close > pricing.staleness_limit("EQUITY_IN", at=monday_open)
+
+
+def test_us_stocks_use_new_york_hours(db):
+    """11:00 in New York is 20:30 in Mumbai — closed by Indian hours, open by the right ones."""
+    at = dt.datetime(2026, 9, 8, 11, 0, tzinfo=_NY)
+    assert pricing.staleness_limit("EQUITY_US", at=at) == dt.timedelta(minutes=30)
+    assert pricing.staleness_limit("EQUITY_US", at=at.replace(hour=18)) >= dt.timedelta(hours=20)
+
+
+def test_fridays_nav_is_current_until_mondays_is_published(db):
+    friday_nav = dt.datetime(2026, 9, 4, 21, 0, tzinfo=_IST)
+    monday_morning = dt.datetime(2026, 9, 7, 9, 0, tzinfo=_IST)
+    tuesday_morning = dt.datetime(2026, 9, 8, 9, 0, tzinfo=_IST)
+    assert monday_morning - friday_nav <= pricing.staleness_limit("MF_IN", at=monday_morning)
+    assert tuesday_morning - friday_nav > pricing.staleness_limit("MF_IN", at=tuesday_morning)
 
 
 def test_crypto_and_mutual_funds_have_their_own_clocks(db):
     """Crypto trades around the clock with no close to fall back on; a NAV publishes once a
     day and a 24-hour limit would cry wolf every weekend."""
     assert pricing.staleness_limit("CRYPTO") == dt.timedelta(hours=4)
-    assert pricing.staleness_limit("MF_IN") == dt.timedelta(hours=48)
+    assert pricing.staleness_limit("MF_IN") >= dt.timedelta(hours=48)
 
 
 # --- valuation ------------------------------------------------------------------------------------

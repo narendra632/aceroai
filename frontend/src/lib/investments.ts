@@ -59,6 +59,22 @@ export function longTermText(holding: Holding): string | null {
   return `${Math.round(days / 30)} months to long-term`;
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  NSE: "NSE",
+  ANGEL_ONE: "Angel One",
+  COINGECKO: "CoinGecko",
+  BINANCE: "Binance, in USD at that day's rate",
+  TWELVE_DATA: "Twelve Data",
+  AMFI: "AMFI",
+  USER: "typed",
+};
+
+/** Where a price came from, in words. An unknown source is shown as-is rather than hidden:
+ *  a price whose origin cannot be named is exactly the one worth questioning. */
+export function sourceLabel(source: string): string {
+  return SOURCE_LABELS[source] ?? source.toLowerCase().replaceAll("_", " ");
+}
+
 /** Why a holding shows no value. Always a sentence, never a dash on its own. */
 export function unpricedReason(holding: Holding): string {
   return holding.currency === "INR"
