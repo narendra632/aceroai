@@ -272,6 +272,17 @@ are one row each at the average price, dated to the first buy, marked `IMPORT` w
 saying so. The per-buy amounts are not recoverable from CoinSwitch, and a labelled aggregate
 is honest where an invented breakdown would not be.
 
+⚠ **The seed carries the identifiers the price feeds need** — NSE's real symbol (`GVT&D`, not
+`GVTD`), the AMFI scheme codes, the CoinGecko ids. They were first written only as data fixes
+in migration 016, which mends rows a database already has. On the production server the
+migration ran against an empty schema and the seed then re-created the instruments without
+them, so GE Vernova and both funds went silently unpriced while everything else worked. **A
+migration mends the past; the seed defines the present, and an identifier has to be in both.**
+
+Re-running the seed also CORRECTS what it finds: an instrument stored under an old name is
+renamed in place, never joined by a second row — two rows would split one holding's
+transactions across two instruments.
+
 ---
 
 ## 10. What is deliberately absent

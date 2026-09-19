@@ -5,8 +5,12 @@ is tested here is the script's own behaviour — that running it twice is safe, 
 reconciliation would actually catch a discrepancy rather than reporting success regardless.
 """
 
+import uuid
 from decimal import Decimal as D
 
+import sqlalchemy as sa
+
+from app.db.models import Instrument
 from app.scripts import seed_investments as seed
 from app.services.investments import costmodel
 from app.services.investments import portfolio as pf
@@ -107,3 +111,49 @@ def test_the_us_holding_carries_the_rate_actually_received(db, user):
     spcx = next(p for p in pf.positions(db, result["portfolio_id"]) if p.symbol == "SPCX")
     assert all(lot.fx_rate_inr == D("96.01") for lot in spcx.lots)
     assert spcx.cost_basis_inr.quantize(D("0.01")) == D("14911.31")
+
+
+def test_the_seed_carries_the_identifiers_the_price_feeds_need(db, user):
+    """⚠ Regression, from production. These identifiers existed only as data fixes in
+    migration 016 — which mends rows a database already has. On the server the migration ran
+    against an empty schema and the seed then created the instruments without them, so GE
+    Vernova and both funds went silently unpriced while everything else worked.
+
+    NSE's symbol is `GVT&D`; the bhavcopy is matched on it, and `GVTD` matches nothing."""
+    seed.seed(db, user=user)
+    by_symbol = {i.symbol: i for i in db.execute(sa.select(Instrument)).scalars()}
+
+    assert "GVT&D" in by_symbol and "GVTD" not in by_symbol
+    assert "GVTD" in (by_symbol["GVT&D"].aliases or []), "chat must still find the old name"
+    assert by_symbol["HDFCMIDCAP"].amfi_scheme_code == "118989"
+    assert by_symbol["HDFCFLEXICAP"].amfi_scheme_code == "118955"
+    assert by_symbol["BTC"].coingecko_id == "bitcoin"
+
+
+def test_an_instrument_stored_under_an_old_name_is_renamed_not_duplicated(db, user):
+    """⚠ The dangerous half. A second row for the same holding would split its transactions
+    across two instruments, and the page would show both halves as separate positions."""
+    stale = Instrument(
+        id=uuid.uuid4(),
+        symbol="GVTD",
+        exchange="NSE",
+        name="GE Vernova T&D India",
+        asset_class="EQUITY_IN",
+        currency="INR",
+    )
+    db.add(stale)
+    db.commit()
+    stale_id = stale.id
+
+    seed.seed(db, user=user)
+    rows = (
+        db.execute(
+            sa.select(Instrument).where(
+                Instrument.exchange == "NSE", Instrument.name == "GE Vernova T&D India"
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1 and rows[0].id == stale_id
+    assert rows[0].symbol == "GVT&D"

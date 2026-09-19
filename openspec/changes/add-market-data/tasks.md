@@ -107,6 +107,12 @@
       the since-start figure in its note; long notes moved behind an "i"; chart axes carry the
       year and tooltips the full date; a 3Y range. Suite 824 passed.
 
+- [x] 7.8 **Found on the deployed server:** migration 016's data fixes reach an EXISTING
+      database only. Production migrated an empty schema, then the seed re-created the
+      instruments with `GVTD` and no scheme codes — GE Vernova and both funds unpriced, and
+      nothing said so. The identifiers now live in the seed as well, which also renames an
+      instrument found under an old name rather than adding a second row. Two tests.
+
 ## 8. Production (Narendra)
 
 - [ ] 8.1 Add the six values to the server's `.env` (`docs/DEPLOY.md` → Market data).

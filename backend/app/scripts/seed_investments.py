@@ -30,13 +30,24 @@ from app.services.investments import costmodel
 from app.services.investments import portfolio as pf
 
 # --- instruments ----------------------------------------------------------------------
-# (symbol, exchange, name, asset_class, currency, aliases)
+# ⚠ **The identifiers the price feeds need live HERE, in the seed data.**
+#
+# They were first written as data fixes in migration 016, which corrects the rows an existing
+# database already has. That is right for an existing database and useless for a fresh one:
+# on the server the migration ran against an empty schema and the seed then re-created the
+# instruments with the old symbol and no codes, so GE Vernova and both funds silently went
+# unpriced while everything else worked. A migration mends the past; the seed defines the
+# present, and each identifier has to be in both.
+#
+# `symbol` is what the EXCHANGE calls it — NSE's is `GVT&D`, not the `GVTD` that looks right —
+# because the bhavcopy is matched on it. Old names stay as aliases so chat still finds them.
 INSTRUMENTS = [
-    ("HDFCBANK", "NSE", "HDFC Bank", "EQUITY_IN", "INR", None),
-    ("KAYNES", "NSE", "Kaynes Technology", "EQUITY_IN", "INR", None),
-    ("GVTD", "NSE", "GE Vernova T&D India", "EQUITY_IN", "INR", None),
-    ("SAILIFE", "NSE", "Sai Life Sciences", "EQUITY_IN", "INR", None),
-    ("SPCX", "NASDAQ", "SpaceX", "EQUITY_US", "USD", None),
+    # symbol, exchange, name, asset_class, currency, aliases, ids
+    ("HDFCBANK", "NSE", "HDFC Bank", "EQUITY_IN", "INR", None, {}),
+    ("KAYNES", "NSE", "Kaynes Technology", "EQUITY_IN", "INR", None, {}),
+    ("GVT&D", "NSE", "GE Vernova T&D India", "EQUITY_IN", "INR", ["GVTD"], {}),
+    ("SAILIFE", "NSE", "Sai Life Sciences", "EQUITY_IN", "INR", None, {}),
+    ("SPCX", "NASDAQ", "SpaceX", "EQUITY_US", "USD", None, {}),
     # ⚠ Renamed under SEBI's scheme-naming standardisation, same ISIN. Both names are carried
     # or an AMFI lookup appears to break when only the label changed.
     (
@@ -46,12 +57,21 @@ INSTRUMENTS = [
         "MF_IN",
         "INR",
         ["HDFC Mid-Cap Opportunities Fund", "HDFCMIDCAPOPP"],
+        {"amfi_scheme_code": "118989", "isin": "INF179K01XQ0"},
     ),
-    ("HDFCFLEXICAP", "MF_IN", "HDFC Flexi Cap Direct Plan Growth", "MF_IN", "INR", None),
-    ("DOGE", "CRYPTO", "Dogecoin", "CRYPTO", "INR", None),
-    ("BTC", "CRYPTO", "Bitcoin", "CRYPTO", "INR", None),
-    ("ZIL", "CRYPTO", "Zilliqa", "CRYPTO", "INR", None),
-    ("JASMY", "CRYPTO", "JasmyCoin", "CRYPTO", "INR", None),
+    (
+        "HDFCFLEXICAP",
+        "MF_IN",
+        "HDFC Flexi Cap Direct Plan Growth",
+        "MF_IN",
+        "INR",
+        None,
+        {"amfi_scheme_code": "118955", "isin": "INF179K01UT0"},
+    ),
+    ("DOGE", "CRYPTO", "Dogecoin", "CRYPTO", "INR", None, {"coingecko_id": "dogecoin"}),
+    ("BTC", "CRYPTO", "Bitcoin", "CRYPTO", "INR", None, {"coingecko_id": "bitcoin"}),
+    ("ZIL", "CRYPTO", "Zilliqa", "CRYPTO", "INR", None, {"coingecko_id": "zilliqa"}),
+    ("JASMY", "CRYPTO", "JasmyCoin", "CRYPTO", "INR", None, {"coingecko_id": "jasmycoin"}),
 ]
 
 # (symbol, date, quantity, price, fx_rate, note)
@@ -70,9 +90,9 @@ BUYS = [
     ("KAYNES", "2026-05-15", "1", "3271.00", "1", None),
     ("KAYNES", "2026-05-18", "1", "3102.00", "1", None),
     ("KAYNES", "2026-05-20", "1", "2999.80", "1", None),
-    ("GVTD", "2026-05-29", "1", "5000.00", "1", None),
-    ("GVTD", "2026-06-01", "1", "4748.00", "1", None),
-    ("GVTD", "2026-06-02", "1", "4639.50", "1", None),
+    ("GVT&D", "2026-05-29", "1", "5000.00", "1", None),
+    ("GVT&D", "2026-06-01", "1", "4748.00", "1", None),
+    ("GVT&D", "2026-06-02", "1", "4639.50", "1", None),
     ("SAILIFE", "2026-04-30", "2", "1066.35", "1", None),
     ("SAILIFE", "2026-06-04", "4", "1159.00", "1", None),
     # One remittance, one rate: ₹14,955 converted at 96.01 gave $155.77, and INDmoney trades
@@ -115,7 +135,7 @@ BUYS = [
 EXPECTED = {
     "HDFCBANK": ("33", "24477.65"),
     "KAYNES": ("5", "16894.00"),
-    "GVTD": ("3", "14387.50"),
+    "GVT&D": ("3", "14387.50"),
     "SAILIFE": ("6", "6768.70"),
     # Units are 0.0003 below Groww's DISPLAYED total, which rounds to 3dp. Worth Rs 0.74 at
     # current NAV; the cost basis is exact, and that is the figure returns depend on.
@@ -144,13 +164,30 @@ def _schedules(db: Session) -> None:
 
 
 def _instruments(db: Session) -> dict[str, Instrument]:
+    """Create what is missing, and correct what is already there.
+
+    ⚠ Correcting matters as much as creating. A database seeded before these identifiers
+    existed holds rows without them, and a row found by an old alias must be RENAMED rather
+    than joined by a second row: creating `GVT&D` beside an existing `GVTD` would split one
+    holding's transactions across two instruments, and the page would show both halves.
+    """
     out: dict[str, Instrument] = {}
-    for symbol, exchange, name, asset_class, currency, aliases in INSTRUMENTS:
-        found = db.execute(
-            sa.select(Instrument).where(
-                Instrument.symbol == symbol, Instrument.exchange == exchange
+    for symbol, exchange, name, asset_class, currency, aliases, ids in INSTRUMENTS:
+        names = [symbol, *(aliases or [])]
+        found = (
+            db.execute(
+                sa.select(Instrument).where(
+                    Instrument.exchange == exchange,
+                    Instrument.deleted_at.is_(None),
+                    sa.or_(
+                        Instrument.symbol.in_(names),
+                        *([Instrument.aliases.overlap(names)] if names else []),
+                    ),
+                )
             )
-        ).scalar_one_or_none()
+            .scalars()
+            .first()
+        )
         if found is None:
             found = Instrument(
                 id=uuid.uuid4(),
@@ -160,8 +197,16 @@ def _instruments(db: Session) -> dict[str, Instrument]:
                 asset_class=asset_class,
                 currency=currency,
                 aliases=aliases,
+                **ids,
             )
             db.add(found)
+        else:
+            found.symbol = symbol
+            keep = {*(found.aliases or []), *(aliases or [])} - {symbol}
+            found.aliases = sorted(keep) or None
+            for field, value in ids.items():
+                if getattr(found, field, None) != value:
+                    setattr(found, field, value)
         out[symbol] = found
     db.flush()
     return out
