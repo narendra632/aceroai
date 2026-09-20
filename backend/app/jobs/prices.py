@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Instrument, User
 from app.jobs.registry import JobResult, job
 from app.jobs.registry import Notification as NotificationSpec
+from app.services.errors import NotFound
 from app.services.investments import corpactions, overview
 from app.services.marketdata import feed, nse
 from app.services.marketdata.http import ProviderError
@@ -73,7 +74,13 @@ def corporate_actions_watch(db: Session, user: User) -> JobResult:
     The whole job is wrapped so a failed feed leaves the ledger untouched and reports the
     reason, rather than half-applying a batch.
     """
-    book = overview.real_book(db, user.id)
+    try:
+        book = overview.real_book(db, user.id)
+    except NotFound:
+        # ⚠ A database with no book yet is not a failure. Without this the job would record
+        # an error every weekday evening on a fresh install, which is how a `job_runs` table
+        # stops being worth reading.
+        return JobResult(silent=True, detail={"reason": "no REAL book yet"})
 
     recorded: list = []
     failed: str | None = None

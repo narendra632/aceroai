@@ -450,3 +450,13 @@ def test_an_unreachable_feed_still_applies_what_is_already_recorded(db, user, bo
     assert result.detail["failed"] == "unreachable"
     assert result.detail["applied"] == 1
     assert pf.position(db, book.id, book.instrument.id).quantity == D(40)
+
+
+def test_the_job_is_silent_on_a_database_with_no_book(db, user, monkeypatch):
+    """A fresh install is not a failure, and recording one every evening would make the
+    job history worthless to read."""
+    from app.jobs import prices
+
+    monkeypatch.setattr(prices.nse, "corporate_actions", lambda *a, **k: [])
+    result = prices.corporate_actions_watch(db, user)
+    assert result.silent and result.detail == {"reason": "no REAL book yet"}
