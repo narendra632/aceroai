@@ -29,6 +29,7 @@ from app.api.schemas import (
     AttentionOut,
     BottleneckOut,
     CorporateActionOut,
+    CrossingsIn,
     CurveOut,
     DraftIn,
     DraftOut,
@@ -565,3 +566,32 @@ def remap(
     db.commit()
     held = {p.instrument_id for p in pf.positions(db, book.id)}
     return _mapping_out(db, version.spec, inst, fresh, held)
+
+
+@router.post("/framework/bottlenecks/{b_bottleneck}/crossings")
+def revise_crossings(
+    b_bottleneck: str,
+    body: CrossingsIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FrameworkOut:
+    """Establish which imperatives a bottleneck actually blocks.
+
+    ⚠ The repair for the one real defect in how the framework was first loaded: the source
+    notes establish the crossing set for eight bottlenecks and leave the rest unstated, and
+    that count is the largest component of the structural score. Before this the interface
+    could say "this figure is a floor" and offer no way to raise it.
+
+    Writes a **new framework version**. Companies mapped to the bottleneck keep their
+    approval, because what was agreed — that the company clears this bottleneck — has not
+    changed; only how wide the bottleneck is, which is what is being decided here.
+    """
+    frameworks.revise_crossings(
+        db,
+        b_bottleneck=b_bottleneck,
+        crosses=body.crosses,
+        status=body.status,
+        note=body.note,
+    )
+    db.commit()
+    return get_framework(user=user, db=db)

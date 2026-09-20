@@ -24,7 +24,7 @@ import sys
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.db.models import FrameworkVersion, Instrument
+from app.db.models import AbMapping, FrameworkVersion, Instrument
 from app.db.session import SessionLocal
 from app.services.investments import framework_data, frameworks
 
@@ -126,6 +126,42 @@ def seed(db: Session, *, write: bool = True) -> dict:
         return report
 
     spec = version.spec
+
+    # ⚠ Bring live mappings onto the installed spec before proposing anything.
+    #
+    # A mapping stores the bottleneck's facts — crossings, crisis, timing, investability — as
+    # they stood when it was agreed. So correcting a crossing set in `framework_data` fixes a
+    # FRESH database and does nothing at all to one already seeded: production would keep
+    # scoring against the old count with nothing anywhere reporting the difference.
+    #
+    # Approval is kept. What the user agreed to was "this company clears this bottleneck", and
+    # that claim is untouched — only how wide the bottleneck is, which is a correction to the
+    # framework rather than a new claim about the company.
+    if write:
+        refreshed = 0
+        for mapping in db.execute(
+            sa.select(AbMapping).where(AbMapping.superseded_by_id.is_(None))
+        ).scalars():
+            row = frameworks.bottleneck(spec, mapping.b_bottleneck)
+            if row is None:
+                continue
+            crosses = sorted(row["crosses"])
+            if (
+                sorted(mapping.a_imperatives or []) == crosses
+                and mapping.crossings_status == row["crossings_status"]
+            ):
+                continue
+            mapping.a_imperatives = crosses
+            mapping.crosses_a_count = len(crosses)
+            mapping.crossings_status = row["crossings_status"]
+            mapping.is_crisis_accelerated = row.get("crisis") == "EXPLICIT"
+            mapping.inflection_quarter = row.get("inflection")
+            mapping.investability = row.get("investability")
+            mapping.framework_version_id = version.id
+            refreshed += 1
+        if refreshed:
+            report["refreshed"] = refreshed
+
     for symbol, b_id in MAPPINGS.items():
         inst = db.execute(
             sa.select(Instrument).where(
@@ -179,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
             f"  {len(spec['imperatives'])} imperatives, {len(spec['bottlenecks'])} bottlenecks, "
             f"{len(spec['multiples'])} multiples"
         )
+        if report.get("refreshed"):
+            print(f"  refreshed {report['refreshed']} live mappings onto the new version")
         for line in report["proposed"]:
             print(f"  proposed  {line}")
         for symbol in report["already"]:

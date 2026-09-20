@@ -246,10 +246,18 @@ BOTTLENECKS: list[dict] = [
         "id": "B2.2",
         "name": "Electronics Component Manufacturing",
         "summary": "60–70% of output is still assembly; PCBs, displays and passives are missing",
-        # His portfolio table also maps Syrma to defence and to manufacturing, so the real
-        # count is probably 3. Left at the floor until approved.
-        "crosses": ["A2"],
-        "crossings_status": "PARTIAL",
+        # ⚠ Widened from the parent-only floor of A2, on the evidence of his own material
+        # rather than on a hunch. His portfolio table places Syrma SGS under defence and under
+        # the wider manufacturing base as well as under semiconductors, and B4.1 states the
+        # dependency outright — "without domestic electronics, indigenous defence is just
+        # assembly". A6 follows from the same components being what China+1 assembly must
+        # stop importing.
+        #
+        # Deliberately NOT widened further. EV power electronics (A9) and data-centre hardware
+        # (A3) both consume components too, but his framework gives each its own bottleneck,
+        # and counting them here would score the same dependency twice.
+        "crosses": ["A2", "A4", "A6"],
+        "crossings_status": "CONFIRMED",
         "crisis": "NO",
         "inflection": "FY27",
         "inflection_text": "FY27–28",

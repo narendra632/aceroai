@@ -859,6 +859,19 @@ class ApproveIn(BaseModel):
     note: str | None = None
 
 
+class CrossingsIn(BaseModel):
+    """Establish which imperatives a bottleneck blocks.
+
+    ⚠ This writes a new framework version: a crossing set is a claim about the country, and
+    changing one changes the rules every later score is measured against.
+    """
+
+    crosses: list[str]
+    #: CONFIRMED once established; PARTIAL to widen a floor that is still not the full set.
+    status: str = "CONFIRMED"
+    note: str | None = None
+
+
 class SummaryOut(BaseModel):
     portfolio_id: uuid.UUID
     name: str

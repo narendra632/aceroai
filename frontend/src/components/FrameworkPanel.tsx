@@ -152,6 +152,9 @@ export default function FrameworkPanel() {
               <Row
                 mapping={m}
                 bottlenecks={data.bottlenecks}
+                imperatives={
+                  data.imperatives as Array<{ id: string; name: string }>
+                }
                 busy={busy === m.id}
                 remapping={remapping === m.id}
                 onRemapToggle={() =>
@@ -164,6 +167,11 @@ export default function FrameworkPanel() {
                       b_bottleneck: off ? null : b,
                       off_framework: off,
                     }),
+                  )
+                }
+                onRevise={(crosses) =>
+                  run(m.id, () =>
+                    api.reviseCrossings(m.b_bottleneck ?? "", crosses),
                   )
                 }
               />
@@ -184,21 +192,27 @@ export default function FrameworkPanel() {
 function Row({
   mapping: m,
   bottlenecks,
+  imperatives,
   busy,
   remapping,
   onRemapToggle,
   onApprove,
   onRemap,
+  onRevise,
 }: {
   mapping: Mapping;
   bottlenecks: api.Bottleneck[];
+  imperatives: Array<{ id: string; name: string }>;
   busy: boolean;
   remapping: boolean;
   onRemapToggle: () => void;
   onApprove: () => void;
   onRemap: (b: string, off: boolean) => void;
+  onRevise: (crosses: string[]) => void;
 }) {
   const [choice, setChoice] = useState(m.b_bottleneck ?? "");
+  const [editing, setEditing] = useState(false);
+  const [picked, setPicked] = useState<string[]>(m.a_imperatives);
   const approved = m.approved_at != null;
 
   return (
@@ -265,13 +279,67 @@ function Row({
         </dl>
       )}
 
-      {m.score.breadth_is_floor && (
-        <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-          The crossing count is a floor. Your notes establish it for eight
-          bottlenecks and leave this one unstated, so the score may be
-          understated — it is not a ceiling.
-        </p>
+      {m.score.breadth_is_floor && !m.off_framework && (
+        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5">
+          <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+            <span>
+              Blocks <strong>at least {m.crosses_a_count}</strong> of the ten —
+              your notes establish the full set for eight bottlenecks and leave
+              this one unstated, so the score may be understated. It is a floor,
+              not a ceiling.
+            </span>
+          </p>
+          {/* ⚠ The control matters as much as the warning. Saying "this may be understated"
+              and offering no way to correct it is information dressed as an action — worse
+              than silence, because it sits in the list for ever. */}
+          <button
+            type="button"
+            className="mt-1.5 text-xs font-medium underline underline-offset-2"
+            onClick={() => setEditing((v) => !v)}
+          >
+            {editing ? "Cancel" : "Set what it actually blocks"}
+          </button>
+          {editing && (
+            <div className="mt-2">
+              <div className="flex flex-wrap gap-1.5">
+                {imperatives.map((a) => (
+                  <label
+                    key={a.id}
+                    className="flex cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs"
+                    title={a.name}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(a.id)}
+                      onChange={() =>
+                        setPicked((cur) =>
+                          cur.includes(a.id)
+                            ? cur.filter((x) => x !== a.id)
+                            : [...cur, a.id],
+                        )
+                      }
+                    />
+                    {a.id}
+                  </label>
+                ))}
+              </div>
+              <Button
+                size="sm"
+                className="mt-2"
+                disabled={busy || picked.length === 0}
+                onClick={() => onRevise(picked)}
+              >
+                {busy ? "Saving…" : `Save — blocks ${picked.length}`}
+              </Button>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                This changes the framework itself, not just this company. Every
+                company on {m.b_bottleneck} is rescored, and a new framework
+                version is recorded so past decisions keep the rules they used.
+              </p>
+            </div>
+          )}
+        </div>
       )}
 
       {m.multiple_is_fallback && !m.off_framework && (

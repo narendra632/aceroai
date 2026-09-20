@@ -494,3 +494,70 @@ def needs_attention(db: Session, spec: dict, *, today: dt.date | None = None) ->
                 )
             )
     return out
+
+
+def revise_crossings(
+    db: Session,
+    *,
+    b_bottleneck: str,
+    crosses: list[str],
+    note: str | None = None,
+    status: str = "CONFIRMED",
+) -> FrameworkVersion:
+    """Establish which imperatives a bottleneck actually blocks.
+
+    ⚠ This is the repair for the one real defect in how the framework was first loaded. The
+    source notes spell the crossing set out for eight bottlenecks and leave it unstated for
+    the rest, and the largest component of the structural score is that count. Until this
+    existed, the interface could say "this figure is a floor" and offer no way to raise it —
+    information dressed as an action, which is worse than silence.
+
+    It writes a **new framework version**, because a crossing set is a claim about India and
+    changing one changes the rules every later score is measured against. Live mappings onto
+    that bottleneck are brought forward **keeping their approval**: what the user agreed to
+    was "this company clears this bottleneck", and that claim has not changed — only how wide
+    the bottleneck is, which is what they are deciding here.
+    """
+    spec = dict(current(db).spec)
+    rows = [dict(r) for r in spec.get("bottlenecks", ())]
+    target = None
+    for row in rows:
+        if row["id"] == b_bottleneck or b_bottleneck in (row.get("aliases") or ()):
+            target = row
+            break
+    if target is None:
+        raise Invalid(f"{b_bottleneck!r} is not a bottleneck in this framework")
+
+    known = {a["id"] for a in spec.get("imperatives", ())}
+    unknown = sorted(set(crosses) - known)
+    if unknown:
+        raise Invalid(f"not imperatives in this framework: {', '.join(unknown)}")
+    if not crosses:
+        raise Invalid("a bottleneck blocks at least one imperative, or it is not a bottleneck")
+    if status not in ("CONFIRMED", "PARTIAL"):
+        raise Invalid("a revised crossing set is either confirmed or still a floor")
+
+    target["crosses"] = sorted(set(crosses))
+    target["crossings_status"] = status
+    spec["bottlenecks"] = rows
+
+    version = install(
+        db,
+        spec,
+        notes=note or f"{target['id']} crossings revised to {len(target['crosses'])}",
+        approved=True,
+    )
+
+    # Bring live mappings onto the new version. Approval is kept deliberately — see above.
+    live = db.execute(
+        sa.select(AbMapping).where(
+            AbMapping.b_bottleneck == target["id"], AbMapping.superseded_by_id.is_(None)
+        )
+    ).scalars()
+    for mapping in live:
+        mapping.a_imperatives = list(target["crosses"])
+        mapping.crosses_a_count = len(target["crosses"])
+        mapping.crossings_status = status
+        mapping.framework_version_id = version.id
+    db.flush()
+    return version

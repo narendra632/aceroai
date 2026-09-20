@@ -15,8 +15,9 @@ import uuid
 from decimal import Decimal as D
 
 import pytest
+import sqlalchemy as sa
 
-from app.db.models import AbMapping, FrameworkVersion
+from app.db.models import AbMapping, FrameworkVersion, Instrument
 from app.services.errors import Invalid, NotFound
 from app.services.investments import framework_data, frameworks
 from tests.conftest import make_instrument
@@ -554,3 +555,120 @@ def test_the_attention_list_reaches_the_interface(auth_client, wired):
     body = auth_client.get("/api/investments/framework").json()
     kinds = {(a["symbol"], a["kind"]) for a in body["attention"]}
     assert ("FWHELD", "UNAPPROVED") in kinds
+
+
+# --- establishing a crossing set ------------------------------------------------------------
+
+
+def test_revising_crossings_raises_the_score_and_versions_the_change(db, version, spec):
+    """⚠ The repair for the defect the whole design was shaped around.
+
+    B8.3 is recorded as blocking one imperative because that section of the notes is brief,
+    not because financial infrastructure serves one national aim. Until this existed the
+    interface could say "this is a floor" and offer no way to raise it — information dressed
+    as an action, which is worse than silence because it sits in the list for ever.
+    """
+    inst = _instrument(db, symbol="FWBANK", sector="PRIVATE_BANK")
+    mapping = frameworks.propose_mapping(
+        db, inst, b_bottleneck="B8.3", spec=spec, framework_version_id=version.id
+    )
+    frameworks.approve_mapping(db, mapping)
+    db.commit()
+
+    before = frameworks.ab_score(mapping, spec)
+    assert before.breadth_is_floor
+    # 1 breadth + 0 crisis + 2 timing (NOW) + 0 commitment + 1 green
+    assert before.total == D(4)
+
+    revised = frameworks.revise_crossings(
+        db, b_bottleneck="B8.3", crosses=["A1", "A6", "A8"], note="rupee settlement, capex"
+    )
+    db.commit()
+
+    assert revised.version > version.version, "a crossing set is a claim; changing it versions"
+    after = frameworks.ab_score(mapping, revised.spec)
+    assert not after.breadth_is_floor
+    # breadth 1 -> 3 on three crossings
+    assert after.total == D(6)
+    assert mapping.approved_at is not None, (
+        "what was agreed — that this company clears this bottleneck — has not changed"
+    )
+    assert mapping.framework_version_id == revised.id
+
+
+def test_a_revision_cannot_invent_an_imperative(db, version, spec):
+    with pytest.raises(Invalid):
+        frameworks.revise_crossings(db, b_bottleneck="B2.2", crosses=["A2", "A99"])
+
+
+def test_a_bottleneck_must_block_something(db, version, spec):
+    with pytest.raises(Invalid):
+        frameworks.revise_crossings(db, b_bottleneck="B2.2", crosses=[])
+
+
+def test_a_revision_of_an_unknown_bottleneck_is_refused(db, version, spec):
+    with pytest.raises(Invalid):
+        frameworks.revise_crossings(db, b_bottleneck="B77.7", crosses=["A2"])
+
+
+def test_revising_over_the_wire_returns_the_whole_framework_again(auth_client, wired):
+    body = auth_client.get("/api/investments/framework").json()
+    watch = next(m for m in body["mappings"] if m["symbol"] == "FWWATCH")
+    auth_client.post(f"/api/investments/framework/mappings/{watch['id']}/approve")
+
+    before = auth_client.get("/api/investments/framework").json()
+    was = next(m for m in before["mappings"] if m["symbol"] == "FWWATCH")
+    assert was["crosses_a_count"] == 1
+
+    revised = auth_client.post(
+        "/api/investments/framework/bottlenecks/B4.2/crossings",
+        json={"crosses": ["A4", "A6"], "status": "CONFIRMED", "note": "also the wider base"},
+    )
+    assert revised.status_code == 200
+    now = next(m for m in revised.json()["mappings"] if m["symbol"] == "FWWATCH")
+    assert now["crosses_a_count"] == 2
+    assert now["crossings_status"] == "CONFIRMED"
+    assert now["approved_at"] is not None
+
+
+def test_the_seed_brings_live_mappings_onto_a_corrected_framework(db, user):
+    """⚠ A mapping stores the bottleneck's facts as they stood when it was agreed, so
+    correcting a crossing set in the data fixes a FRESH database and does nothing at all to one
+    already seeded. Production would keep scoring the old count with nothing reporting it."""
+    from app.scripts import seed_framework
+
+    db.add(
+        make_instrument(
+            db,
+            symbol="SYRMA",
+            exchange="NSE",
+            name="Syrma SGS Technology",
+            asset_class="EQUITY_IN",
+            currency="INR",
+            sector="EMS_ELECTRONICS",
+        )
+    )
+    db.flush()
+
+    seed_framework.seed(db, write=True)
+    syrma = db.execute(
+        sa.select(AbMapping)
+        .join(Instrument, AbMapping.instrument_id == Instrument.id)
+        .where(Instrument.symbol == "SYRMA", AbMapping.superseded_by_id.is_(None))
+    ).scalar_one()
+
+    frameworks.approve_mapping(db, syrma)
+    syrma.a_imperatives = ["A2"]
+    syrma.crosses_a_count = 1
+    syrma.crossings_status = "PARTIAL"
+    db.commit()
+
+    report = seed_framework.seed(db, write=True)
+    db.refresh(syrma)
+
+    assert report.get("refreshed", 0) >= 1
+    assert syrma.crosses_a_count == 3, "the corrected crossing set must reach an existing row"
+    assert syrma.crossings_status == "CONFIRMED"
+    assert syrma.approved_at is not None, (
+        "the company-to-bottleneck agreement is untouched; only the bottleneck's width changed"
+    )

@@ -57,6 +57,25 @@ FX_LIVE_SOURCE = f"{twelve_data.PROVIDER}_LIVE"
 #: busy day; four hours of that is well under the noise in the prices it converts.
 FX_STALE_AFTER = dt.timedelta(hours=4)
 
+#: How far back a company that is WATCHED but not held is priced.
+#:
+#: ⚠ Not a round number for its own sake. The reflexivity checklist asks whether a stock's
+#: 52-week range has blown out and whether its multiple expanded faster than its earnings over
+#: twelve months — neither is computable without a year of closes. A watchlist that cannot be
+#: valued is a list of names, and the whole point of watching a company is to be able to say
+#: whether today is a sensible day to buy it.
+WATCHLIST_HISTORY_DAYS = 400
+
+#: The most NEW days a single fill run will fetch from NSE.
+#:
+#: ⚠ Bounded because adding a watched company asks for ~280 trading days that nothing has ever
+#: fetched, and a job that downloads 280 files in one pass is a job that hammers a public
+#: archive and runs for ten minutes. Spread over a few runs it is invisible. Days are filled
+#: OLDEST FIRST and that order is load-bearing: `_start` resumes from the newest close already
+#: stored, so fetching recent days first would move the resume point forward and the older gap
+#: would never be filled at all.
+MAX_NEW_DAYS_PER_RUN = 120
+
 #: Pause between bhavcopy downloads on a long fill — the first run fetches ~100 files, and
 #: NSE's archive is a public service. Module-level so tests can zero it.
 FILE_PAUSE = 0.25
@@ -97,6 +116,11 @@ class Span:
     first: dt.date
     end: dt.date
     is_open: bool
+    #: ⚠ Whether the book has ever TRANSACTED in this instrument, as against merely watching
+    #: it. Both need prices; only one can have a corporate action that corrupts a position.
+    #: Without the distinction, a bonus announced on a watchlist company would be recorded,
+    #: notified and then closed as "nothing held" — noise about a holding that does not exist.
+    held: bool = True
 
 
 def spans(db: Session, today: dt.date) -> list[Span]:
@@ -116,20 +140,49 @@ def spans(db: Session, today: dt.date) -> list[Span]:
                 if p.is_open
             )
 
-    if not first:
-        return []
-    instruments = db.execute(
-        sa.select(Instrument).where(Instrument.id.in_(first), Instrument.deleted_at.is_(None))
-    ).scalars()
     out = []
-    for inst in instruments:
-        is_open = inst.id in open_ids
+    if first:
+        instruments = db.execute(
+            sa.select(Instrument).where(Instrument.id.in_(first), Instrument.deleted_at.is_(None))
+        ).scalars()
+        for inst in instruments:
+            is_open = inst.id in open_ids
+            out.append(
+                Span(
+                    instrument=inst,
+                    first=first[inst.id],
+                    end=today if is_open else min(last[inst.id], today),
+                    is_open=is_open,
+                )
+            )
+
+    # --- watched but never bought ----------------------------------------------------------
+    #
+    # ⚠ Everything above is derived from TRANSACTIONS, which meant a company on the watchlist
+    # was never priced at all — it never entered the loop. That is not a cosmetic gap: no
+    # market price means no margin of safety, and a margin of safety is the single most
+    # important thing the quality score produces. A watchlist you cannot value is a list of
+    # names.
+    #
+    # The cost is nearly nothing going forward: NSE's bhavcopy is one file per day carrying
+    # every symbol, and those files are already fetched daily for the holdings. Only the
+    # historical backfill is new, and `MAX_NEW_DAYS_PER_RUN` spreads it.
+    watched = db.execute(
+        sa.select(Instrument).where(
+            Instrument.deleted_at.is_(None),
+            Instrument.is_tracked.is_(True),
+            Instrument.asset_class.in_(("EQUITY_IN", "EQUITY_US")),
+            Instrument.id.notin_(set(first)) if first else sa.true(),
+        )
+    ).scalars()
+    for inst in watched:
         out.append(
             Span(
                 instrument=inst,
-                first=first[inst.id],
-                end=today if is_open else min(last[inst.id], today),
-                is_open=is_open,
+                first=today - dt.timedelta(days=WATCHLIST_HISTORY_DAYS),
+                end=today,
+                is_open=True,
+                held=False,
             )
         )
     return sorted(out, key=lambda s: s.instrument.symbol)
@@ -300,7 +353,11 @@ def _fill_nse(db: Session, all_spans: list[Span], now, c, report: Report) -> Non
     unfetched: dict[uuid.UUID, list[dt.date]] = defaultdict(list)
     by_id = {s.instrument.id: s for s in mine}
 
-    for i, day in enumerate(sorted(needed)):
+    # ⚠ Oldest first, and capped. `_start` resumes from the newest close already stored, so
+    # fetching recent days first would advance the resume point past the gap and the older days
+    # would never be fetched at all. The cap simply stops one run doing a whole year.
+    days = sorted(needed)[:MAX_NEW_DAYS_PER_RUN]
+    for i, day in enumerate(days):
         if i and FILE_PAUSE:
             time.sleep(FILE_PAUSE)
         try:
@@ -671,7 +728,14 @@ def share_changing_actions(
 ) -> list[tuple[Instrument, nse.CorporateAction]]:
     """Splits, bonuses and consolidations announced for a stock that is currently held."""
     today = today or dt.datetime.now(IST).date()
-    held = [s.instrument for s in spans(db, today) if s.is_open and s.instrument.exchange == "NSE"]
+    # ⚠ `s.held`, not just `s.is_open`. A watched company has an open span because it needs
+    # prices, and it has no position for a split to corrupt — announcing one would be a
+    # warning about a holding that does not exist.
+    held = [
+        s.instrument
+        for s in spans(db, today)
+        if s.is_open and s.held and s.instrument.exchange == "NSE"
+    ]
     out = []
     for action in actions:
         if not nse.changes_share_count(action):

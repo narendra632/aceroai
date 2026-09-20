@@ -514,3 +514,77 @@ def test_the_value_line_starts_at_the_first_purchase(db, user, sources):
     ).scalar_one()
     covered = history.covered_range(history.curve(db, book_id, until=NOW.date()))
     assert covered is not None and covered[0] == bought
+
+
+# --- watched, but never bought -------------------------------------------------------------
+
+
+def _watched(db, symbol="WATCHONLY"):
+    from tests.conftest import make_instrument
+
+    inst = make_instrument(
+        db,
+        symbol=symbol,
+        exchange="NSE",
+        name=f"{symbol} Industries",
+        asset_class="EQUITY_IN",
+        currency="INR",
+    )
+    db.add(inst)
+    db.commit()
+    return inst
+
+
+def test_a_watched_company_is_given_a_span_although_it_was_never_bought(db, user):
+    """⚠ The whole price feed used to be derived from transactions, so a watchlist company was
+    never priced at all. No market price means no margin of safety, and a watchlist that
+    cannot be valued is a list of names."""
+    inst = _watched(db)
+    today = dt.date.today()
+
+    found = [s for s in feed.spans(db, today) if s.instrument.id == inst.id]
+    assert len(found) == 1
+    span = found[0]
+    assert span.is_open
+    assert not span.held, "it is watched, not held"
+    assert span.first == today - dt.timedelta(days=feed.WATCHLIST_HISTORY_DAYS)
+    assert span.end == today
+
+
+def test_a_watched_company_raises_no_corporate_action_alert(db, user):
+    """It has no position for a split to corrupt. Announcing one would warn about a holding
+    that does not exist, and then close itself as 'nothing held'."""
+    inst = _watched(db, symbol="WATCHSPLIT")
+    action = nse.CorporateAction(
+        company=f"{inst.name} Limited", purpose="BONUS 1:1", ex_date=dt.date.today()
+    )
+    assert feed.share_changing_actions(db, [action]) == []
+
+
+def test_a_watchlist_span_survives_a_book_with_no_transactions_at_all(db, user):
+    """The early return used to bail before any watched instrument was considered."""
+    inst = _watched(db, symbol="WATCHALONE")
+    assert any(s.instrument.id == inst.id for s in feed.spans(db, dt.date.today()))
+
+
+def test_one_run_does_not_fetch_a_whole_year_of_files(db, user, monkeypatch):
+    """⚠ Adding a watched company asks for ~280 trading days nothing has ever fetched. Days
+    are filled OLDEST FIRST, and that order is load-bearing: `_start` resumes from the newest
+    close stored, so fetching recent days first would move the resume point past the gap and
+    the older days would never be fetched at all."""
+    inst = _watched(db, symbol="WATCHCAP")
+    monkeypatch.setattr(feed, "FILE_PAUSE", 0)
+    monkeypatch.setattr(feed, "MAX_NEW_DAYS_PER_RUN", 3)
+
+    asked: list[dt.date] = []
+
+    def fake_bhavcopy(day, c=None):
+        asked.append(day)
+        raise nse.NotPublished(day)
+
+    monkeypatch.setattr(feed.nse, "bhavcopy", fake_bhavcopy)
+    feed.fill_closes(db, ("NSE",))
+
+    assert len(asked) == 3, "a single run must not download a year of files"
+    assert asked == sorted(asked), "oldest first, or the gap is never filled"
+    assert inst.symbol == "WATCHCAP"

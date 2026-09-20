@@ -1519,3 +1519,29 @@ export async function remapInstrument(
   if (!r.ok) return investmentError(r, "that company could not be remapped");
   return r.json();
 }
+
+/** Establish which imperatives a bottleneck actually blocks.
+ *
+ *  ⚠ Writes a NEW framework version: a crossing set is a claim about the country, and
+ *  changing one changes the rules every later score is measured against. Companies mapped to
+ *  the bottleneck keep their approval — what was agreed is that the company clears this
+ *  bottleneck, and that has not changed; only how wide the bottleneck is. */
+export async function reviseCrossings(
+  bottleneck: string,
+  crosses: string[],
+  note?: string,
+): Promise<Framework> {
+  const r = await req(
+    `/api/investments/framework/bottlenecks/${encodeURIComponent(bottleneck)}/crossings`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        crosses,
+        status: "CONFIRMED",
+        note: note ?? null,
+      }),
+    },
+  );
+  if (!r.ok) return investmentError(r, "those crossings could not be saved");
+  return r.json();
+}

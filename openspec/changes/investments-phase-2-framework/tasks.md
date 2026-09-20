@@ -80,21 +80,42 @@
       **and** the year under identical tags. Reading the wrong one is wrong by 4×, silently
 - [x] 8.6 ⚠ Banks confirmed to use a different taxonomy, declared in the filename
 
-## 9. Deployment
+## 9. Corrections found after stage 1 shipped
 
-- [ ] 9.1 Pushed; migration 018 run on the server; both seeds run
-- [ ] 9.2 Verified in production
+- [x] 9.1 **Watchlist companies were never priced.** The whole feed derives from
+      transactions, so a company with none never entered the loop — and no market price means
+      no margin of safety, which is the most important thing the quality score produces
+- [x] 9.2 `Span.held` separates "transacted in" from "merely watched", so a split announced
+      on a watched company stops raising a warning about a holding that does not exist
+- [x] 9.3 `MAX_NEW_DAYS_PER_RUN` bounds the backfill. ⚠ Oldest-first is load-bearing:
+      `_start` resumes from the newest close stored, so fetching recent days first would
+      advance the resume point past the gap and the older days would never be fetched
+- [x] 9.4 **`BREADTH_FLOOR` was information dressed as an action.** The interface said a
+      figure might be understated and offered no way to raise it, so it would have sat in the
+      list for ever. `revise_crossings` + route + control added
+- [x] 9.5 The seed brings LIVE mappings onto a corrected framework — otherwise a fix to a
+      crossing set repairs a fresh database and silently does nothing to production
+- [x] 9.6 **Judgement applied to the framework itself:** B2.2 widened from A2 to A2, A4, A6
+      on the evidence of his own portfolio table and B4.1's stated dependency. Deliberately
+      not widened to A9 or A3, which have their own bottlenecks — counting them here would
+      score the same dependency twice
+- [x] 9.7 Full suite 932 passed
 
-## 10. Documentation
+## 10. Deployment
 
-- [x] 10.1 `docs/phase2-framework-inputs.md` committed — the research this stage rests on
-- [ ] 10.2 `docs/INVESTMENTS.md` — the framework section (with stage 2, once scores exist)
+- [x] 10.1 Pushed; migration 018 run on the server; both seeds run
+- [x] 10.2 Verified in production — routes live, auth enforced, seeds reported 12 mappings
 
-## 11. Owed at the end of Phase 2
+## 11. Documentation
 
-- [ ] 11.1 **The walkthrough.** Hand-held explanation of the whole module — interface,
+- [x] 11.1 `docs/phase2-framework-inputs.md` committed — the research this stage rests on
+- [ ] 11.2 `docs/INVESTMENTS.md` — the framework section (with stage 2, once scores exist)
+
+## 12. Owed at the end of Phase 2
+
+- [ ] 12.1 **The walkthrough.** Hand-held explanation of the whole module — interface,
       arithmetic, framework layer — with worked examples and simulated scenarios under
       different conditions. ⚠ Phase 2 is not complete without this; it is a deliverable he
       asked for, not a courtesy.
-- [ ] 11.2 The Schedule FA coverage wording: count days **held**, not days in the period, so
+- [ ] 12.2 The Schedule FA coverage wording: count days **held**, not days in the period, so
       "priced on 97 of 263 days" stops implying missing data when he simply did not own it yet
