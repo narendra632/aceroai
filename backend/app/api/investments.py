@@ -27,6 +27,8 @@ from app.api.schemas import (
     ApproveIn,
     AssetTotalOut,
     AttentionOut,
+    BookLineOut,
+    BooksOut,
     BottleneckOut,
     ClaimOut,
     CorporateActionOut,
@@ -70,6 +72,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.services.errors import NotFound
 from app.services.investments import (
+    books,
     corpactions,
     entry,
     frameworks,
@@ -794,3 +797,28 @@ def decide_proposal(
     )
     db.commit()
     return _proposal_out(db, row)
+
+
+@router.get("/books")
+def get_books(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BooksOut:
+    """Every book, valued at the same prices at the same moment.
+
+    ⚠ The same prices, deliberately. Valuing one book at yesterday's close and another at
+    today's live price would produce a difference that is entirely an artefact of when each
+    was read, and it would look exactly like a result.
+    """
+    books.ensure(db, user.id, "MIRROR")
+    books.ensure(db, user.id, "AI_CLEAN")
+    books.seed_mirror(db, user.id)
+    db.commit()
+
+    comparison = books.compare(db, user.id)
+    return BooksOut(
+        lines=[BookLineOut.model_validate(line) for line in comparison.lines],
+        as_of=comparison.as_of,
+        readable=comparison.readable,
+        unaided=books.unaided(db, user.id),
+    )

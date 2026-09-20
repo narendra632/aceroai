@@ -5,6 +5,7 @@ import CorporateActions from "@/components/CorporateActions";
 import ForeignHoldings from "@/components/ForeignHoldings";
 import FrameworkPanel from "@/components/FrameworkPanel";
 import PositionSheet from "@/components/PositionSheet";
+import BooksPanel from "@/components/BooksPanel";
 import ProposalsPanel from "@/components/ProposalsPanel";
 import TransactionEntry from "@/components/TransactionEntry";
 import { InfoTip } from "@/components/InfoTip";
@@ -871,6 +872,11 @@ export default function InvestmentsView() {
           {/* Below the holdings: this is where a company stops being a line in a ledger
           and becomes a position in a thesis. */}
           <FrameworkPanel />
+
+          {/* ⚠ Below the framework and collapsed by default. It is for reading in aggregate
+          on a schedule, and putting it higher would invite exactly the casual dipping-in that
+          trains worse judgement. */}
+          <BooksPanel />
 
           {/* Below the holdings and above the ledger: it is a yearly obligation rather
           than something to check on open, but it belongs with the record it reads. */}

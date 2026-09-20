@@ -65,6 +65,7 @@ from app.db.models import (
     CorporateAction,
     DailyUsage,
     Decision,
+    FrameworkScore,
     FrameworkVersion,
     Fundamental,
     FxObservation,
@@ -313,6 +314,13 @@ def _purge(db):
 
     db.execute(sa_update(AbMapping).values(superseded_by_id=None))
     db.execute(delete(AbMapping))
+    # Score history points at both an instrument and a framework version, so it goes before
+    # either. Append-only, lifted the same way the rest of the ledger is.
+    db.execute(text("ALTER TABLE framework_scores DISABLE TRIGGER framework_scores_append_only"))
+    try:
+        db.execute(delete(FrameworkScore))
+    finally:
+        db.execute(text("ALTER TABLE framework_scores ENABLE TRIGGER framework_scores_append_only"))
     db.execute(delete(FrameworkVersion))
 
     orphaned = ~Instrument.id.in_(select(Transaction.instrument_id))

@@ -1175,6 +1175,31 @@ export type Proposal = {
   decision_reason: string | null;
 };
 
+/** One book or benchmark, valued at the same prices as all the others. */
+export type BookLine = {
+  kind: string;
+  name: string;
+  purpose: string;
+  invested_inr: string;
+  /** ⚠ null when even one holding lacks a price — a partial total steps whenever coverage
+   *  changes, which is indistinguishable from a real movement. */
+  value_inr: string | null;
+  gain_inr: string | null;
+  gain_pct: string | null;
+  positions: number;
+  is_complete: boolean;
+};
+
+export type Books = {
+  lines: BookLine[];
+  as_of: string | null;
+  /** ⚠ false until the real book and a paper book are both fully priced. */
+  readable: boolean;
+  /** What you bought that the system never suggested — the one category a merged ledger
+   *  would silently discard. */
+  unaided: string[];
+};
+
 /** One reading of how the system is doing.
  *
  *  ⚠ `value` is null while `n` is below the minimum, and that is the honest state for a long
@@ -1705,5 +1730,12 @@ export async function decideProposal(
     }),
   });
   if (!r.ok) return investmentError(r, "that decision could not be recorded");
+  return r.json();
+}
+
+/** Every book side by side, valued at the same prices at the same moment. */
+export async function getBooks(): Promise<Books> {
+  const r = await req("/api/investments/books");
+  if (!r.ok) throw new Error("could not load the books");
   return r.json();
 }

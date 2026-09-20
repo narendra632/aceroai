@@ -483,8 +483,15 @@ class Instrument(Base):
 class Portfolio(Base):
     """A book of holdings.
 
-    `REAL` is what the user actually holds. `MIRROR` is what the system's own approved
-    decisions produce, and stays empty until proposals exist.
+    Six kinds, and each answers a question the others cannot:
+
+    * `REAL` — what the user actually holds. Their word, never written by a machine.
+    * `MIRROR` — seeded with the real holdings, then the system's approved decisions on top.
+      *What would my portfolio look like if I had followed Acero from here.*
+    * `AI_CLEAN` — from nothing, only those decisions. *What has Acero itself produced.*
+    * `PROPOSED_ALL` — every buy ever suggested, equally weighted, never sold. If the real
+      book cannot beat this, the system has ideas but no timing.
+    * `SHADOW_*` — what did NOT happen: vetoed, unfunded, or refused by the rules.
 
     ⚠ They are **not nested**. The user holds things the system never suggested, and the
     system suggests things the user does not act on. The difference between the two books is
@@ -951,4 +958,42 @@ class ShadowEntry(Base):
     exit_price: Mapped[Decimal | None] = mapped_column(sa.Numeric(20, 6))
     exit_date: Mapped[dt.date | None] = mapped_column(sa.Date)
     exit_reason: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class FrameworkScore(Base):
+    """What a company scored, on a day, under the rules in force then. **APPEND-ONLY** (022).
+
+    ⚠ A score is a judgement made at a moment with the data available then. Recomputing it
+    later with today's figures silently rewrites history — a company that scored 4 in March and
+    8 in September would read as 8 for both, and the improvement, which is the most interesting
+    thing about it, would be invisible.
+
+    ⚠ The three scores sit side by side and are never summed. A company can be structurally
+    essential, genuinely excellent, and still a bad purchase today; that is the finding an
+    average destroys, and it is the main reason these frameworks are held together.
+
+    One row per company per day, written only when something CHANGED. Eleven identical rows
+    every evening would turn a history worth reading into a log.
+    """
+
+    __tablename__ = "framework_scores"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    scored_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    #: The day the score DESCRIBES, distinct from when it was taken. A catch-up run on Monday
+    #: scoring Friday's facts is recording a fact about Friday.
+    as_of: Mapped[dt.date] = mapped_column(sa.Date)
+    framework_version_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("framework_versions.id"))
+    ab_score: Mapped[Decimal | None] = mapped_column(sa.Numeric(4, 2))
+    ab_components: Mapped[dict | None] = mapped_column(JSONB)
+    quality_earned: Mapped[Decimal | None] = mapped_column(sa.Numeric(4, 2))
+    quality_available: Mapped[Decimal | None] = mapped_column(sa.Numeric(4, 2))
+    quality_components: Mapped[dict | None] = mapped_column(JSONB)
+    flags_yes: Mapped[int] = mapped_column(sa.Integer, default=0)
+    flags: Mapped[dict | None] = mapped_column(JSONB)
+    quadrant: Mapped[str | None] = mapped_column(sa.Text)
+    price: Mapped[Decimal | None] = mapped_column(sa.Numeric(20, 6))
+    years_read: Mapped[int] = mapped_column(sa.Integer, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

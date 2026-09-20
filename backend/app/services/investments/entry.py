@@ -307,6 +307,60 @@ def record_action(
     return txn
 
 
+def record_paper(
+    db: Session,
+    portfolio_id: uuid.UUID,
+    *,
+    instrument: Instrument,
+    trade_date: dt.date,
+    quantity: Decimal,
+    price: Decimal,
+    fx_rate_inr: Decimal | None = None,
+    note: str | None = None,
+) -> Transaction:
+    """Write a fill into a PAPER book — what the system's own decisions would have produced.
+
+    The third write path, and the last. Kept here beside `record` and `record_action` so every
+    append to any ledger is still in one module.
+
+    ⚠ **Charges are modelled, not skipped.** A paper book that ignores the transaction taxes,
+    exchange fees, stamp duty and depository charges flatters itself by a few tenths of a
+    percent on every round trip — and the entire purpose of these books is to be compared
+    against a real one that pays them.
+
+    ⚠ It does not commit. Unlike `record`, this runs inside a decision that is also writing
+    the decision row and arming the conditions, and those must land together or not at all.
+    """
+    if quantity <= 0:
+        raise Invalid("a paper fill needs a positive quantity")
+
+    fx = fx_rate_inr or (Decimal(1) if instrument.currency == "INR" else None)
+    if fx is None:
+        raise Invalid(f"{instrument.symbol} is priced in {instrument.currency}; a rate is needed")
+
+    charges, prepaid, _ = _cost(db, instrument, "BUY", quantity, price, fx, trade_date)
+    schedule = costmodel.schedule_for(db, VENUE_FOR.get(instrument.asset_class, ""), trade_date)
+    txn = Transaction(
+        id=uuid.uuid4(),
+        portfolio_id=portfolio_id,
+        instrument_id=instrument.id,
+        txn_type="BUY",
+        trade_date=trade_date,
+        quantity=quantity,
+        price=price,
+        currency=instrument.currency,
+        fx_rate_inr=fx,
+        charges_inr=charges,
+        prepaid_tax_inr=prepaid,
+        charge_schedule_id=schedule.id if schedule else None,
+        entry_source="PROPOSAL_APPROVAL",
+        note=note,
+    )
+    db.add(txn)
+    db.flush()
+    return txn
+
+
 def reverse(db: Session, txn_id: uuid.UUID, *, note: str | None = None) -> Transaction:
     """Undo, implemented as the ledger requires: a new entry that supersedes the old one.
 
@@ -386,6 +440,7 @@ __all__ = [
     "prepare",
     "record",
     "record_action",
+    "record_paper",
     "reverse",
     "superseded_ids",
 ]

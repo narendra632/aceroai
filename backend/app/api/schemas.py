@@ -923,6 +923,39 @@ class DecideIn(BaseModel):
     modified_amount_inr: Decimal | None = None
 
 
+class BookLineOut(BaseModel):
+    """One book or benchmark, valued at the same prices as all the others."""
+
+    kind: str
+    name: str
+    purpose: str
+    invested_inr: Decimal
+    #: ⚠ None when even one holding lacks a price. A total assembled from partial coverage
+    #: steps whenever coverage changes, and that is indistinguishable from a real movement.
+    value_inr: Decimal | None
+    gain_inr: Decimal | None
+    gain_pct: Decimal | None
+    positions: int
+    is_complete: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BooksOut(BaseModel):
+    """Every book side by side, plus what you bought that was never suggested."""
+
+    lines: list[BookLineOut]
+    as_of: dt.datetime | None
+    #: ⚠ False until the real book and a paper book are both fully priced. Comparing a
+    #: complete total with a partial one is worse than not comparing at all.
+    readable: bool
+    #: Holdings the system never suggested — the direct read on your own judgement, and the
+    #: one category a single merged ledger would silently discard.
+    unaided: list[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MeasureOut(BaseModel):
     """One reading of how the system is doing, with the sample it rests on.
 

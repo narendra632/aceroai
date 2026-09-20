@@ -38,7 +38,16 @@ from app.db.models import (
     ShadowEntry,
 )
 from app.services.errors import Invalid, NotFound
-from app.services.investments import frameworks, fundamentals, gates, pricing, scoring
+from app.services.investments import (
+    books,
+    entry,
+    frameworks,
+    fundamentals,
+    gates,
+    pricing,
+    scoring,
+    watching,
+)
 from app.services.investments import portfolio as pf
 
 ZERO = Decimal(0)
@@ -608,6 +617,9 @@ def decide(
     )
     db.add(row)
 
+    if outcome == "APPROVE" or outcome == "MODIFY":
+        _fill_paper_books(db, user_id, proposal, modified_amount_inr)
+
     if outcome == "REJECT":
         # ⚠ Read in aggregate on a schedule, never after a name that got away. A rejected idea
         # that rose is far more memorable than one that fell, and browsing this book casually
@@ -620,6 +632,54 @@ def decide(
             trigger.status = "ARMED"
     db.flush()
     return row
+
+
+def _fill_paper_books(
+    db: Session,
+    user_id: uuid.UUID,
+    proposal: Proposal,
+    modified_amount_inr: Decimal | None,
+) -> None:
+    """Write the approved fill into both paper books.
+
+    ⚠ Both, and they are not duplicates. `MIRROR` started as a copy of what was really held,
+    so it answers "what would my portfolio look like if I had followed Acero from here".
+    `AI_CLEAN` started from nothing, so it answers "what has Acero itself produced". One
+    cannot be derived from the other, and merging them would lose whichever question was not
+    asked.
+
+    ⚠ The REAL book is never touched. What the user does in life is their word, entered the
+    same way every other transaction is — and the gap between the two is one of the most
+    interesting numbers this module produces.
+    """
+    raw = (proposal.price_snapshot or {}).get("price")
+    if not raw:
+        return
+    price = Decimal(str(raw))
+    if price <= 0:
+        return
+
+    amount = modified_amount_inr or proposal.target_amount_inr or ZERO
+    quantity = proposal.target_qty or (amount / price if amount else ZERO)
+    if quantity <= 0:
+        return
+
+    instrument = db.get(Instrument, proposal.instrument_id)
+    if instrument is None:
+        return
+
+    note = f"approved suggestion {proposal.id}"
+    for kind in ("MIRROR", "AI_CLEAN"):
+        book_row = books.ensure(db, user_id, kind)
+        entry.record_paper(
+            db,
+            book_row.id,
+            instrument=instrument,
+            trade_date=dt.date.today(),
+            quantity=quantity,
+            price=price,
+            note=note,
+        )
 
 
 def _shadow_from_proposal(
@@ -759,6 +819,35 @@ def synthesise(
         if verdict.passed:
             passing += 1
         decided.append((draft, verdict))
+
+        # ⚠ Remember the judgement, not just the suggestion. A score is made at a moment with
+        # the data available then; recomputing it later with today's figures would show a
+        # company that improved from 4 to 8 as having always been 8, and the improvement —
+        # the most interesting thing about it — would be invisible. Written only on a change.
+        watching.record_score(
+            db,
+            inst,
+            framework_version_id=version.id,
+            ab=frameworks.ab_score(mapping, spec),
+            quality=candidate.quality,
+            flags=scoring.computed_flags(
+                db,
+                inst,
+                price=(
+                    Decimal(str(draft.price_snapshot["price"]))
+                    if draft.price_snapshot.get("price")
+                    else None
+                ),
+            ),
+            quadrant=draft.quadrant,
+            price=(
+                Decimal(str(draft.price_snapshot["price"]))
+                if draft.price_snapshot.get("price")
+                else None
+            ),
+            years_read=draft.input_refs.get("years_read", 0),
+            today=today,
+        )
 
     run = AgentRun(
         id=uuid.uuid4(),

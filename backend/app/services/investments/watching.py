@@ -439,3 +439,93 @@ def measures(db: Session, *, today: dt.date | None = None) -> list[Measure]:
         trigger_discipline(db, today=today),
         decision_record(db),
     ]
+
+
+# --- remembering what was judged ------------------------------------------------------------
+
+
+def record_score(
+    db: Session,
+    instrument,
+    *,
+    framework_version_id: uuid.UUID,
+    ab,
+    quality,
+    flags: list,
+    quadrant: str,
+    price: Decimal | None,
+    years_read: int,
+    as_of: dt.date | None = None,
+    today: dt.date | None = None,
+):
+    """Store a score, but only when it has changed since the last one.
+
+    ⚠ Written because a score is a judgement made at a moment, with the data available then
+    and the rules in force then. Recomputing it later with today's figures silently rewrites
+    history — a company that scored 4 in March and 8 in September would read as 8 for both,
+    and the improvement, which is the most interesting thing about it, would be invisible.
+
+    ⚠ Only on a change. Eleven identical rows every evening would turn a history worth reading
+    into a log, and what is being recorded is the movement.
+    """
+    from app.db.models import FrameworkScore
+
+    as_of = as_of or today or dt.date.today()
+    flags_yes = sum(1 for f in flags if f.verdict == "YES")
+
+    previous = db.execute(
+        sa.select(FrameworkScore)
+        .where(FrameworkScore.instrument_id == instrument.id)
+        .order_by(FrameworkScore.as_of.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if previous is not None:
+        if previous.as_of == as_of:
+            return None
+        unchanged = (
+            previous.ab_score == ab.total
+            and previous.quality_earned == quality.earned
+            and previous.quality_available == quality.available
+            and previous.flags_yes == flags_yes
+            and previous.quadrant == quadrant
+        )
+        if unchanged:
+            return None
+
+    row = FrameworkScore(
+        id=uuid.uuid4(),
+        instrument_id=instrument.id,
+        scored_at=dt.datetime.now(dt.UTC),
+        as_of=as_of,
+        framework_version_id=framework_version_id,
+        ab_score=ab.total,
+        ab_components={c.name: str(c.points) for c in ab.components},
+        quality_earned=quality.earned,
+        quality_available=quality.available,
+        quality_components={
+            p.name: (None if p.points is None else str(p.points)) for p in quality.parts
+        },
+        flags_yes=flags_yes,
+        flags={str(f.number): f.verdict for f in flags},
+        quadrant=quadrant,
+        price=price,
+        years_read=years_read,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def score_history(db: Session, instrument_id: uuid.UUID, *, limit: int = 60) -> list:
+    """How a company's three scores have moved, newest first."""
+    from app.db.models import FrameworkScore
+
+    return list(
+        db.execute(
+            sa.select(FrameworkScore)
+            .where(FrameworkScore.instrument_id == instrument_id)
+            .order_by(FrameworkScore.as_of.desc())
+            .limit(limit)
+        ).scalars()
+    )
