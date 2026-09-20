@@ -33,11 +33,13 @@ from app.api.schemas import (
     CurveOut,
     DraftIn,
     DraftOut,
+    FlagOut,
     FrameworkOut,
     HoldingDetailOut,
     HoldingOut,
     MappingOut,
     PriceRefreshOut,
+    QualityOut,
     RemapIn,
     ReverseIn,
     ScheduleFaOut,
@@ -52,9 +54,12 @@ from app.services.investments import (
     corpactions,
     entry,
     frameworks,
+    fundamentals,
     history,
     overview,
+    pricing,
     schedulefa,
+    scoring,
 )
 from app.services.investments import portfolio as pf
 from app.services.marketdata import feed
@@ -430,10 +435,30 @@ def get_schedule_fa(
 
 
 def _mapping_out(
-    db: Session, spec: dict, inst: Instrument, mapping, held: set[uuid.UUID]
+    db: Session,
+    spec: dict,
+    inst: Instrument,
+    mapping,
+    held: set[uuid.UUID],
+    mark=None,
 ) -> MappingOut:
     row = frameworks.bottleneck(spec, mapping.b_bottleneck)
     multiple = frameworks.multiple_for(spec, inst.sector)
+
+    # ⚠ Market cap is price x shares, and shares come from the filing (paid-up capital over
+    # face value) rather than from anywhere convenient. Without BOTH the margin of safety
+    # reports unknown rather than assuming anything about the price.
+    periods = fundamentals.by_period(db, inst.id, limit=6)
+    years = [p for p in periods if "Q" not in p]
+    shares = scoring._shares(periods, years[0]) if years else None
+    price = mark.price if mark else None
+    market_cap = (price * shares) if (price is not None and shares) else None
+
+    quality = scoring.quality_score(db, inst, spec, market_cap=market_cap)
+    flags = scoring.computed_flags(db, inst, price=price)
+    # Two or more red flags standing is what "the narrative is running" looks like when only
+    # the measured half of the checklist has been answered.
+    reflexive = sum(1 for f in flags if f.verdict == "YES") >= 2
     return MappingOut(
         id=mapping.id,
         instrument_id=inst.id,
@@ -458,6 +483,20 @@ def _mapping_out(
         off_framework=mapping.off_framework,
         is_held=inst.id in held,
         score=AbScoreOut.model_validate(frameworks.ab_score(mapping, spec)),
+        quality=QualityOut(
+            earned=quality.earned,
+            available=quality.available,
+            ratio=quality.ratio,
+            parts=[
+                {"name": p.name, "points": p.points, "available": p.available, "detail": p.detail}
+                for p in quality.parts
+            ],
+            unknown=quality.unknown,
+            is_complete=quality.is_complete,
+        ),
+        flags=[FlagOut.model_validate(f) for f in flags],
+        quadrant=scoring.quadrant(quality, reflexive),
+        years_read=len(years),
     )
 
 
@@ -486,11 +525,13 @@ def get_framework(
     spec = version.spec
     held = {p.instrument_id for p in pf.positions(db, book.id)}
 
+    tracked = _tracked_equities(db)
+    marks = pricing.latest(db, [i.id for i in tracked])
     mappings = []
-    for inst in _tracked_equities(db):
+    for inst in tracked:
         mapping = frameworks.live_mapping(db, inst.id)
         if mapping is not None:
-            mappings.append(_mapping_out(db, spec, inst, mapping, held))
+            mappings.append(_mapping_out(db, spec, inst, mapping, held, marks.get(inst.id)))
 
     return FrameworkOut(
         version=version.version,

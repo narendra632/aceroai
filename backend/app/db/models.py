@@ -706,3 +706,71 @@ class AbMapping(Base):
     framework_version_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("framework_versions.id"))
     superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("ab_mappings.id"))
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class SourceItem(Base):
+    """One document the system has read, and the words it took its figures from (019).
+
+    ⚠ **APPEND-ONLY, and the excerpt is why this table exists.** The rule the module rests on
+    is that a model never produces a number: every figure is looked up from a record and
+    checked back against that record's own words, character by character. That check needs the
+    words. Storing the parsed figure alone leaves the validator comparing a number with
+    itself, which validates nothing.
+
+    The document itself is NOT stored. Filings run to 200 KB and the module has a hard disk
+    budget; the file is parsed in memory and discarded, and the ~15 tagged lines the figures
+    came from fit the 2 KB cap with room to spare.
+
+    A company revising its results arrives as a NEW row whose figures supersede the old ones.
+    """
+
+    __tablename__ = "source_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(sa.Text)
+    instrument_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("instruments.id"))
+    source: Mapped[str] = mapped_column(sa.Text)
+    external_id: Mapped[str] = mapped_column(sa.Text)
+    url: Mapped[str | None] = mapped_column(sa.Text)
+    title: Mapped[str | None] = mapped_column(sa.Text)
+    published_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    fetched_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    content_hash: Mapped[str] = mapped_column(sa.Text)
+    #: ⚠ Capped at 2 KB by a database CHECK, not by the code that writes it. A cap the
+    #: application promises to honour is a cap a later writer forgets.
+    excerpt: Mapped[str] = mapped_column(sa.Text)
+    extraction: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Fundamental(Base):
+    """One figure a company reported, for one period. **APPEND-ONLY** (019).
+
+    Keyed on `(instrument, period, metric, source_item)` rather than a uuid so that re-parsing
+    the same filing writes the identical rows and the insert does nothing — the sync job is
+    safe to run as often as it likes.
+
+    ⚠ `consolidated` travels with every figure. Consolidated covers subsidiaries and
+    standalone does not; comparing one year's consolidated revenue with another's standalone
+    is a silent apples-to-oranges error, and GE Vernova files only standalone because it has
+    no subsidiaries at all.
+    """
+
+    __tablename__ = "fundamentals"
+
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("instruments.id"), primary_key=True
+    )
+    #: `FY26` or `FY26Q1` — what the figure DESCRIBES, never when it was filed.
+    fiscal_period: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    metric_key: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    source_item_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("source_items.id"), primary_key=True
+    )
+    value: Mapped[Decimal] = mapped_column(sa.Numeric(24, 6))
+    unit: Mapped[str] = mapped_column(sa.Text)
+    period_end: Mapped[dt.date] = mapped_column(sa.Date)
+    consolidated: Mapped[bool] = mapped_column(sa.Boolean)
+    taxonomy: Mapped[str] = mapped_column(sa.Text)
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("source_items.id"))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

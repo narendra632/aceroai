@@ -1082,6 +1082,35 @@ export type Bottleneck = {
   investability: string;
 };
 
+/** One component of the quality score. ⚠ `points` is null where the inputs were absent,
+ *  which is a different answer from zero and must not render the same way. */
+export type ScorePart = {
+  name: string;
+  points: string | null;
+  available: string;
+  detail: string;
+};
+
+/** ⚠ `earned` and `available` belong together. Six on its own means nothing: six of ten is
+ *  mediocre, six of six is excellent, and the difference is how many filings were read. */
+export type Quality = {
+  earned: string;
+  available: string;
+  ratio: string | null;
+  parts: ScorePart[];
+  unknown: string[];
+  is_complete: boolean;
+};
+
+/** One checklist answer. ⚠ Every flag is a RED flag: YES is bad. */
+export type Flag = {
+  number: number;
+  question: string;
+  verdict: "YES" | "NO" | "UNKNOWN";
+  evidence: string;
+  computed: boolean;
+};
+
 export type Mapping = {
   id: string;
   instrument_id: string;
@@ -1109,6 +1138,12 @@ export type Mapping = {
   off_framework: boolean;
   is_held: boolean;
   score: AbScore;
+  quality: Quality | null;
+  flags: Flag[];
+  /** ⚠ Q2 and Q4 block a purchase outright, so BORDERLINE on a thin reading is a refusal to
+   *  convict rather than a missing answer. */
+  quadrant: string | null;
+  years_read: number;
 };
 
 export type FrameworkAttention = {

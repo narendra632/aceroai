@@ -793,6 +793,51 @@ class BottleneckOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ScorePartOut(BaseModel):
+    """One component of the quality score. ⚠ `points` is null where the inputs were absent —
+    which is a different answer from zero and must be rendered differently."""
+
+    name: str
+    points: Decimal | None
+    available: Decimal
+    detail: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QualityOut(BaseModel):
+    """How good the business is and how sensibly it is priced, from filings alone.
+
+    ⚠ `earned` and `available` must be shown TOGETHER. Six on its own means nothing: six out
+    of ten is mediocre and six out of six is excellent, and the difference is entirely how
+    many of the filings have been read.
+    """
+
+    earned: Decimal
+    available: Decimal
+    ratio: Decimal | None
+    parts: list[ScorePartOut]
+    unknown: list[str]
+    is_complete: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FlagOut(BaseModel):
+    """One checklist answer. ⚠ Every flag is a RED flag: YES is bad."""
+
+    number: int
+    question: str
+    #: YES · NO · UNKNOWN. Unknown is the truth when nothing was read; a checklist that
+    #: answers NO by default reports a clean bill of health it never checked.
+    verdict: str
+    evidence: str
+    #: Measured rather than judged, so no model verdict may later overrule it.
+    computed: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MappingOut(BaseModel):
     """Where one company sits in the framework, and what that is worth."""
 
@@ -822,6 +867,13 @@ class MappingOut(BaseModel):
     off_framework: bool
     is_held: bool
     score: AbScoreOut
+    quality: QualityOut | None = None
+    flags: list[FlagOut] = []
+    #: Q1 · Q2 · Q3 · Q4 · BORDERLINE · UNKNOWN. ⚠ Q2 and Q4 block a purchase outright, so
+    #: BORDERLINE on a thin reading is a refusal to convict rather than a missing answer.
+    quadrant: str | None = None
+    #: How many full years of filings the quality score rests on.
+    years_read: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 

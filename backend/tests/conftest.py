@@ -63,6 +63,7 @@ from app.db.models import (
     CorporateAction,
     DailyUsage,
     FrameworkVersion,
+    Fundamental,
     FxObservation,
     GeneratedReview,
     Instrument,
@@ -74,6 +75,7 @@ from app.db.models import (
     PriceObservation,
     ProfileFact,
     PushSubscription,
+    SourceItem,
     Span,
     Task,
     Transaction,
@@ -256,6 +258,20 @@ def _purge(db):
     # `superseded_by_id` is nulled first: the column references this same table, so deleting
     # every row in one statement can trip its own foreign key depending on the order Postgres
     # reaches them.
+    # Filed figures and the documents they came from. ⚠ Both are append-only with a trigger,
+    # so teardown lifts it exactly as it does for transactions — the guarantee that matters is
+    # that APPLICATION code cannot rewrite the record, not that a test cannot clean up.
+    # Figures reference documents, so they go first.
+    if db.execute(select(SourceItem.id).limit(1)).first() is not None:
+        for table in ("fundamentals", "source_items"):
+            db.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {table}_append_only"))
+        try:
+            db.execute(delete(Fundamental))
+            db.execute(delete(SourceItem))
+        finally:
+            for table in ("fundamentals", "source_items"):
+                db.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {table}_append_only"))
+
     db.execute(sa_update(AbMapping).values(superseded_by_id=None))
     db.execute(delete(AbMapping))
     db.execute(delete(FrameworkVersion))

@@ -26,6 +26,26 @@ import type { Framework, Mapping } from "@/lib/api";
  *     company narrow for a documentation reason.
  */
 
+/* ⚠ Q2 and Q4 hard-block a purchase, so their wording says what they MEAN rather than
+   naming a box. BORDERLINE is a refusal to convict on a partial reading — not a shrug. */
+const QUADRANT: Record<string, string> = {
+  Q1: "quality, and the story running",
+  Q2: "a story without a business",
+  Q3: "quality, quietly",
+  Q4: "cheap for a reason",
+  BORDERLINE: "too little read to judge",
+  UNKNOWN: "nothing read yet",
+};
+
+const PART_LABEL: Record<string, string> = {
+  roe: "return on equity",
+  roce: "return on capital",
+  cash_conversion: "profit into cash",
+  balance_sheet: "debt",
+  retained_earnings: "retained earnings",
+  margin_of_safety: "margin of safety",
+};
+
 const ATTENTION_LABEL: Record<api.FrameworkAttention["kind"], string> = {
   UNMAPPED: "not in the framework yet",
   UNAPPROVED: "waiting for you",
@@ -277,6 +297,61 @@ function Row({
             </div>
           ))}
         </dl>
+      )}
+
+      {m.quality && m.quality.available !== "0" && (
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-xs font-medium">
+              Business and price
+              {/* ⚠ Both halves, always. "6.0" alone is meaningless: six of ten is mediocre
+                  and six of six is excellent, and the gap is how much has been read. */}
+              <span className="ml-2 font-normal tabular-nums">
+                {m.quality.earned} of {m.quality.available} measurable
+              </span>
+            </p>
+            <span className="text-xs text-muted-foreground">
+              {m.years_read} year{m.years_read === 1 ? "" : "s"} of filings ·{" "}
+              <span className="font-medium">{QUADRANT[m.quadrant ?? ""] ?? m.quadrant}</span>
+            </span>
+          </div>
+
+          <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+            {m.quality.parts.map((p) => (
+              <div key={p.name} className="flex items-baseline gap-2">
+                <dt className="w-32 shrink-0 text-muted-foreground">
+                  {PART_LABEL[p.name] ?? p.name}
+                </dt>
+                {/* ⚠ "—" for an input that was absent, never "0". A company marked poor
+                    because its filings were not read looks identical to one that is poor. */}
+                <dd className="w-12 shrink-0 font-medium tabular-nums">
+                  {p.points == null ? "—" : `${p.points}/${p.available}`}
+                </dd>
+                <dd className="truncate text-muted-foreground" title={p.detail}>
+                  {p.detail}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          {m.flags.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {m.flags.map((f) => (
+                <span
+                  key={f.number}
+                  title={`${f.question} — ${f.evidence}`}
+                  className={`rounded-md px-1.5 py-0.5 text-xs ${
+                    f.verdict === "YES"
+                      ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  flag {f.number}: {f.verdict.toLowerCase()}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {m.score.breadth_is_floor && !m.off_framework && (

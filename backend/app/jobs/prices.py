@@ -18,7 +18,7 @@ from app.db.models import Instrument, User
 from app.jobs.registry import JobResult, job
 from app.jobs.registry import Notification as NotificationSpec
 from app.services.errors import NotFound
-from app.services.investments import corpactions, overview
+from app.services.investments import corpactions, fundamentals, overview
 from app.services.marketdata import feed, nse
 from app.services.marketdata.http import ProviderError
 
@@ -152,3 +152,27 @@ def corporate_actions_watch(db: Session, user: User) -> JobResult:
         )
 
     return JobResult(silent=True, detail=detail)
+
+
+@job(
+    "fundamentals_sync",
+    # Sunday morning. Results arrive in four clusters a year and a filing is worth reading the
+    # week it appears, not the hour — and this is the one price-side job that parses documents.
+    "0 8 * * sun",
+    description="Reads the results your companies file with the exchange.",
+    catch_up=dt.timedelta(hours=12),
+)
+def fundamentals_sync(db: Session, user: User) -> JobResult:
+    """Read every tracked Indian company's annual filings and store what they report.
+
+    Silent by design. A filing arriving is not news — what the numbers in it MEAN is news, and
+    that is the scoring job's business. A notification every time a company filed its results
+    would be four a year per holding, none of which asks anything of the reader.
+
+    ⚠ Never raises. An unreachable NSE leaves every figure already stored exactly as it was;
+    the quality score then reports its components unknown rather than scoring them badly, which
+    is the distinction the whole module turns on.
+    """
+    report = fundamentals.sync(db)
+    db.commit()
+    return JobResult(silent=True, detail=report.detail())
