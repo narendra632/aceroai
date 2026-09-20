@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Instrument, Portfolio, PriceObservation, Transaction
 from app.services.errors import NotFound
-from app.services.investments import history, pricing, returns, taxrules
+from app.services.investments import corpactions, history, pricing, returns, taxrules
 from app.services.investments import portfolio as pf
 
 ZERO = Decimal(0)
@@ -110,6 +110,10 @@ class Holding:
     losses_ring_fenced: bool
     suspicious_move: history.SuspiciousMove | None
     lots: int
+    #: ⚠ Gate G7. An announced split or bonus that is not yet in the ledger means the price
+    #: and the quantity are counting different things, so every figure on this row is
+    #: arithmetic over a disagreement. Present means "do not trust the P&L here yet".
+    open_action: corpactions.ActionView | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,8 @@ class Summary:
     #: the allocation, so "excluded" is a figure rather than a shrug.
     unpriced_cost_inr: Decimal = ZERO
     returns: list[Return] = field(default_factory=list)
+    #: Everything outstanding, plus what was applied recently so it can be checked.
+    corporate_actions: list[corpactions.ActionView] = field(default_factory=list)
 
 
 def _book(db: Session, portfolio_id: uuid.UUID, user_id: uuid.UUID) -> Portfolio:
@@ -199,6 +205,11 @@ def summary(db: Session, portfolio_id: uuid.UUID, user_id: uuid.UUID) -> Summary
     valued = pricing.value(positions, marks, pricing.latest_fx(db))
     totals = pricing.totals(valued)
     flagged = history.latest_per_instrument(history.suspicious_moves(db, book.id))
+    open_actions = corpactions.open_actions(db, instrument_ids)
+    action_views = {
+        instrument_id: corpactions.view(db, book.id, action)
+        for instrument_id, action in open_actions.items()
+    }
 
     holdings = [
         Holding(
@@ -222,6 +233,7 @@ def summary(db: Session, portfolio_id: uuid.UUID, user_id: uuid.UUID) -> Summary
             losses_ring_fenced=taxrules.losses_are_ring_fenced(pos.asset_class),
             suspicious_move=flagged.get(pos.instrument_id),
             lots=len([lot for lot in pos.lots if lot.quantity > ZERO]),
+            open_action=action_views.get(pos.instrument_id),
         )
         for pos, vp in zip(positions, valued, strict=True)
     ]
@@ -239,6 +251,7 @@ def summary(db: Session, portfolio_id: uuid.UUID, user_id: uuid.UUID) -> Summary
             (h.cost_basis_inr for h in holdings if h.market_value_inr is None), ZERO
         ),
         returns=_returns(db, book.id, totals, valued),
+        corporate_actions=corpactions.views(db, book.id, corpactions.listing(db)),
     )
 
 

@@ -376,26 +376,85 @@ thinking about it.
 
 ---
 
-## 12. The corporate-action warning
+## 12. Corporate actions
 
-Until the exchange feed arrives, a split or bonus nobody recorded appears as a catastrophic
-loss in a position that has lost nothing — the one failure mode of this module that produces
-a large, alarming, entirely fictional number.
+A split or bonus nobody recorded appears as a catastrophic loss in a position that has lost
+nothing — the one failure mode of this module that produces a large, alarming, entirely
+fictional number, and the one whose obvious reaction is to sell something that did nothing
+wrong. A 1:1 bonus reads as −50%.
 
-The page flags a holding when two observations **four calendar days or fewer apart** differ by
-more than **25%**.
+There are two guards, and they answer different questions.
 
-Two restrictions keep it from becoming noise, and both matter:
+### The feed, which knows
+
+`corporate_actions_watch` reads NSE's own `Corporate_action.xml` every weekday evening and
+records every share-changing announcement on a stock the book holds. Three properties matter:
+
+- **The row is what remembers, not the notification.** A feed repeats itself nightly; a
+  notification can be dismissed. A recorded action is announced once and stays outstanding
+  until it is dealt with.
+- **Nothing is guessed.** A ratio is read only from a form that cannot mean two things.
+  `BONUS 1:1` is unambiguous, and so is `FACE VALUE SPLIT FROM RS.10/- TO RE.1/-`. A bare
+  `SPLIT 1:10` is **not** — it does not say which side is the old face value, and the two
+  readings differ by a factor of a hundred. Anything unreadable is stored as `NEEDS_REVIEW`,
+  which flags the holding and waits for a person. ⚠ Refusing to answer is a supported
+  outcome, and the larger fiction is always the confident wrong one.
+- **On the ex-date it is applied**, as an ordinary append-only ledger entry with
+  `entry_source='CORP_ACTION'`. Total cost basis is conserved and every lot keeps its own
+  per-unit cost — a 1:1 bonus on lots bought at ₹960 and ₹722 gives ₹480 and ₹361, never
+  ₹420 twice. Flattening them to the book average conserves the total and reports the wrong
+  realised gain on every FIFO disposal afterwards.
+
+While an action is outstanding the page flags the holding and says its profit and loss is not
+yet reliable. That is gate **G7** of the build spec, and it is why the action is a stored row
+rather than a message: a message can be closed while the number it was about stays on screen.
+
+Applying is offered as a button and undone by the ordinary correction path. The ledger is the
+user's word, so an entry made on their behalf has to be visible in the history and reversible
+from it.
+
+### The trip-wire, for what the feed missed
+
+Independently, the page flags a holding when two observations **four calendar days or fewer
+apart** differ by more than **25%**. Two restrictions keep it from becoming noise:
 
 - **The gap limit.** Observations far apart differ for ordinary reasons. Comparing prices a
   month apart and calling it a single-day move would fire constantly — the same way a
   30-minute staleness limit overnight would mark the whole portfolio stale every evening.
-- **A recorded action explains itself.** If a `SPLIT` or `BONUS` sits in the window, the
-  corporate action *is* recorded and there is nothing to warn about.
+- **A recorded action explains itself.** If a `SPLIT` or `BONUS` sits in the window, or an
+  announcement is outstanding, the action *is* known and there is nothing to guess about.
 
 ⚠ **Known limitation, stated rather than hidden:** a 1:4 bonus moves the price about 20% and
-will not trip this. The threshold sits where false positives are rare, because the real fix is
-the feed, not a lower number.
+will not trip this. The threshold sits where false positives are rare, because this is the
+backstop and the feed is the fix.
+
+---
+
+## 12a. Foreign holdings and Schedule FA
+
+Every Indian resident holding a foreign security declares it in Schedule FA, with **no
+minimum threshold** — one fractional share of one US company is reportable, and the penalties
+under the Black Money Act for omitting it are severe. Per security the return wants the
+acquisition date, the initial value, the **peak value during the period**, the closing value,
+and anything received.
+
+Two things make that a problem for software rather than a spreadsheet:
+
+- **The period is the calendar year**, 1 January to 31 December — not the financial year every
+  other Indian tax figure uses, so these numbers appear nowhere else in this module.
+- **The peak cannot be reconstructed afterwards.** It is the highest the holding was worth on
+  any day, and knowing it requires having recorded what it was worth on every day.
+
+The second stopped being true when the price feeds landed: a close is recorded for every US
+holding on every trading day with a USD/INR rate beside it. So `schedulefa.report` is a walk
+over stored observations, storing nothing new, and its **coverage is reported beside it** —
+a peak over 40 observed days of a 365-day year is the peak of those 40 days, and a figure that
+did not say so would claim more authority than it has.
+
+⚠ **The rate is the one recorded, not SBI's TT buying rate**, which is what the return
+requires and is not what a market feed quotes. Every figure names the day it came from so the
+correct rate can be looked up for that day. Calling these filing-ready would be the more
+convenient lie.
 
 ---
 
@@ -411,17 +470,23 @@ backend/app/services/investments/
   entry.py       the one write path, shared by API and tools
 
   history.py     value over time, and movements too large to be price moves
+  corpactions.py splits and bonuses: read, recorded, applied on the ex-date
+  schedulefa.py  foreign holdings as the calendar-year return asks for them
   overview.py    the one-fold assembly the page and the API read from
 
 backend/app/api/investments.py          summary · holding · transactions · history · entry
+                                        corporate-actions · schedule-fa
 backend/app/core/tools/investments.py   six tools, draft-then-confirm
 backend/app/scripts/seed_investments.py the real portfolio
 backend/alembic/versions/…014_investment_ledger.py
 backend/alembic/versions/…015_form_entry_source.py
+backend/alembic/versions/…017_corporate_actions.py
 
 frontend/src/components/InvestmentsView.tsx   the page
 frontend/src/components/PositionSheet.tsx     one holding, in full
 frontend/src/components/TransactionEntry.tsx  entry and history
+frontend/src/components/CorporateActions.tsx  announced splits, and applying them
+frontend/src/components/ForeignHoldings.tsx   the Schedule FA figures
 frontend/src/lib/investments.ts               display rules, in one place
 ```
 
@@ -431,7 +496,9 @@ Tests: `test_investments_ledger.py` (the fold, against Groww),
 `test_investments_api.py` (exact money over the wire, ownership, no way to delete),
 `test_investments_returns_and_costs.py` (XIRR against Groww, charges against the reference),
 `test_investments_entry.py` (validation, correction, staleness),
-`test_investments_seed.py` (the script).
+`test_investments_seed.py` (the script),
+`test_investments_corpactions.py` (what the feed says, what is refused, what is written),
+`test_investments_schedulefa.py` (the peak, and how honestly its coverage is stated).
 
 ---
 

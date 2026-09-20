@@ -591,6 +591,71 @@ class SuspiciousMoveOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CorporateActionOut(BaseModel):
+    """A split or bonus the exchange announced, and what it would do to the book.
+
+    `quantity_before`/`quantity_after` are computed server-side on purpose: they are the
+    arithmetic that changes a holding's size, and a browser computing them would be doing
+    that arithmetic in binary floating point.
+    """
+
+    id: uuid.UUID
+    instrument_id: uuid.UUID
+    symbol: str
+    name: str
+    action_type: str
+    ex_date: dt.date | None
+    purpose: str
+    #: PENDING · NEEDS_REVIEW · APPLIED · IGNORED
+    status: str
+    source: str
+    announced_at: dt.datetime
+    applied_at: dt.datetime | None
+    #: Why a ratio could not be read, or what was done with the action.
+    note: str | None
+    #: None when the announcement's ratio was never understood — the case a person must read.
+    ratio_text: str | None
+    quantity_change: Decimal | None
+    quantity_before: Decimal | None
+    quantity_after: Decimal | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ForeignHoldingOut(BaseModel):
+    """One security's Schedule FA figures for one calendar year."""
+
+    symbol: str
+    name: str
+    currency: str
+    acquired_on: dt.date
+    initial_inr: Decimal
+    peak_inr: Decimal | None
+    peak_on: dt.date | None
+    closing_inr: Decimal | None
+    closing_on: dt.date | None
+    closing_quantity: Decimal
+    gross_income_inr: Decimal
+    gross_proceeds_inr: Decimal
+    #: ⚠ Coverage, stated rather than assumed. A peak over 40 observed days of a 365-day year
+    #: is the peak of those 40 days, and the interface must be able to say so.
+    days_valued: int
+    days_in_period: int
+    is_complete: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ScheduleFaOut(BaseModel):
+    year: int
+    period_start: dt.date
+    period_end: dt.date
+    holdings: list[ForeignHoldingOut]
+    years_available: list[int]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class HoldingOut(BaseModel):
     instrument_id: uuid.UUID
     symbol: str
@@ -613,6 +678,10 @@ class HoldingOut(BaseModel):
     losses_ring_fenced: bool
     suspicious_move: SuspiciousMoveOut | None
     lots: int
+    #: ⚠ An announced split or bonus not yet in the ledger. While this is present the price
+    #: and the quantity on this row are counting different things, so the profit and loss
+    #: beside them is not reliable and the interface must say so rather than show it plainly.
+    open_action: CorporateActionOut | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -689,6 +758,8 @@ class SummaryOut(BaseModel):
     #: What the holdings that cannot be valued originally cost.
     unpriced_cost_inr: Decimal
     returns: list[ReturnOut]
+    #: Outstanding splits and bonuses, plus recently applied ones so they can be checked.
+    corporate_actions: list[CorporateActionOut] = []
 
 
 class LotOut(BaseModel):

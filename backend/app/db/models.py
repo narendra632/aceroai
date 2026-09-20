@@ -590,3 +590,43 @@ class FxObservation(Base):
     source: Mapped[str] = mapped_column(sa.Text, primary_key=True)
     rate: Mapped[Decimal] = mapped_column(sa.Numeric(18, 8))
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class CorporateAction(Base):
+    """A split, bonus or similar, announced by the exchange (migration 017).
+
+    ⚠ **Not append-only, unlike the three tables above it, and the difference is the point.**
+    A transaction is an event and never changes. An action is a thing being *tracked*: it
+    arrives PENDING, and becomes APPLIED, IGNORED or NEEDS_REVIEW as it is dealt with. What
+    it did to the book is still an event — that is a row in `transactions`, and
+    `applied_txn_id` points at it.
+
+    While one is PENDING or NEEDS_REVIEW the holding's profit and loss is not reliable, and
+    the page says so. That is the whole reason the row exists rather than a notification: a
+    notification can be dismissed, and the number it was warning about stays on the screen.
+    """
+
+    __tablename__ = "corporate_actions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    action_type: Mapped[str] = mapped_column(sa.Text)
+    #: NSE announces some actions before fixing the ex-date. Undated ones are recorded and
+    #: flagged, and never applied on a schedule.
+    ex_date: Mapped[dt.date | None] = mapped_column(sa.Date)
+    #: The multiplier as an exact fraction: 2/1 for a 1:1 bonus, 10/1 for a ₹10→₹1 split.
+    #: Integers rather than a decimal because 1/3 has no exact decimal form.
+    ratio_num: Mapped[int | None] = mapped_column(sa.Integer)
+    ratio_den: Mapped[int | None] = mapped_column(sa.Integer)
+    amount_per_share: Mapped[Decimal | None] = mapped_column(sa.Numeric(20, 6))
+    announced_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(sa.Text)
+    #: The feed's own words, verbatim — what a person reads when the ratio could not be
+    #: parsed, and the provenance for whatever was applied.
+    purpose: Mapped[str] = mapped_column(sa.Text)
+    dedupe_key: Mapped[str] = mapped_column(sa.Text)
+    status: Mapped[str] = mapped_column(sa.Text, default="PENDING")
+    applied_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    applied_txn_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("transactions.id"))
+    note: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

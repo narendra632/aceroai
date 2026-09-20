@@ -103,3 +103,64 @@ def disk_watch(db: Session, user: User) -> JobResult:
         ),
         detail={"percent": round(percent, 1), "band": band},
     )
+
+
+#: The Investments module's share of a disk that is already three-quarters full. Its build
+#: spec reserves 250 MB and asks to be warned at 200 MB, and the gap between the two is what
+#: makes the warning useful: there is a month of ordinary growth in which to act.
+#:
+#: ⚠ Module constants rather than settings, deliberately. These are a *design* budget written
+#: down in one place, not a preference anyone tunes from the interface — and a number that can
+#: be edited away is a number that gets edited away the first time it fires.
+INVESTMENTS_BUDGET_BYTES = 250 * 1024 * 1024
+INVESTMENTS_WARN_BYTES = 200 * 1024 * 1024
+
+
+@job(
+    "investments_disk_watch",
+    # Weekly. The module's projected growth is around 50 MB a year, so a daily check would be
+    # eleven identical readings a week apart from the one that matters.
+    "0 9 * * mon",
+    description="Watches how much disk the investment record is using against its budget.",
+    catch_up=dt.timedelta(hours=12),
+)
+def investments_disk_watch(db: Session, user: User) -> JobResult:
+    """Report the Investments module's footprint before it becomes the disk's problem.
+
+    The whole-disk `disk_watch` above answers "is the machine about to stop"; this answers
+    "which part of it is growing, and was that the plan". They are different questions, and a
+    disk alert that arrives without the second one leaves nothing to act on but guesswork.
+
+    The module's own price record is the part that grows without anyone deciding it should:
+    every holding gains an observation every trading day, forever, and nothing in the daily
+    path is a reminder that this has a ceiling.
+    """
+    used = vitals.table_bytes(db, vitals.INVESTMENT_TABLES)
+    if used is None:
+        # ⚠ An unmeasurable table is NOT an empty one, and is certainly not a full one.
+        return JobResult(silent=True, detail={"reason": "table sizes unreadable"})
+
+    megabytes = round(used / 1024 / 1024, 1)
+    detail = {"used_mb": megabytes, "budget_mb": INVESTMENTS_BUDGET_BYTES // 1024 // 1024}
+    if used < INVESTMENTS_WARN_BYTES:
+        return JobResult(silent=True, detail=detail)
+
+    # Banded like `disk_watch`, and repeated daily while unresolved, for the same reasons.
+    band = int(used / 1024 / 1024 // 25) * 25
+    tag = f"investments-disk-{band}"
+    if notifications.already_said(db, user.id, "disk", tag, since=dt.timedelta(hours=24)):
+        return JobResult(silent=True, detail={**detail, "already_told": True})
+
+    return JobResult(
+        notify=NotificationSpec(
+            kind="disk",
+            title=f"The investment record is using {megabytes:.0f} MB",
+            body=(
+                f"Its budget is {INVESTMENTS_BUDGET_BYTES // 1024 // 1024} MB. Daily prices "
+                "are what grow — thinning the oldest of them is the lever."
+            ),
+            url="/#insights",
+            tag=tag,
+        ),
+        detail={**detail, "band": band},
+    )

@@ -83,10 +83,13 @@ class SuspiciousMove:
         return "fell" if self.change < ZERO else "rose"
 
 
-def _observation_series(
+def price_series(
     db: Session, instrument_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, tuple[list[dt.date], list[Decimal]]]:
     """Every trusted price per instrument, oldest first, one per day.
+
+    Public because `schedulefa` walks the same series for a different purpose. One reader of
+    the price record, not two that can drift apart about which observations count.
 
     Two observations on one day collapse to the later — the same "newest wins" rule
     `pricing.latest` applies, just applied per day instead of once.
@@ -114,7 +117,7 @@ def _observation_series(
     return out
 
 
-def _fx_series(db: Session) -> dict[str, tuple[list[dt.date], list[Decimal]]]:
+def fx_series(db: Session) -> dict[str, tuple[list[dt.date], list[Decimal]]]:
     """Every recorded exchange rate, by pair, oldest first, one per day."""
     rows = db.execute(
         sa.select(FxObservation).order_by(FxObservation.pair, FxObservation.observed_at)
@@ -130,7 +133,7 @@ def _fx_series(db: Session) -> dict[str, tuple[list[dt.date], list[Decimal]]]:
     }
 
 
-def _as_of(series: tuple[list[dt.date], list[Decimal]] | None, day: dt.date) -> Decimal | None:
+def value_as_of(series: tuple[list[dt.date], list[Decimal]] | None, day: dt.date) -> Decimal | None:
     """The last value observed on or before `day`, or None if there is none yet.
 
     ⚠ Carry-forward only, never backwards. A price observed tomorrow says nothing about what
@@ -174,8 +177,8 @@ def curve(
             sa.select(Instrument).where(Instrument.id.in_({t.instrument_id for t in txns}))
         ).scalars()
     }
-    prices = _observation_series(db, list(instruments))
-    fx = _fx_series(db)
+    prices = price_series(db, list(instruments))
+    fx = fx_series(db)
 
     by_day: dict[dt.date, list[Transaction]] = defaultdict(list)
     for txn in txns:
@@ -223,13 +226,13 @@ def _point_for(
         open_count += 1
         invested += pos.cost_basis_inr
 
-        price = _as_of(prices.get(pos.instrument_id), day)
+        price = value_as_of(prices.get(pos.instrument_id), day)
         if price is None:
             continue
         if pos.currency == "INR":
             rate: Decimal | None = Decimal(1)
         else:
-            rate = _as_of(fx.get(f"{pos.currency}INR"), day)
+            rate = value_as_of(fx.get(f"{pos.currency}INR"), day)
         if rate is None:
             continue
 
@@ -292,7 +295,7 @@ def suspicious_moves(
             recorded[txn.instrument_id].append(txn.trade_date)
 
     out: list[SuspiciousMove] = []
-    for instrument_id, (days, values) in _observation_series(db, list(instruments)).items():
+    for instrument_id, (days, values) in price_series(db, list(instruments)).items():
         for i in range(1, len(days)):
             previous, current = values[i - 1], values[i]
             gap = (days[i] - days[i - 1]).days

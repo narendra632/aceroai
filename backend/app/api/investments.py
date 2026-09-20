@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.api.schemas import (
     AssetTotalOut,
+    CorporateActionOut,
     CurveOut,
     DraftIn,
     DraftOut,
@@ -31,14 +32,15 @@ from app.api.schemas import (
     HoldingOut,
     PriceRefreshOut,
     ReverseIn,
+    ScheduleFaOut,
     SummaryOut,
     TotalsOut,
     TransactionOut,
 )
-from app.db.models import Instrument, Transaction, User
+from app.db.models import CorporateAction, Instrument, Transaction, User
 from app.db.session import get_db
 from app.services.errors import NotFound
-from app.services.investments import entry, history, overview
+from app.services.investments import corpactions, entry, history, overview, schedulefa
 from app.services.marketdata import feed
 
 router = APIRouter(prefix="/api/investments", tags=["investments"])
@@ -126,6 +128,7 @@ def get_summary(
         by_asset_class=[AssetTotalOut.model_validate(a) for a in view.by_asset_class],
         unpriced_cost_inr=view.unpriced_cost_inr,
         returns=view.returns,
+        corporate_actions=[CorporateActionOut.model_validate(a) for a in view.corporate_actions],
     )
 
 
@@ -305,3 +308,98 @@ def reverse_transaction(
     correction = entry.reverse(db, txn_id, note=body.note if body else None)
     db.commit()
     return next(t for t in _transactions_out(db, book.id) if t.id == correction.id)
+
+
+# --- corporate actions ---------------------------------------------------------------------
+#
+# ⚠ These three routes exist because a split that is announced and not recorded is the one
+# failure mode of this module that produces a large, alarming, entirely fictional number. The
+# feed finds it; only the ledger can fix it; and the step between the two is a decision, so it
+# is a button rather than something that happens silently.
+
+
+def _owned_action(db: Session, action_id: uuid.UUID, portfolio_id: uuid.UUID) -> CorporateAction:
+    """Fetch an action, having first checked it concerns something this book holds.
+
+    An id is not an authorisation — the same rule the reverse route follows. An action is
+    about an instrument rather than about a portfolio, so ownership is established through
+    the book's own transactions.
+    """
+    action = db.get(CorporateAction, action_id)
+    if action is None:
+        raise NotFound("corporate action")
+    touched = db.execute(
+        sa.select(Transaction.id)
+        .where(
+            Transaction.portfolio_id == portfolio_id,
+            Transaction.instrument_id == action.instrument_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if touched is None:
+        raise NotFound("corporate action")
+    return action
+
+
+@router.get("/corporate-actions")
+def list_corporate_actions(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[CorporateActionOut]:
+    """Outstanding splits and bonuses, plus recently applied ones so they can be checked."""
+    book = overview.real_book(db, user.id)
+    return [
+        CorporateActionOut.model_validate(a)
+        for a in corpactions.views(db, book.id, corpactions.listing(db))
+    ]
+
+
+@router.post("/corporate-actions/{action_id}/apply")
+def apply_corporate_action(
+    action_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CorporateActionOut:
+    """Write the quantity change into the ledger.
+
+    The transaction it writes is an ordinary append-only entry, visible in the history and
+    retired by the ordinary correction path if the exchange or the match was wrong.
+    """
+    book = overview.real_book(db, user.id)
+    action = _owned_action(db, action_id, book.id)
+    corpactions.apply(db, book.id, action)
+    db.commit()
+    db.refresh(action)
+    return CorporateActionOut.model_validate(corpactions.view(db, book.id, action))
+
+
+@router.post("/corporate-actions/{action_id}/dismiss")
+def dismiss_corporate_action(
+    action_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CorporateActionOut:
+    """Mark an action as not applying to this book, clearing the holding's flag."""
+    book = overview.real_book(db, user.id)
+    action = _owned_action(db, action_id, book.id)
+    corpactions.dismiss(db, action)
+    db.commit()
+    db.refresh(action)
+    return CorporateActionOut.model_validate(corpactions.view(db, book.id, action))
+
+
+@router.get("/schedule-fa")
+def get_schedule_fa(
+    year: int | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ScheduleFaOut:
+    """Foreign holdings as Schedule FA asks for them, for one calendar year.
+
+    ⚠ The calendar year, not the financial year — Schedule FA is the one Indian tax figure
+    reported on 1 January to 31 December, so it cannot be read off anything else here.
+    """
+    book = overview.real_book(db, user.id)
+    return ScheduleFaOut.model_validate(
+        schedulefa.report(db, book.id, year or dt.date.today().year)
+    )

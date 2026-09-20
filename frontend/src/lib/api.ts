@@ -995,6 +995,60 @@ export type SuspiciousMove = {
 
 export type AssetClass = "EQUITY_IN" | "EQUITY_US" | "MF_IN" | "CRYPTO";
 
+/** A split or bonus the exchange announced, and what it would do to the book.
+ *
+ *  ⚠ `quantity_before`/`quantity_after` arrive computed. They are the arithmetic that
+ *  changes a holding's size, and doing it here would do it in binary floating point. */
+export type CorporateAction = {
+  id: string;
+  instrument_id: string;
+  symbol: string;
+  name: string;
+  action_type: string;
+  ex_date: string | null;
+  purpose: string;
+  status: "PENDING" | "NEEDS_REVIEW" | "APPLIED" | "IGNORED";
+  source: string;
+  announced_at: string;
+  applied_at: string | null;
+  /** Why a ratio could not be read, or what was done with the action. */
+  note: string | null;
+  /** null when the announcement could not be read precisely — the case needing a person. */
+  ratio_text: string | null;
+  quantity_change: string | null;
+  quantity_before: string | null;
+  quantity_after: string | null;
+};
+
+/** One foreign security's Schedule FA figures for one calendar year. */
+export type ForeignHolding = {
+  symbol: string;
+  name: string;
+  currency: string;
+  acquired_on: string;
+  initial_inr: string;
+  peak_inr: string | null;
+  peak_on: string | null;
+  closing_inr: string | null;
+  closing_on: string | null;
+  closing_quantity: string;
+  gross_income_inr: string;
+  gross_proceeds_inr: string;
+  /** ⚠ Coverage, stated rather than assumed — a peak over 40 observed days of a year is the
+   *  peak of those 40 days, and the interface has to be able to say so. */
+  days_valued: number;
+  days_in_period: number;
+  is_complete: boolean;
+};
+
+export type ScheduleFa = {
+  year: number;
+  period_start: string;
+  period_end: string;
+  holdings: ForeignHolding[];
+  years_available: number[];
+};
+
 export type Holding = {
   instrument_id: string;
   symbol: string;
@@ -1017,6 +1071,10 @@ export type Holding = {
   losses_ring_fenced: boolean;
   suspicious_move: SuspiciousMove | null;
   lots: number;
+  /** ⚠ An announced split or bonus not yet in the ledger. While this is set the price and
+   *  the quantity on this row count different things, so the profit and loss beside them is
+   *  not reliable and must not be shown as though it were. */
+  open_action: CorporateAction | null;
 };
 
 export type Totals = {
@@ -1078,6 +1136,8 @@ export type InvestmentSummary = {
   by_asset_class: AssetTotal[];
   unpriced_cost_inr: string;
   returns: PortfolioReturn[];
+  /** Outstanding splits and bonuses, plus recently applied ones so they can be checked. */
+  corporate_actions: CorporateAction[];
 };
 
 export type Lot = {
@@ -1288,5 +1348,50 @@ export async function reverseTransaction(
     body: JSON.stringify({ note: note ?? null }),
   });
   if (!r.ok) return investmentError(r, "that entry could not be reversed");
+  return r.json();
+}
+
+/** Outstanding splits and bonuses, plus recently applied ones. Also carried on the summary,
+ *  so this is only for a caller that wants them without the whole fold. */
+export async function listCorporateActions(): Promise<CorporateAction[]> {
+  const r = await req("/api/investments/corporate-actions");
+  if (!r.ok) throw new Error("could not load corporate actions");
+  return r.json();
+}
+
+/** Write the announced quantity change into the ledger.
+ *
+ *  ⚠ Not a cosmetic acknowledgement: this appends a real transaction, which is why it is a
+ *  deliberate action rather than something the page does on your behalf. It is undone by the
+ *  ordinary correction path, like any other entry. */
+export async function applyCorporateAction(
+  id: string,
+): Promise<CorporateAction> {
+  const r = await req(`/api/investments/corporate-actions/${id}/apply`, {
+    method: "POST",
+  });
+  if (!r.ok) return investmentError(r, "that action could not be applied");
+  return r.json();
+}
+
+/** Mark an action as not applying to this book, clearing the holding's flag. Touches
+ *  nothing in the ledger. */
+export async function dismissCorporateAction(
+  id: string,
+): Promise<CorporateAction> {
+  const r = await req(`/api/investments/corporate-actions/${id}/dismiss`, {
+    method: "POST",
+  });
+  if (!r.ok) return investmentError(r, "that action could not be dismissed");
+  return r.json();
+}
+
+/** Foreign holdings as Schedule FA asks for them. ⚠ The CALENDAR year — the one Indian tax
+ *  figure not reported on the financial year. */
+export async function getScheduleFa(year?: number): Promise<ScheduleFa> {
+  const r = await req(
+    `/api/investments/schedule-fa${year ? `?year=${year}` : ""}`,
+  );
+  if (!r.ok) throw new Error("could not load the foreign-holdings schedule");
   return r.json();
 }

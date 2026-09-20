@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Wallet } from "lucide-react";
 
+import CorporateActions from "@/components/CorporateActions";
+import ForeignHoldings from "@/components/ForeignHoldings";
 import PositionSheet from "@/components/PositionSheet";
 import TransactionEntry from "@/components/TransactionEntry";
 import { InfoTip } from "@/components/InfoTip";
@@ -430,6 +432,14 @@ export default function InvestmentsView() {
             />
           </section>
 
+          {/* ⚠ Above the chart and the holdings on purpose. An announced split the ledger
+          does not know about makes every figure below this point wrong for that holding —
+          by half, in the worst case — so the explanation has to be read first. */}
+          <CorporateActions
+            actions={summary.corporate_actions}
+            onChange={() => void load()}
+          />
+
           {unpriced.length > 0 && (
             <div className="rounded-xl border border-border bg-card p-4">
               <p className="text-sm font-medium">
@@ -733,11 +743,20 @@ export default function InvestmentsView() {
                               <span className="block text-xs font-normal text-muted-foreground">
                                 {longTermText(h) ?? "no long-term boundary"}
                               </span>
-                              {h.suspicious_move && (
+                              {/* An ANNOUNCED action outranks a guessed one: it says
+                              the same thing with a source behind it. */}
+                              {h.open_action ? (
                                 <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
                                   <AlertTriangle className="size-3" />
-                                  possible unrecorded split
+                                  {h.open_action.ratio_text ?? "action"} pending
                                 </span>
+                              ) : (
+                                h.suspicious_move && (
+                                  <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                                    <AlertTriangle className="size-3" />
+                                    possible unrecorded split
+                                  </span>
+                                )
                               )}
                             </th>
                             <td className="px-3 py-2.5 text-right tabular-nums">
@@ -821,11 +840,18 @@ export default function InvestmentsView() {
                               : "at cost — no price yet"}
                           </span>
                         </div>
-                        {h.suspicious_move && (
+                        {h.open_action ? (
                           <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                            <AlertTriangle className="size-3" /> possible
-                            unrecorded split
+                            <AlertTriangle className="size-3" />{" "}
+                            {h.open_action.ratio_text ?? "action"} pending
                           </p>
+                        ) : (
+                          h.suspicious_move && (
+                            <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                              <AlertTriangle className="size-3" /> possible
+                              unrecorded split
+                            </p>
+                          )
                         )}
                       </button>
                     </li>
@@ -834,6 +860,10 @@ export default function InvestmentsView() {
               </>
             )}
           </section>
+
+          {/* Below the holdings and above the ledger: it is a yearly obligation rather
+          than something to check on open, but it belongs with the record it reads. */}
+          <ForeignHoldings />
 
           <TransactionEntry
             transactions={transactions}

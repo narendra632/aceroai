@@ -122,13 +122,12 @@ def _apply(pos: Position, txn: Transaction) -> None:
         return
 
     if txn.txn_type in QUANTITY_ONLY:
-        # More units, same money. Spread the existing cost across the larger count so total
-        # cost basis is untouched and only the per-unit figure moves.
+        # More units, same money. Every lot grows in the same proportion and its per-unit cost
+        # falls by exactly that proportion, so total cost basis is untouched.
+        before = pos.quantity
         pos.quantity += qty
-        for lot in pos.lots:
-            if pos.quantity:
-                lot.quantity = lot.quantity * (pos.quantity / (pos.quantity - qty))
-        _rescale_unit_costs(pos)
+        if before:
+            _rescale_lots(pos, pos.quantity / before)
         return
 
     if txn.txn_type in ACQUIRING:
@@ -159,18 +158,21 @@ def _apply(pos: Position, txn: Transaction) -> None:
         pos.cost_basis_inr += price * qty * fx
 
 
-def _rescale_unit_costs(pos: Position) -> None:
-    """After a quantity-only event, restate per-unit cost so the total is unchanged."""
-    if not pos.quantity:
+def _rescale_lots(pos: Position, factor: Decimal) -> None:
+    """Restate every lot after a split or bonus: `factor` times as many, each worth that
+    much less.
+
+    ⚠ **Per lot, not to a common average.** This used to hand every lot the same unit cost —
+    the book's average — which conserved the total and destroyed the thing lots exist for.
+    Two lots of HDFC Bank bought at ₹960 and ₹722 are, after a 1:1 bonus, worth ₹480 and ₹361
+    a share; flattening both to ₹420 leaves the total right and makes every FIFO disposal
+    afterwards report the wrong realised gain, on the one figure the tax view depends on.
+    """
+    if factor <= ZERO:
         return
     for lot in pos.lots:
-        if lot.quantity:
-            lot.unit_cost = (lot.unit_cost * lot.quantity) / lot.quantity
-    total_lot_qty = sum((lot.quantity for lot in pos.lots), ZERO)
-    if total_lot_qty and pos.cost_basis:
-        unit = pos.cost_basis / total_lot_qty
-        for lot in pos.lots:
-            lot.unit_cost = unit
+        lot.quantity *= factor
+        lot.unit_cost /= factor
 
 
 def _dispose(

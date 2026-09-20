@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Instrument, Portfolio, Transaction
 from app.services.errors import Invalid, NotFound
 from app.services.investments import costmodel
-from app.services.investments.portfolio import ACQUIRING, DISPOSING, live, position
+from app.services.investments.portfolio import ACQUIRING, DISPOSING, QUANTITY_ONLY, live, position
 
 #: Which venue's charges apply to which asset class.
 VENUE_FOR = {
@@ -255,6 +255,58 @@ def record(
     return txn
 
 
+def record_action(
+    db: Session,
+    portfolio_id: uuid.UUID,
+    *,
+    instrument: Instrument,
+    txn_type: str,
+    trade_date: dt.date,
+    quantity: Decimal,
+    note: str | None = None,
+) -> Transaction:
+    """Write the quantity change an exchange announced. The second write path, and the last.
+
+    Kept here beside `record` rather than in `corpactions` so that every append to the ledger
+    is still in one module — a second writer somewhere else is how a rule like "charges are
+    computed server-side" ends up applying to only some rows.
+
+    ⚠ It differs from `record` in what it is allowed to do, and each difference is deliberate:
+
+    * **Quantity may be negative.** A consolidation removes units. `prepare` refuses that,
+      correctly, because a person typing a negative quantity has made a mistake.
+    * **Price is zero, and that is not a missing value.** A bonus hands over units for no
+      money. `portfolio.QUANTITY_ONLY` never reads the price; writing the market price here
+      would put a number in the record that nothing uses and everything could misread.
+    * **No charges and no schedule.** Nothing was traded, so nothing was charged.
+    * **`fx_rate_inr` is 1 even on a foreign holding**, because no money moved for it to be a
+      rate of. The fold ignores it for these types; it is here because the column is NOT NULL.
+    """
+    if quantity == 0:
+        raise Invalid("a corporate action that changes nothing is not recorded")
+    if txn_type not in QUANTITY_ONLY:
+        raise Invalid(f"{txn_type} is not a quantity-only event")
+
+    txn = Transaction(
+        id=uuid.uuid4(),
+        portfolio_id=portfolio_id,
+        instrument_id=instrument.id,
+        txn_type=txn_type,
+        trade_date=trade_date,
+        quantity=quantity,
+        price=Decimal(0),
+        currency=instrument.currency,
+        fx_rate_inr=Decimal(1),
+        charges_inr=Decimal(0),
+        prepaid_tax_inr=Decimal(0),
+        entry_source="CORP_ACTION",
+        note=note,
+    )
+    db.add(txn)
+    db.flush()
+    return txn
+
+
 def reverse(db: Session, txn_id: uuid.UUID, *, note: str | None = None) -> Transaction:
     """Undo, implemented as the ledger requires: a new entry that supersedes the old one.
 
@@ -333,6 +385,7 @@ __all__ = [
     "live",
     "prepare",
     "record",
+    "record_action",
     "reverse",
     "superseded_ids",
 ]

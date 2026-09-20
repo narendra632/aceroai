@@ -58,6 +58,7 @@ from sqlalchemy import delete, select, text
 from app.core.security import hash_password
 from app.db.models import (
     ChatSession,
+    CorporateAction,
     DailyUsage,
     FxObservation,
     GeneratedReview,
@@ -188,6 +189,17 @@ def _purge(db):
             b.id for b in db.execute(select(Portfolio).where(Portfolio.user_id == u.id)).scalars()
         ]
         if book_ids:
+            # Corporate actions point at the transaction they wrote, so they must go before
+            # it. Scoped to instruments this user's books touched, like everything else here.
+            db.execute(
+                delete(CorporateAction).where(
+                    CorporateAction.instrument_id.in_(
+                        select(Transaction.instrument_id).where(
+                            Transaction.portfolio_id.in_(book_ids)
+                        )
+                    )
+                )
+            )
             db.execute(text("ALTER TABLE transactions DISABLE TRIGGER transactions_append_only"))
             try:
                 # Corrections point at what they replace, so children must go first or the
@@ -232,6 +244,11 @@ def _purge(db):
     # touches the ledger, so the common path must not pay for the rare one.
     orphaned = ~Instrument.id.in_(select(Transaction.instrument_id))
     if db.execute(select(Instrument.id).where(orphaned).limit(1)).first() is not None:
+        db.execute(
+            delete(CorporateAction).where(
+                CorporateAction.instrument_id.in_(select(Instrument.id).where(orphaned))
+            )
+        )
         db.execute(
             text("ALTER TABLE price_observations DISABLE TRIGGER price_observations_append_only")
         )

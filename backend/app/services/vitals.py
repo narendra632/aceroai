@@ -158,6 +158,45 @@ def database_bytes(db: Session) -> int | None:
         return None
 
 
+#: The tables the Investments module owns. Its build spec reserves 250 MB of a disk that is
+#: already three-quarters full, and a budget nobody measures is a wish.
+INVESTMENT_TABLES = (
+    "instruments",
+    "portfolios",
+    "charge_schedules",
+    "transactions",
+    "price_observations",
+    "fx_observations",
+    "corporate_actions",
+)
+
+
+def table_bytes(db: Session, tables: tuple[str, ...]) -> int | None:
+    """How much disk a named set of tables occupies, indexes and TOAST included.
+
+    `pg_total_relation_size` rather than `pg_relation_size`: the price record is small rows
+    under a four-column primary key, so its indexes are a large fraction of what it costs and
+    a figure that left them out would under-report the thing being budgeted.
+
+    ⚠ Named via `to_regclass`, which returns NULL for a table that does not exist rather than
+    raising. A migration that has not run yet must not take this reading — or the whole
+    endpoint — down with it.
+    """
+    try:
+        total = db.execute(
+            text(
+                "SELECT coalesce(sum(pg_total_relation_size(c)), 0) "
+                "FROM unnest(CAST(:names AS text[])) AS n(name), "
+                "LATERAL to_regclass(n.name) AS c WHERE c IS NOT NULL"
+            ),
+            {"names": list(tables)},
+        ).scalar_one()
+        return int(total)
+    except Exception:  # noqa: BLE001 - a vital sign must never take the response with it
+        log.debug("table size unavailable", exc_info=True)
+        return None
+
+
 def last_tick() -> dt.datetime | None:
     """When the scheduler last completed a pass, or None if it has not yet in this process.
 
