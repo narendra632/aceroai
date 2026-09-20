@@ -35,12 +35,14 @@ from app.api.schemas import (
     DecideIn,
     DraftIn,
     DraftOut,
+    FiredTriggerOut,
     FlagOut,
     FrameworkOut,
     GateOut,
     HoldingDetailOut,
     HoldingOut,
     MappingOut,
+    MeasureOut,
     PriceRefreshOut,
     ProposalOut,
     ProposalsOut,
@@ -78,6 +80,7 @@ from app.services.investments import (
     proposals,
     schedulefa,
     scoring,
+    watching,
 )
 from app.services.investments import portfolio as pf
 from app.services.marketdata import feed
@@ -732,11 +735,32 @@ def list_proposals(
     runs = db.execute(
         sa.select(sa.func.count(), sa.func.max(AgentRun.finished_at)).select_from(AgentRun)
     ).one()
+    fired = list(
+        db.execute(
+            sa.select(InvalidationTrigger, Instrument.symbol)
+            .join(Instrument, InvalidationTrigger.instrument_id == Instrument.id)
+            .where(InvalidationTrigger.status == "FIRED")
+            .order_by(InvalidationTrigger.fired_at.desc())
+            .limit(20)
+        ).all()
+    )
     return ProposalsOut(
         open=[_proposal_out(db, p) for p in proposals.open_proposals(db, mirror.id)],
         recent=[_proposal_out(db, p) for p in proposals.recent(db, mirror.id)],
         runs_recorded=runs[0] or 0,
         last_run_at=runs[1],
+        fired=[
+            FiredTriggerOut(
+                id=t.id,
+                symbol=symbol,
+                description=t.description,
+                metric_key=t.metric_key,
+                fired_at=t.fired_at,
+                evidence=t.fired_evidence or {},
+            )
+            for t, symbol in fired
+        ],
+        measures=[MeasureOut.model_validate(m) for m in watching.measures(db)],
     )
 
 

@@ -1174,12 +1174,37 @@ export type Proposal = {
   decision_reason: string | null;
 };
 
+/** One reading of how the system is doing.
+ *
+ *  ⚠ `value` is null while `n` is below the minimum, and that is the honest state for a long
+ *  time. A figure over six outcomes reads exactly like one over six hundred. */
+export type Measure = {
+  name: string;
+  value: string | null;
+  n: number;
+  detail: string;
+};
+
+/** A condition that came true — written down before the position was taken. */
+export type FiredTrigger = {
+  id: string;
+  symbol: string;
+  description: string;
+  metric_key: string;
+  fired_at: string | null;
+  evidence: Record<string, unknown>;
+};
+
 export type ProposalsView = {
   open: Proposal[];
   recent: Proposal[];
   /** ⚠ Includes evenings that suggested nothing, which is usually the right answer. */
   runs_recorded: number;
   last_run_at: string | null;
+  /** ⚠ Outranks everything else on screen: a thesis you hold money against has been
+   *  contradicted by the facts. */
+  fired: FiredTrigger[];
+  measures: Measure[];
 };
 
 export type Mapping = {

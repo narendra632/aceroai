@@ -66,17 +66,39 @@
 - [x] 7.4 Full suite: 1001 passed, 5 skipped. Was 975.
 - [x] 7.5 Run against the REAL book: 11 considered, 0 proposed, every refusal specific
 
-## 8. Deployment
+## 8. The watching half
 
-- [ ] 8.1 Pushed; migration 020 run on the server
-- [ ] 8.2 Verified in production
+- [x] 8.1 `watching.check_triggers` — every armed condition against today's price and today's
+      filed figures
+- [x] 8.2 ⚠ A condition nothing can evaluate is UNEVALUATED, not satisfied. Counting it as
+      passed reports a clean bill of health nothing ever checked
+- [x] 8.3 A condition past its window expires rather than lingering — left armed it would fire
+      years later on an unrelated movement and read as the original thesis failing
+- [x] 8.4 `watching.resolve_claims` — settles every claim whose deadline has passed
+- [x] 8.5 ⚠ A claim that cannot be checked is UNVERIFIABLE, never false. Otherwise claim
+      accuracy measures data coverage rather than judgement, and the two become inseparable
+- [x] 8.6 Four measures: claim accuracy, calibration (Brier), trigger discipline, decision
+      record — each reporting its sample size
+- [x] 8.7 ⚠ No figure below `MIN_OBSERVATIONS`. A precision over six outcomes reads exactly
+      like one over six hundred, and no caveat fixes that
+- [x] 8.8 ⚠ Trigger discipline reports from the FIRST firing. A single ignored condition is a
+      finding, not a data point
+- [x] 8.9 `position_watch` job, weekdays after the close, and a firing always notifies
+- [x] 8.10 Migration 021: the claims guard narrowed rather than dropped — the PREDICTION is
+      frozen, the outcome may be recorded, and DELETE is refused outright
+- [x] 8.11 Fired conditions and the measures on the page, above the suggestions
+- [x] 8.12 `test_investments_watching.py` — 21 tests. Full suite 1022.
 
-## 9. Owed at the end of Phase 2
+## 9. Deployment
 
-- [ ] 9.1 **The walkthrough** — interface, arithmetic and framework layer, with worked
+- [ ] 9.1 Pushed; migrations 020 and 021 run on the server
+- [ ] 9.2 Verified in production
+
+## 10. Owed at the end of Phase 2
+
+- [ ] 10.1 **The walkthrough** — interface, arithmetic and framework layer, with worked
       examples and simulated scenarios. ⚠ Phase 2 is not complete without it
-- [ ] 9.2 Schedule FA coverage wording: count days held, not days in the period
-- [ ] 9.3 The six model-judged flags, with source ingestion
-- [ ] 9.4 Trigger evaluation on a schedule — conditions are armed and stored; nothing yet
-      checks them against each day's facts
-- [ ] 9.5 Claim resolution and the calibration measures that rest on it
+- [ ] 10.2 Schedule FA coverage wording: count days held, not days in the period
+- [ ] 10.3 The six model-judged flags, with source ingestion
+- [x] 10.4 Trigger evaluation on a schedule — done in section 8
+- [x] 10.5 Claim resolution and the measures that rest on it — done in section 8

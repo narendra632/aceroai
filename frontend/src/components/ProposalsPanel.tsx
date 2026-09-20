@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ShieldX } from "lucide-react";
+import { AlertTriangle, Scale, ShieldX } from "lucide-react";
 
 import { InfoTip } from "@/components/InfoTip";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,13 @@ const GATE: Record<string, string> = {
   G8_price_age: "the price is too old",
   G9_volume: "enough suggestions for now",
   G11_confidence: "not confident enough to be worth your time",
+};
+
+const MEASURE: Record<string, string> = {
+  claim_accuracy: "Of the specific things it said would happen, how many did",
+  calibration: "When it says 80%, is it right 80% of the time",
+  trigger_discipline: "When something disproved a thesis, did anything happen",
+  decision_record: "How often you agreed",
 };
 
 export default function ProposalsPanel() {
@@ -109,6 +116,34 @@ export default function ProposalsPanel() {
             : ""}
         </p>
       </div>
+
+      {/* ⚠ Above everything, including live suggestions. A fired condition means a thesis
+          you hold money against has been contradicted by the facts — and being told when
+          that happens is the entire reason the condition was written down in advance. */}
+      {data.fired.length > 0 && (
+        <div className="rounded-xl border border-destructive/50 bg-destructive/5 p-4">
+          <p className="flex items-center gap-1.5 text-sm font-medium">
+            <AlertTriangle className="size-4 text-destructive" />
+            {data.fired.length} thing{data.fired.length === 1 ? "" : "s"} that
+            would disprove a thesis {data.fired.length === 1 ? "has" : "have"}{" "}
+            happened
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {data.fired.map((f) => (
+              <li key={f.id} className="text-xs">
+                <span className="font-medium">{f.symbol}</span> —{" "}
+                {f.description}
+                <span className="block text-muted-foreground">
+                  {f.metric_key} now {String(f.evidence.value ?? "?")}, against
+                  the {String(f.evidence.threshold ?? "?")} written down when
+                  the position was taken
+                  {f.fired_at ? ` · ${formatDateFull(f.fired_at)}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {data.open.length === 0 && (
         <div className="rounded-xl border border-border bg-card p-4">
@@ -181,6 +216,40 @@ export default function ProposalsPanel() {
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {data.measures.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="flex items-center gap-1.5 text-sm font-medium">
+            <Scale className="size-3.5 text-muted-foreground" />
+            How it is doing
+            <InfoTip label="Why most of these are blank">
+              At thirty-odd decisions a year nothing statistical can be said
+              about returns for years. But each thesis makes several checkable
+              assertions, so a year produces a few hundred testable predictions
+              — which is how this becomes answerable in months rather than
+              decades. Until there are enough, no figure is shown: a number over
+              six outcomes reads exactly like one over six hundred.
+            </InfoTip>
+          </p>
+          <dl className="mt-2 space-y-1.5">
+            {data.measures.map((m) => (
+              <div key={m.name} className="text-xs">
+                <dt className="text-muted-foreground">
+                  {MEASURE[m.name] ?? m.name}
+                </dt>
+                {/* ⚠ "—" while the sample is too small. Withholding the figure IS the
+                    feature; showing it with a caveat would still be read as a finding. */}
+                <dd>
+                  <span className="font-medium tabular-nums">
+                    {m.value == null ? "—" : m.value}
+                  </span>
+                  <span className="ml-2 text-muted-foreground">{m.detail}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
       )}
 

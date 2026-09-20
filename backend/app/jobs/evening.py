@@ -22,7 +22,7 @@ from app.db.models import Instrument, User
 from app.jobs.registry import JobResult, job
 from app.jobs.registry import Notification as NotificationSpec
 from app.services.errors import NotFound
-from app.services.investments import proposals
+from app.services.investments import proposals, watching
 
 
 @job(
@@ -73,6 +73,54 @@ def evening_synthesis(db: Session, user: User) -> JobResult:
             ),
             url="/#investments",
             tag=f"proposals-{batch.batch_id}",
+        ),
+        detail=detail,
+    )
+
+
+@job(
+    "position_watch",
+    # 16:45 on weekdays, after the Indian close is recorded. An invalidation condition is about
+    # today's facts, so it is checked once today's facts exist.
+    "45 16 * * mon-fri",
+    description="Checks whether anything that would disprove a thesis has happened.",
+    catch_up=dt.timedelta(hours=6),
+)
+def position_watch(db: Session, user: User) -> JobResult:
+    """Walk the invalidation conditions, and settle any claim whose deadline has passed.
+
+    ⚠ **A firing is the one thing here that always notifies.** Everything else this module
+    sends can wait for the evening; this cannot. A condition fired means a thesis the user is
+    holding money against has been contradicted by the facts, and the whole reason for writing
+    the condition down in advance was to be told when it happened rather than to notice later.
+
+    ⚠ It fires whether or not the story still looks good. A system that writes invalidation
+    conditions and then reasons past them has quietly stopped being a system, and the measure
+    of that — trigger discipline — is the one criterion that is not statistical.
+    """
+    watch = watching.check_triggers(db)
+    resolved = watching.resolve_claims(db)
+    db.commit()
+
+    detail = {**watch.detail(), "claims": resolved.detail()}
+    if not watch.fired:
+        return JobResult(silent=True, detail=detail)
+
+    first = watch.fired[0]
+    more = len(watch.fired) - 1
+    return JobResult(
+        notify=NotificationSpec(
+            kind="invalidation",
+            title=(
+                f"{first.symbol}: something that would disprove the thesis has happened"
+                + (f", and {more} other{'s' if more > 1 else ''}" if more else "")
+            ),
+            body=(
+                f"{first.trigger.description} It now stands at {first.value}. "
+                "This was written down before the position was taken."
+            ),
+            url="/#investments",
+            tag=f"fired-{first.trigger.id}",
         ),
         detail=detail,
     )

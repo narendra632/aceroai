@@ -921,6 +921,33 @@ class DecideIn(BaseModel):
     modified_amount_inr: Decimal | None = None
 
 
+class MeasureOut(BaseModel):
+    """One reading of how the system is doing, with the sample it rests on.
+
+    ⚠ `value` is null while `n` is below the minimum, and that is the honest state for a long
+    time. A figure over six outcomes reads exactly like one over six hundred, and nothing in
+    an interface can tell the reader which they are seeing unless the figure is withheld.
+    """
+
+    name: str
+    value: Decimal | None
+    n: int
+    detail: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FiredTriggerOut(BaseModel):
+    """A condition that came true, and what made it true."""
+
+    id: uuid.UUID
+    symbol: str
+    description: str
+    metric_key: str
+    fired_at: dt.datetime | None
+    evidence: dict
+
+
 class ProposalsOut(BaseModel):
     open: list[ProposalOut]
     recent: list[ProposalOut]
@@ -928,6 +955,10 @@ class ProposalsOut(BaseModel):
     #: the days it acted can never be measured against the days it should have.
     runs_recorded: int
     last_run_at: dt.datetime | None
+    #: ⚠ Conditions that have fired and not yet been answered. These outrank everything else
+    #: on the screen: a thesis the user holds money against has been contradicted.
+    fired: list[FiredTriggerOut] = []
+    measures: list[MeasureOut] = []
 
 
 class MappingOut(BaseModel):

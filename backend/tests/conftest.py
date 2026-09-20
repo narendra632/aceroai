@@ -211,8 +211,12 @@ def _purge(db):
             # are: the guarantee that matters is that APPLICATION code cannot rewrite the
             # record, not that a test cannot clean up after itself.
             proposal_ids = select(Proposal.id).where(Proposal.portfolio_id.in_(book_ids))
-            for table in ("proposals", "decisions", "claims", "agent_runs"):
+            for table in ("proposals", "decisions", "agent_runs"):
                 db.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {table}_append_only"))
+            # ⚠ `claims` guards differently since migration 021: an UPDATE that only records
+            # an outcome is allowed, and it is DELETE that is refused outright — a prediction
+            # that can be removed after the fact is one that never has to be counted.
+            db.execute(text("ALTER TABLE claims DISABLE TRIGGER claims_no_delete"))
             try:
                 db.execute(delete(ShadowEntry).where(ShadowEntry.portfolio_id.in_(book_ids)))
                 db.execute(
@@ -225,8 +229,9 @@ def _purge(db):
                 db.execute(delete(Proposal).where(Proposal.portfolio_id.in_(book_ids)))
                 db.execute(delete(AgentRun))
             finally:
-                for table in ("proposals", "decisions", "claims", "agent_runs"):
+                for table in ("proposals", "decisions", "agent_runs"):
                     db.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {table}_append_only"))
+                db.execute(text("ALTER TABLE claims ENABLE TRIGGER claims_no_delete"))
 
             # Corporate actions point at the transaction they wrote, so they must go before
             # it. Scoped to instruments this user's books touched, like everything else here.
