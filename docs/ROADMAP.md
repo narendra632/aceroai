@@ -202,13 +202,26 @@
 
 *(Nothing in flight — the next change on the list below starts when Narendra says so.)*
 
+**Shipped 2026-09-19/20: the Investments module is complete and live.** The ledger, the page,
+and market data (`2026-09-07-add-investment-ledger`, `2026-09-20-add-investments-page`,
+`2026-09-20-add-market-data`). Prices arrive by themselves on the server — NSE's own bhavcopy
+for Indian closes, Angel One for the price while the market is open, Twelve Data for SPCX and
+USD/INR, CoinGecko and Binance for crypto, AMFI for NAVs — and every holding is valued from
+the day it was bought. Production reproduces the laptop to the rupee.
+
 ## Next (planned, in order)
 
 1. **MCP-powered real-world capabilities** — expose the tools Narendra actually
    uses through MCP so Acero can act in the real world, not just chat. The tool
    registry (`core/tools/`) was shaped with this in mind.
 
-2. **Beyond** — additional features as they come up; this list grows over time.
+2. **Investments Phase 2 — scoring and proposals.** ⚠ **Blocked on Narendra, not on code.**
+   The technical spec refers to the A-imperatives, the bottleneck taxonomy and Soros flags
+   1–5 and 7–9 and never enumerates them. Nothing can be built until those exist in writing.
+   Everything Phase 2 needs from the machine — the ledger, live prices, a value series per
+   day, both returns — now exists.
+
+3. **Beyond** — additional features as they come up; this list grows over time.
 
 ### Small things the jobs change made cheap
 

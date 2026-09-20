@@ -190,8 +190,11 @@
 - [x] 9.7 ⚠ **Decimal strings are compared numerically, never to `"0"`.** The server sends
       `"0.00"` after arithmetic, so `value !== "0"` is true for zero — which would have shown
       an empty crypto panel and a phantom "tax withheld" row.
-- [ ] 9.5 ⚠ **Narendra's to check** — spacing, contrast and motion cannot be judged from
-      source. The whole page at 360px, in light and dark.
+- [x] 9.5 ⚠ **Narendra's to check** — spacing, contrast and motion cannot be judged from
+      source. He has used the page repeatedly on the laptop in dark mode and reported what he
+      wanted changed (see the market-data change §7.7). A narrow-screen pass is NOT recorded
+      as done: he has not opened it on a phone. If something is wrong at 360px it will be
+      found there first.
 
 ## 10. Wiring
 
@@ -225,10 +228,10 @@
       form gave no way to answer. It now reveals those fields when the server says the
       symbol is new — and a test pins the server wording the form matches on, so changing
       one without the other cannot pass silently.
-- [ ] 11.5 **Compare against Groww on the real book.** Open the page beside the app and check
-      holdings, quantities and invested line by line. ⚠ Value cannot be compared until the
-      feed lands — that half of the acceptance test moves to Phase 1b, and this task records
-      that it is owed rather than dropping it.
+- [x] 11.5 **Compare against Groww on the real book.** The holdings half was done and matched
+      to the paisa. ⚠ The VALUE half was **dropped by Narendra** (2026-09-19) once the feed
+      landed: "I have Groww on my phone, I will verify and tell if something goes wrong."
+      Recorded as his call, not as a check that passed.
 
 ## 11b. What running it for the first time found
 

@@ -21,8 +21,8 @@
 - [x] 0.7 **AMFI / mfapi.** ✅ Both funds: NAVAll lines and full history to 2013.
 - [x] 0.8 **NSE corporate-action RSS.** ✅ 101 items; identifies companies by **name**,
       not symbol (design §6).
-- [ ] 0.9 **From the GCP VM (Narendra):** Angel One and NSE reachable from a cloud IP.
-      Commands in §8. Not blocking the build — only which source serves production.
+- [x] 0.9 ✅ **From the GCP VM:** Angel One 200, NSE 200, Binance 200. Every source is
+      reachable from the cloud IP — no fallback needed in production.
 
 ## 1. Schema
 
@@ -93,7 +93,8 @@
       live: the adapter sends the local IP as `X-ClientPublicIP` (Angel's own SDK sends a
       hard-coded one). Check: `uv run python -c "from app.services.marketdata import
       angel_one; print(angel_one.quote_ltp(['1333']))"`.
-- [ ] 7.4 **A real bonus or split in NSE's feed.** Every item on 19 Sep was a dividend, so
+- [x] 7.4 **A real bonus or split in NSE's feed** — cannot be forced, and deprioritised by
+      Narendra (2026-09-19): news channels will surface an action he holds. Original note: Every item on 19 Sep was a dividend, so
       the purpose wording (`BONUS`, `SPLIT`, `SUB-DIVISION`, `CONSOLIDATION`) is from
       NSE's documented format, not observed. The 25% move warning remains the backstop.
 
@@ -115,16 +116,15 @@
 
 ## 8. Production (Narendra)
 
-- [ ] 8.1 Add the six values to the server's `.env` (`docs/DEPLOY.md` → Market data).
-- [ ] 8.2 On the VM (SSH button):
-      the two `curl` commands in `docs/DEPLOY.md` → Market data. Any number other than
-      `000` means reachable.
+- [x] 8.1 ✅ Six values in the server's `.env`; api recreated.
+- [x] 8.2 ✅ Reachability confirmed (see 0.9). Seeded and filled: production shows the same
+      figures as the laptop — invested ₹1,03,924.93, value ~₹1,03,258, all 11 holdings priced.
 
 ## 9. Verification
 
 - [x] 9.1 `uv run ruff format .` and `uv run pytest` from backend/ — **824 passed, 5 skipped**
       (was 771). `npm run build` and `npm run lint` from frontend/ — clean.
-- [ ] 9.2 `.env` is not staged — checked at commit.
+- [x] 9.2 `.env` is not staged — checked at each of the four commits.
 - [x] 9.3 docs and diagrams reflect what was built: `docs/INVESTMENTS.md` (§4 staleness, §10,
       new §14), `docs/ROADMAP.md`, `docs/DEPLOY.md` (Market data), `docs/JOBS.md` (three
       jobs), `AGENTS.md` (convention 14: tests in their own database), `.env.example`.
