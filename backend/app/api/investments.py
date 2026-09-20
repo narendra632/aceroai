@@ -24,9 +24,11 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.api.schemas import (
     AbScoreOut,
+    ActiveIn,
     ApproveIn,
     AssetTotalOut,
     AttentionOut,
+    AttributionOut,
     BookLineOut,
     BooksOut,
     BottleneckOut,
@@ -41,6 +43,7 @@ from app.api.schemas import (
     FlagOut,
     FrameworkOut,
     GateOut,
+    HeardOut,
     HoldingDetailOut,
     HoldingOut,
     MappingOut,
@@ -49,9 +52,11 @@ from app.api.schemas import (
     ProposalOut,
     ProposalsOut,
     QualityOut,
+    ReadingOut,
     RemapIn,
     ReverseIn,
     ScheduleFaOut,
+    SourceOut,
     SummaryOut,
     TotalsOut,
     TransactionOut,
@@ -66,6 +71,7 @@ from app.db.models import (
     Instrument,
     InvalidationTrigger,
     Proposal,
+    Source,
     Transaction,
     User,
 )
@@ -81,6 +87,7 @@ from app.services.investments import (
     overview,
     pricing,
     proposals,
+    reading,
     schedulefa,
     scoring,
     watching,
@@ -822,3 +829,79 @@ def get_books(
         readable=comparison.readable,
         unaided=books.unaided(db, user.id),
     )
+
+
+# --- the reading layer -----------------------------------------------------------------------
+#
+# ⚠ Every instrument every source names is recorded, held or not, acted on or not. Judging a
+# source on the ideas that were acted on measures the reader's filter rather than the source:
+# forty companies named, three looked at, one that worked reads as 33% instead of 2.5%.
+
+
+@router.get("/reading")
+def get_reading(
+    days: int = 30,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReadingOut:
+    """Where the system reads from, what has been said lately, and whether it was worth it."""
+    sources = reading.registered(db)
+    return ReadingOut(
+        sources=[SourceOut.model_validate(s) for s in sources],
+        heard=[HeardOut.model_validate(h) for h in reading.recent(db, days=days)],
+        attribution=[
+            AttributionOut(
+                source=a.source,
+                trust_tier=a.trust_tier,
+                named=a.named,
+                directional=a.directional,
+                scored=a.scored,
+                pending=a.pending,
+                became_proposals=a.became_proposals,
+                hit_rate=MeasureOut.model_validate(a.hit_rate),
+            )
+            for a in reading.attributions(db)
+        ],
+        awaiting_approval=sum(1 for s in sources if s.approved_at is None),
+    )
+
+
+@router.post("/reading/sources/{source_id}/approve")
+def approve_source(
+    source_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SourceOut:
+    """Start reading from a source.
+
+    ⚠ A decision, not a setting, which is why it has its own route rather than riding on a
+    settings toggle. Approving a commentator changes what the system can be talked into — and
+    the sourcing gate still refuses a proposal that rests on tier 3 alone, so this widens what
+    is *read*, never what is *acted on*.
+    """
+    source = db.get(Source, source_id)
+    if source is None or source.deleted_at is not None:
+        raise NotFound("source")
+    reading.approve(db, source)
+    db.commit()
+    return SourceOut.model_validate(source)
+
+
+@router.post("/reading/sources/{source_id}/active")
+def set_source_active(
+    source_id: uuid.UUID,
+    body: ActiveIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SourceOut:
+    """Switch a source on or off.
+
+    ⚠ Off, never deleted. A removed source would orphan every mention that cited it and
+    quietly rewrite the attribution history along with it.
+    """
+    source = db.get(Source, source_id)
+    if source is None or source.deleted_at is not None:
+        raise NotFound("source")
+    reading.set_active(db, source, active=body.is_active)
+    db.commit()
+    return SourceOut.model_validate(source)

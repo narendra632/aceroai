@@ -1,0 +1,219 @@
+"""Reading the world: exchange announcements, and what commentators are saying.
+
+Two adapters, neither needing a key.
+
+**NSE's own RSS feeds** are the best free source in this whole design. Announcements, results,
+board meetings, shareholding, insider trading — the exchange's official firehose, no login, no
+quota, and it is *tier 1*: what a company tells the exchange is a filing, not a report of one.
+
+**YouTube channel RSS** gives new uploads without an API key or a quota. ⚠ It is an unsupported
+endpoint and is reported to fail intermittently — occasional 404s, silent multi-day gaps, and a
+window of only the last ~15 items. So a missed video is expected and must not be treated as
+"nothing happened": the poller records what it saw and never infers absence.
+
+⚠ **Nothing here judges materiality or extracts meaning.** These adapters fetch and parse. What
+an item *means* is a separate step, and keeping them apart is what lets the record of "this was
+published" survive independently of whatever the reading of it concluded.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import re
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+
+import httpx
+
+from app.services.marketdata import http
+from app.services.marketdata.http import ProviderError
+
+PROVIDER = "NSE_RSS"
+YOUTUBE_PROVIDER = "YOUTUBE_RSS"
+
+#: The exchange's feeds. ⚠ `Corporate_action.xml` is read elsewhere, by the job that applies
+#: splits — it is the one feed whose items change the ledger rather than informing a view.
+NSE_FEEDS: dict[str, str] = {
+    "announcements": "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml",
+    "results": "https://nsearchives.nseindia.com/content/RSS/Financial_Results.xml",
+    "board_meetings": "https://nsearchives.nseindia.com/content/RSS/Board_Meetings.xml",
+    "shareholding": "https://nsearchives.nseindia.com/content/RSS/Shareholding_Pattern.xml",
+    "insider": "https://nsearchives.nseindia.com/content/RSS/InsiderTrading.xml",
+}
+
+YOUTUBE_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+
+_HEADERS = {"User-Agent": "Mozilla/5.0 (personal portfolio; research feed reader)"}
+
+#: How much of an item's text is kept. ⚠ Enough to check a reading against, never the
+#: document — the module's storage budget forbids documents and the excerpt column caps at 2 KB.
+EXCERPT_CAP = 1500
+
+
+class NotPublished(Exception):
+    """The feed answered with nothing usable. Common for YouTube RSS; not a failure."""
+
+
+@dataclass(frozen=True)
+class Item:
+    """One thing that was published, before anyone has decided what it means."""
+
+    external_id: str
+    title: str
+    url: str | None
+    published_at: dt.datetime | None
+    body: str
+    #: Which feed produced it, for the source register.
+    feed: str
+
+
+def _text(element: ET.Element | None) -> str:
+    return (element.text or "").strip() if element is not None else ""
+
+
+def _parse_when(raw: str) -> dt.datetime | None:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    for fmt in (
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%a, %d %b %Y %H:%M:%S GMT",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%d-%b-%Y %H:%M:%S",
+    ):
+        try:
+            when = dt.datetime.strptime(raw, fmt)
+            return when if when.tzinfo else when.replace(tzinfo=dt.UTC)
+        except ValueError:
+            continue
+    return None
+
+
+def _clean(raw: str) -> str:
+    """Strip tags and squeeze whitespace. Feed bodies arrive with markup in them."""
+    without_tags = re.sub(r"<[^>]+>", " ", raw or "")
+    return re.sub(r"\s+", " ", without_tags).strip()[:EXCERPT_CAP]
+
+
+def nse_feed(name: str, c: httpx.Client | None = None) -> list[Item]:
+    """Every current item in one of the exchange's feeds.
+
+    ⚠ The feed is a WINDOW, not a history — it holds the last few hundred items and older ones
+    simply vanish. So polling has to be frequent enough that nothing falls out between reads,
+    and a gap can never be recovered by asking again later.
+    """
+    url = NSE_FEEDS.get(name)
+    if url is None:
+        raise ProviderError(PROVIDER, f"no feed called {name!r}")
+
+    own = c is None
+    c = c or http.client()
+
+    def attempt() -> httpx.Response:
+        r = c.get(url, headers=_HEADERS)
+        r.raise_for_status()
+        return r
+
+    try:
+        r = http.with_retries(PROVIDER, attempt)
+    finally:
+        if own:
+            c.close()
+
+    try:
+        root = ET.fromstring(r.content)
+    except ET.ParseError:
+        raise ProviderError(PROVIDER, f"the {name} feed was not XML") from None
+
+    # ⚠ NSE answers a blocked client with an HTML page, and an HTML page is *valid XML*. So
+    # parsing alone proves nothing: without this check the adapter would return an empty list
+    # and the poller would read it as "the exchange announced nothing today".
+    if root.tag != "rss":
+        raise ProviderError(PROVIDER, f"the {name} feed answered with a {root.tag} document")
+
+    out: list[Item] = []
+    for node in root.iter("item"):
+        title = _text(node.find("title"))
+        body = _clean(_text(node.find("description")))
+        link = _text(node.find("link")) or None
+        when = _parse_when(_text(node.find("pubDate")))
+        if not title and not body:
+            continue
+        # ⚠ The feed carries no stable id, so one is derived from what identifies the item:
+        # its link where there is one, else the title and time together. A guid that changed
+        # between polls would re-ingest the same announcement every hour.
+        external_id = link or f"{name}|{title}|{when.isoformat() if when else '?'}"
+        out.append(
+            Item(
+                external_id=external_id,
+                title=title,
+                url=link,
+                published_at=when,
+                body=body,
+                feed=name,
+            )
+        )
+    return out
+
+
+def youtube_uploads(channel_id: str, c: httpx.Client | None = None) -> list[Item]:
+    """A channel's recent uploads, without a key or a quota.
+
+    ⚠ This endpoint is unsupported and unreliable: intermittent 404s, silent multi-day gaps,
+    and a window of roughly the last fifteen videos. A poll returning nothing means **the feed
+    said nothing**, not that the channel published nothing — and the difference matters,
+    because source attribution counts what a source named and would be wrong if a missed video
+    silently became "said nothing".
+    """
+    own = c is None
+    c = c or http.client()
+
+    def attempt() -> httpx.Response:
+        r = c.get(YOUTUBE_FEED.format(channel_id=channel_id), headers=_HEADERS)
+        if r.status_code in (403, 404):
+            return r
+        r.raise_for_status()
+        return r
+
+    try:
+        r = http.with_retries(YOUTUBE_PROVIDER, attempt)
+    finally:
+        if own:
+            c.close()
+
+    if r.status_code in (403, 404):
+        raise NotPublished(channel_id)
+
+    try:
+        root = ET.fromstring(r.content)
+    except ET.ParseError:
+        raise NotPublished(channel_id) from None
+
+    out: list[Item] = []
+    for node in root.iter():
+        if not node.tag.endswith("}entry") and node.tag != "entry":
+            continue
+        values = {child.tag.split("}")[-1]: child for child in node}
+        video_id = _text(values.get("videoId"))
+        title = _text(values.get("title"))
+        if not video_id or not title:
+            continue
+        description = ""
+        for child in node.iter():
+            if child.tag.split("}")[-1] == "description":
+                description = _clean(_text(child))
+                break
+        out.append(
+            Item(
+                external_id=f"yt:{video_id}",
+                title=title,
+                url=f"https://www.youtube.com/watch?v={video_id}",
+                published_at=_parse_when(_text(values.get("published"))),
+                body=description,
+                feed="youtube",
+            )
+        )
+    if not out:
+        raise NotPublished(channel_id)
+    return out

@@ -7,6 +7,7 @@ import FrameworkPanel from "@/components/FrameworkPanel";
 import PositionSheet from "@/components/PositionSheet";
 import BooksPanel from "@/components/BooksPanel";
 import ProposalsPanel from "@/components/ProposalsPanel";
+import ReadingPanel from "@/components/ReadingPanel";
 import TransactionEntry from "@/components/TransactionEntry";
 import { InfoTip } from "@/components/InfoTip";
 import { Button } from "@/components/ui/button";
@@ -872,6 +873,11 @@ export default function InvestmentsView() {
           {/* Below the holdings: this is where a company stops being a line in a ledger
           and becomes a position in a thesis. */}
           <FrameworkPanel />
+
+          {/* ⚠ Below the framework, because what a source said is evidence for a judgement
+          rather than a judgement, and reading it first is how commentary ends up setting the
+          agenda. Collapsed by default for the same reason. */}
+          <ReadingPanel />
 
           {/* ⚠ Below the framework and collapsed by default. It is for reading in aggregate
           on a schedule, and putting it higher would invite exactly the casual dipping-in that

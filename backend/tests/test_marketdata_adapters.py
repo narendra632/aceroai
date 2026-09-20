@@ -18,7 +18,16 @@ import httpx
 import pytest
 
 from app.config import settings
-from app.services.marketdata import amfi, angel_one, binance, coingecko, http, nse, twelve_data
+from app.services.marketdata import (
+    amfi,
+    angel_one,
+    binance,
+    coingecko,
+    feeds,
+    http,
+    nse,
+    twelve_data,
+)
 from app.services.marketdata.http import ProviderError
 
 
@@ -367,3 +376,126 @@ def test_binance_closes_are_paged_and_keep_the_candles_own_day():
     assert pages == [dt.date(2024, 1, 1), dt.date(2024, 1, 1) + dt.timedelta(days=1000)]
     assert len(closes) == 1003
     assert closes[0] == (dt.date(2024, 1, 1), D("0.1"))
+
+
+# --- the reading feeds ----------------------------------------------------------------------
+#
+# Shapes recorded from the live feeds on 2026-09-20: NSE's announcement RSS carries the
+# company's legal name as the item TITLE and the disclosure in the description, and YouTube's
+# channel feed is Atom with a `yt:videoId` and a `media:description`.
+
+
+NSE_RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
+<item>
+  <title>Welspun Corp Limited</title>
+  <link>https://nsearchives.nseindia.com/corporate/WELCORP_20092026_order.pdf</link>
+  <description>Welspun Corp Limited has informed the Exchange about Bagging/Receiving of
+   orders/contracts |SUBJECT: Bagging/Receiving of orders/contracts</description>
+  <pubDate>Sat, 20 Sep 2026 21:41:10 GMT</pubDate>
+</item>
+<item>
+  <title>Supriya Lifescience Limited</title>
+  <link>https://nsearchives.nseindia.com/corporate/SUPRIYA_20092026_meet.pdf</link>
+  <description>Schedule of meet |SUBJECT: Analysts/Institutional Investor Meet</description>
+  <pubDate>Sat, 20 Sep 2026 23:41:18 GMT</pubDate>
+</item>
+</channel></rss>"""
+
+YOUTUBE_ATOM = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <yt:videoId>abc123</yt:videoId>
+    <title>Interest rates and Stock Prices</title>
+    <published>2026-09-10T16:06:09+00:00</published>
+    <media:group><media:description>Long-term rates hit 20-year highs.</media:description>
+    </media:group>
+  </entry>
+</feed>"""
+
+
+def test_an_announcement_carries_the_company_name_as_its_title():
+    """⚠ Which is what the matcher reads. NSE writes the legal name there and the disclosure
+    in the description, so a parser that kept only the description would lose the company."""
+    c = mock(lambda request: httpx.Response(200, content=NSE_RSS.encode()))
+
+    items = feeds.nse_feed("announcements", c)
+
+    assert items[0].title == "Welspun Corp Limited"
+    assert "Bagging/Receiving of orders" in items[0].body
+    assert items[0].published_at.year == 2026
+
+
+def test_an_item_is_identified_by_its_link():
+    """⚠ The feed carries no stable guid. An id that changed between polls would re-ingest
+    the same announcement every four hours, for as long as it stayed in the window."""
+    c = mock(lambda request: httpx.Response(200, content=NSE_RSS.encode()))
+
+    assert feeds.nse_feed("announcements", c)[0].external_id.endswith("order.pdf")
+
+
+def test_a_block_page_is_reported_rather_than_read_as_an_empty_feed():
+    """⚠ NSE answers a blocked client with HTML, and HTML is valid XML — so it parses
+    cleanly and yields nothing. Without a check on the root element the poller would read
+    that as "the exchange announced nothing today"."""
+    c = mock(lambda request: httpx.Response(200, content=b"<html><body>blocked</body></html>"))
+
+    with pytest.raises(ProviderError):
+        feeds.nse_feed("announcements", c)
+
+
+def test_a_feed_that_is_not_xml_at_all_is_reported_too():
+    c = mock(lambda request: httpx.Response(200, content=b"not xml <<<"))
+
+    with pytest.raises(ProviderError):
+        feeds.nse_feed("announcements", c)
+
+
+def test_an_unknown_feed_name_is_refused_before_a_request_is_made():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=NSE_RSS.encode())
+
+    with pytest.raises(ProviderError):
+        feeds.nse_feed("not_a_feed", mock(handler))
+    assert calls == []
+
+
+def test_markup_inside_a_description_is_stripped():
+    """Feed descriptions carry escaped HTML, which the XML parser hands back as real tags."""
+    body = NSE_RSS.replace("Schedule of meet", "&lt;b&gt;Schedule&lt;/b&gt; of meet")
+    c = mock(lambda request: httpx.Response(200, content=body.encode()))
+
+    parsed = feeds.nse_feed("announcements", c)[1].body
+    assert "<b>" not in parsed
+    assert "Schedule" in parsed
+
+
+def test_a_channel_upload_is_read_without_a_key():
+    c = mock(lambda request: httpx.Response(200, content=YOUTUBE_ATOM.encode()))
+
+    items = feeds.youtube_uploads("UCLvnJL8htRR1T9cbSccaoVw", c)
+
+    assert items[0].external_id == "yt:abc123"
+    assert items[0].url == "https://www.youtube.com/watch?v=abc123"
+    assert "20-year highs" in items[0].body
+
+
+def test_a_404_from_the_channel_feed_is_silence_not_a_failure():
+    """⚠ The endpoint is unsupported and 404s intermittently. Raising a provider error would
+    make a routine gap look like a broken source; reporting silence keeps "we did not hear"
+    distinct from "nothing was said"."""
+    c = mock(lambda request: httpx.Response(404))
+
+    with pytest.raises(feeds.NotPublished):
+        feeds.youtube_uploads("UCgone", c)
+
+
+def test_an_empty_channel_feed_is_silence_too():
+    c = mock(lambda request: httpx.Response(200, content=b"<feed></feed>"))
+
+    with pytest.raises(feeds.NotPublished):
+        feeds.youtube_uploads("UCempty", c)

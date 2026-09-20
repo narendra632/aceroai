@@ -74,6 +74,7 @@ from app.db.models import (
     InvalidationTrigger,
     JobRun,
     JournalEntry,
+    Mention,
     Message,
     Notification,
     Portfolio,
@@ -82,6 +83,7 @@ from app.db.models import (
     Proposal,
     PushSubscription,
     ShadowEntry,
+    Source,
     SourceItem,
     Span,
     Task,
@@ -305,12 +307,23 @@ def _purge(db):
     if db.execute(select(SourceItem.id).limit(1)).first() is not None:
         for table in ("fundamentals", "source_items"):
             db.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {table}_append_only"))
+        # Mentions reference the documents, so they go before them. Their guard refuses
+        # DELETE outright rather than UPDATE — 023 narrowed it so a mention can record what
+        # it led to — so it is the no-delete trigger that teardown lifts here.
+        db.execute(text("ALTER TABLE mentions DISABLE TRIGGER mentions_no_delete"))
         try:
+            db.execute(delete(Mention))
             db.execute(delete(Fundamental))
             db.execute(delete(SourceItem))
         finally:
+            db.execute(text("ALTER TABLE mentions ENABLE TRIGGER mentions_no_delete"))
             for table in ("fundamentals", "source_items"):
                 db.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {table}_append_only"))
+
+    # The register itself. ⚠ After the documents that cite it, or the foreign key refuses —
+    # which is the same ordering rule the rest of this teardown follows, and the reason a
+    # missing delete here breaks the purge outright instead of leaking rows quietly.
+    db.execute(delete(Source))
 
     db.execute(sa_update(AbMapping).values(superseded_by_id=None))
     db.execute(delete(AbMapping))

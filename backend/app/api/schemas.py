@@ -1247,3 +1247,80 @@ class DraftOut(BaseModel):
 
 class ReverseIn(BaseModel):
     note: str | None = None
+
+
+class SourceOut(BaseModel):
+    """One place the system reads from.
+
+    ⚠ `trust_tier` is not decoration. Tier 1 is a filing or a regulator, tier 2 the press,
+    tier 3 commentary — and a proposal whose evidence is only tier 3 fails its sourcing gate.
+    """
+
+    id: uuid.UUID
+    kind: str
+    name: str
+    handle: str
+    trust_tier: int
+    is_active: bool
+    #: ⚠ Null means nothing is read from it. Adding a source changes what the system can be
+    #: talked into, so it waits for a person the way a framework mapping does.
+    approved_at: dt.datetime | None
+    notes: str | None
+    last_polled_at: dt.datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AttributionOut(BaseModel):
+    """What one source named, and whether its directional calls worked out.
+
+    ⚠ `named` counts **everything** the source said, including the companies never looked at.
+    Scoring a source on the ideas that were acted on measures the reader's filter instead of
+    the source, and turns a 2.5% hit rate into a 33% one.
+    """
+
+    source: str
+    trust_tier: int
+    named: int
+    directional: int
+    scored: int
+    #: Calls whose horizon has not arrived, or whose prices do not reach it yet.
+    pending: int
+    became_proposals: int
+    hit_rate: MeasureOut
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HeardOut(BaseModel):
+    """One thing a source said about one instrument."""
+
+    symbol: str
+    name: str
+    #: BULL · BEAR · NEUTRAL · MENTION_ONLY. ⚠ Asked of commentary only: an exchange filing
+    #: reports that something happened and takes no side, so it is always MENTION_ONLY.
+    stance: str
+    excerpt: str | None
+    source: str
+    trust_tier: int
+    url: str | None
+    published_at: dt.datetime | None
+    is_held: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ReadingOut(BaseModel):
+    """The reading layer: where information comes from, and what has been said lately."""
+
+    sources: list[SourceOut]
+    heard: list[HeardOut]
+    attribution: list[AttributionOut]
+    #: Sources registered but not yet approved — the decision waiting for the user.
+    awaiting_approval: int
+
+
+class ActiveIn(BaseModel):
+    """Switch a source on or off. ⚠ Never a delete: see `SourceOut`."""
+
+    is_active: bool

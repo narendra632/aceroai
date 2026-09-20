@@ -68,6 +68,14 @@ Each job says how late it may still run.
 | `prices_india_close` | 19:00 weekdays | +12 h | NSE's file is out by ~18:30; tomorrow's run also catches up |
 | `corporate_actions_watch` | 20:00 weekdays | +12 h | Actions are announced days before their ex-date |
 | `investments_disk_watch` | 09:00 Mondays | +12 h | A 50 MB/year budget does not need a daily reading |
+| `sources_poll` | 08:10, 12:10, 16:10, 20:10, 23:10 | +2 h | The feed is a window that empties; a gap cannot be re-asked |
+
+⚠ **Why `sources_poll` closes the day at 23:10.** NSE's announcement feed is not a history,
+it is a *window that empties*: it held 56 items at 23:40 on 20 Sep 2026 and 0 the next
+morning. Anything filed after the last poll and before that reset is gone for good, because a
+feed with no history cannot be asked again. Companies do file late — the 21:41 and 23:41 items
+that Saturday were both real disclosures — so the day ends with a poll after them rather than
+before, and the catch-up window is 2 h because the shortest gap between runs is 3 h.
 
 ⚠ **A trap, found by measurement.** The window must be *shorter than the gap between runs*.
 A daily job with a 24-hour window can never be missed — its occurrences are 24 hours apart,
@@ -293,6 +301,7 @@ backend/app/jobs/
   scheduler.py     the ticker — APScheduler holds exactly one job
   run.py           python -m app.jobs.run
   housekeeping.py  retention_sweep, disk_watch, investments_disk_watch
+  reading.py       sources_poll
   brief.py         morning_brief, day_end_summary   (the only jobs that call a model)
   nudges.py        task_nudge, budget_watch, journal_nudge
   backups.py       db_backup, restore_check, backup_watch

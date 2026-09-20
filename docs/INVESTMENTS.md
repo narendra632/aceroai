@@ -471,6 +471,7 @@ backend/app/services/investments/
 
   history.py     value over time, and movements too large to be price moves
   corpactions.py splits and bonuses: read, recorded, applied on the ex-date
+  reading.py     the source register, and every instrument every source named
   schedulefa.py  foreign holdings as the calendar-year return asks for them
   overview.py    the one-fold assembly the page and the API read from
 
@@ -481,12 +482,14 @@ backend/app/scripts/seed_investments.py the real portfolio
 backend/alembic/versions/…014_investment_ledger.py
 backend/alembic/versions/…015_form_entry_source.py
 backend/alembic/versions/…017_corporate_actions.py
+backend/alembic/versions/…023_sources_and_mentions.py
 
 frontend/src/components/InvestmentsView.tsx   the page
 frontend/src/components/PositionSheet.tsx     one holding, in full
 frontend/src/components/TransactionEntry.tsx  entry and history
 frontend/src/components/CorporateActions.tsx  announced splits, and applying them
 frontend/src/components/ForeignHoldings.tsx   the Schedule FA figures
+frontend/src/components/ReadingPanel.tsx     sources, what was said, and whether it was worth it
 frontend/src/lib/investments.ts               display rules, in one place
 ```
 
@@ -498,7 +501,8 @@ Tests: `test_investments_ledger.py` (the fold, against Groww),
 `test_investments_entry.py` (validation, correction, staleness),
 `test_investments_seed.py` (the script),
 `test_investments_corpactions.py` (what the feed says, what is refused, what is written),
-`test_investments_schedulefa.py` (the peak, and how honestly its coverage is stated).
+`test_investments_schedulefa.py` (the peak, and how honestly its coverage is stated),
+`test_investments_reading.py` (who was named, what the model may not add, what the guard refuses).
 
 ---
 
@@ -565,3 +569,110 @@ the 25% move warning (§12) is the backstop.
 
 Code: `backend/app/services/marketdata/` — one module per source, plus `feed.py`, the only
 writer — and `backend/app/jobs/prices.py`.
+
+---
+
+## 15. What it reads, and everything it heard named
+
+The system reads two kinds of thing, and keeping them apart is the point.
+
+**Tier 1 — filings.** NSE publishes five RSS feeds with no key and no login: announcements
+(every Reg-30 disclosure), results, board meetings, shareholding patterns and insider
+dealing. What a company tells the exchange *is* the filing, not a report of one, so these are
+registered approved: the module already reads NSE's bhavcopy for the close of record and its
+corporate-action feed for splits, and an announcement feed is the same record from the same
+registrar.
+
+**Tier 3 — commentary.** Channels are registered **unapproved** and read nothing until you
+say so. Adding a source changes what the system can be talked into, which is a decision, not
+a setting. And approving one widens what is *read*, never what is *acted on*: a suggestion
+whose evidence is only tier 3 still fails its sourcing gate.
+
+### Every instrument every source names
+
+`mentions` records **every** company **every** source names — held or not, acted on or not,
+dismissed or not.
+
+⚠ **That clause is the entire reason the table exists.** Judge a channel on the ideas you
+acted on and you are measuring your own filter rather than the channel: a source that named
+forty companies, of which three were looked at and one worked, reads as **33% instead of
+2.5%**. The skipped ideas are missing from the denominator, and they cannot be reconstructed
+afterwards — which is why the row is written the moment the thing is said, long before anyone
+knows whether it mattered.
+
+### Who was named is code; which direction was meant is the model
+
+Matching is deterministic, so the denominator never depends on a model remembering a company.
+The model is then allowed to read a *direction* onto the names the matcher already found —
+and **never to add one**. A model that could introduce names would be inventing the very
+mentions the attribution measure counts, and an invented mention is indistinguishable from a
+real one once written.
+
+A stance is asked of commentary only. An exchange announcement reports that something
+happened and takes no side; reading a bull case into "board meeting intimation" would put
+noise straight into the numbers.
+
+Matching a name is fussier than it looks. Stripping corporate words wherever they appear
+turned *Apar Industries Limited* into `apar` — four characters, under the safety floor — so
+only the **trailing** legal form is stripped and "Industries" stays part of the name. Tickers
+match case-sensitively, because lower-cased, half the symbols on the exchange are ordinary
+English words: `APARINDS` is a mention, "the aparinds of the matter" is not. Measured against
+56 live announcements on 20 Sep 2026: zero false positives.
+
+### What the sources actually publish
+
+Measured rather than assumed, on 20 Sep 2026, over each channel's last fifteen uploads:
+
+| Source | Uploads | Named a tracked company |
+|---|---|---|
+| Aswath Damodaran | 15 | **0** — valuation method, US examples |
+| Yadnya Investment Academy | 15 | **0** — macro and personal finance |
+| Zerodha | 15 | **0** — IPO explainers, product videos |
+| Capitalmind | 2, from 2006 | not the investing firm; their work is a newsletter |
+
+⚠ So the honest position is that the machinery is correct and the commentary yield is near
+zero **for these eleven companies**. That is a finding about the sources, not a fault in the
+design — and it is exactly what a mention register is for, because without one "the channels
+aren't naming my stocks" would be a feeling rather than a count.
+
+⚠ **A known limit, stated rather than hidden.** The matcher only knows companies that are
+already tracked, so commentary can tell you something new about what you own — it cannot
+*discover* a company you have never heard of. Idea discovery would need a universe of every
+listed name, and instruments here are created by recording a holding, never separately.
+
+### What the database refuses
+
+`mentions` is append-only in its **utterance** — instrument, stance, words — and mutable in
+what came of it. Writing it as a whole-table guard would have made `became_proposal_id`
+unsettable and the column decoration; that is the fourth time this trigger has caught its own
+author (`agent_runs`, `proposals.status`, `claims`, and now this). DELETE is refused outright:
+a mention that can be removed after the fact is one that never has to be counted.
+
+`sources` is switched off, never deleted. A removed source would orphan every mention that
+cited it and quietly rewrite the attribution history along with it.
+
+### Was a source worth reading
+
+A BULL call is a hit if the price rose over the next quarter; a BEAR call is a hit if it fell.
+NEUTRAL and MENTION_ONLY make no claim — counted, never scored. The hit rate is **withheld
+below 20 settled calls**, like every other measure here, because a figure over six reads
+exactly like one over six hundred and nothing on a page can tell the reader which they are
+seeing unless it refuses. A call whose horizon has not arrived, or whose price series does not
+reach it, is *pending* rather than wrong.
+
+### Two things the live feeds taught
+
+⚠ **A block page is valid XML.** NSE answers a refused client with HTML, which parses cleanly
+and yields no items — so the adapter checks the root element. Without that, "we are blocked"
+and "the exchange announced nothing today" are the same reading.
+
+⚠ **One document is announced more than once.** The results feed returned four entries and
+two links on 21 Sep 2026: the same XBRL file, a second apart, once as `RELATING TO:Annual` and
+once as `RELATING TO:Fourth Quarter`. They are two readings of one filing, so the document is
+the unit and the bodies are *merged* — the excerpt is the evidence, and dropping one would
+throw away half of what the exchange said. A poller that assumed the feed was a set would also
+collide with its own insert and lose the whole round to a rollback.
+
+Code: `backend/app/services/investments/reading.py`, `backend/app/services/marketdata/feeds.py`,
+`backend/app/jobs/reading.py`, `backend/app/scripts/seed_sources.py`,
+`frontend/src/components/ReadingPanel.tsx`. Migration 023.

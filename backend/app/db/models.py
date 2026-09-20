@@ -736,6 +736,10 @@ class SourceItem(Base):
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     kind: Mapped[str] = mapped_column(sa.Text)
     instrument_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("instruments.id"))
+    #: Which registered source produced this. ⚠ Nullable, because the filings ingested before
+    #: the source register existed have none — and inventing one would be a lie about
+    #: provenance in the one table whose entire purpose is provenance.
+    source_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("sources.id"))
     source: Mapped[str] = mapped_column(sa.Text)
     external_id: Mapped[str] = mapped_column(sa.Text)
     url: Mapped[str | None] = mapped_column(sa.Text)
@@ -996,4 +1000,68 @@ class FrameworkScore(Base):
     quadrant: Mapped[str | None] = mapped_column(sa.Text)
     price: Mapped[Decimal | None] = mapped_column(sa.Numeric(20, 6))
     years_read: Mapped[int] = mapped_column(sa.Integer, default=0)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Source(Base):
+    """A place the system reads from (023).
+
+    ⚠ `trust_tier` is load-bearing rather than descriptive. Tier 1 is a filing or a regulator,
+    tier 2 the press, tier 3 commentary — and a proposal resting *only* on tier 3 fails its
+    sourcing gate. A stock named on a channel joins the research queue; it does not join the
+    portfolio, however persuasive the argument was.
+
+    ⚠ Approved like a framework mapping, and for the same reason: adding a source changes what
+    the system reads and therefore what it can be talked into. That is a decision, not a
+    setting.
+
+    Soft-deleted rather than removed. A source that could only be deleted would orphan every
+    mention that ever cited it, and quietly rewrite the attribution history along with it.
+    """
+
+    __tablename__ = "sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(sa.Text)
+    name: Mapped[str] = mapped_column(sa.Text)
+    #: A channel id, a feed URL, a filer id — whatever its own system calls it.
+    handle: Mapped[str] = mapped_column(sa.Text)
+    trust_tier: Mapped[int] = mapped_column(sa.Integer)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
+    approved_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(sa.Text)
+    last_polled_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Mention(Base):
+    """Every instrument every source has ever named. **APPEND-ONLY** (023).
+
+    ⚠ **Every** one — acted on or not, held or not, dismissed or not. That clause is the whole
+    reason this table exists.
+
+    Judge a channel only on the ideas you acted on and you are measuring your own filter rather
+    than the channel: the ideas you skipped are missing from the denominator, so a source that
+    named forty companies of which you looked at three and one worked reads as 33% instead of
+    2.5%. That is not a subtle bias — it is the difference between a source looking excellent
+    and looking useless. And it cannot be reconstructed afterwards, which is why the row is
+    written at the moment the thing is said.
+
+    `became_proposal_id` is usually NULL, and the rows carrying nothing there are the point.
+
+    ⚠ Append-only in the **utterance** — instrument, stance and words — and not in what came
+    of it. `became_proposal_id` is set later, by a database trigger narrowed the same way 021
+    had to narrow `claims`: what was said cannot be unsaid, but what it led to is a fact
+    discovered afterwards about an utterance that has not moved. DELETE is refused outright.
+    """
+
+    __tablename__ = "mentions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    source_item_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("source_items.id"))
+    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    stance: Mapped[str] = mapped_column(sa.Text)
+    claim_excerpt: Mapped[str | None] = mapped_column(sa.Text)
+    became_proposal_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("proposals.id"))
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

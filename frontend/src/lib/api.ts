@@ -1739,3 +1739,87 @@ export async function getBooks(): Promise<Books> {
   if (!r.ok) throw new Error("could not load the books");
   return r.json();
 }
+
+// --- the reading layer -----------------------------------------------------------------
+
+/** One place the system reads from. */
+export type Source = {
+  id: string;
+  kind: string;
+  name: string;
+  handle: string;
+  /** ⚠ 1 = a filing or a regulator · 2 = the press · 3 = commentary. A suggestion resting
+   *  only on tier 3 fails its sourcing gate — a stock named on a channel enters the research
+   *  queue, never the portfolio. */
+  trust_tier: number;
+  is_active: boolean;
+  /** ⚠ null means nothing is read from it. Adding a source changes what the system can be
+   *  talked into, so it waits for you the way a framework mapping does. */
+  approved_at: string | null;
+  notes: string | null;
+  last_polled_at: string | null;
+};
+
+/** What one source named, and whether its directional calls worked out. */
+export type Attribution = {
+  source: string;
+  trust_tier: number;
+  /** ⚠ EVERYTHING it named, including what was never looked at. Scoring a source on the
+   *  ideas you acted on measures your own filter and turns 2.5% into 33%. */
+  named: number;
+  directional: number;
+  scored: number;
+  pending: number;
+  became_proposals: number;
+  hit_rate: Measure;
+};
+
+/** One thing a source said about one instrument. */
+export type Heard = {
+  symbol: string;
+  name: string;
+  stance: string;
+  excerpt: string | null;
+  source: string;
+  trust_tier: number;
+  url: string | null;
+  published_at: string | null;
+  is_held: boolean;
+};
+
+export type Reading = {
+  sources: Source[];
+  heard: Heard[];
+  attribution: Attribution[];
+  awaiting_approval: number;
+};
+
+/** Where the system reads from, what has been said lately, and whether it was worth it. */
+export async function getReading(days = 30): Promise<Reading> {
+  const r = await req(`/api/investments/reading?days=${days}`);
+  if (!r.ok) throw new Error("could not load the reading list");
+  return r.json();
+}
+
+/** Start reading from a source.
+ *
+ *  ⚠ This widens what is READ, never what is acted on. The sourcing gate still refuses a
+ *  suggestion resting on commentary alone, whatever that commentary says. */
+export async function approveSource(id: string): Promise<Source> {
+  const r = await req(`/api/investments/reading/sources/${id}/approve`, {
+    method: "POST",
+  });
+  if (!r.ok) return investmentError(r, "that source could not be approved");
+  return r.json();
+}
+
+/** Switch a source on or off. ⚠ Off, never deleted: removing one would orphan every mention
+ *  that cited it and quietly rewrite the attribution history. */
+export async function setSourceActive(id: string, isActive: boolean): Promise<Source> {
+  const r = await req(`/api/investments/reading/sources/${id}/active`, {
+    method: "POST",
+    body: JSON.stringify({ is_active: isActive }),
+  });
+  if (!r.ok) return investmentError(r, "that source could not be changed");
+  return r.json();
+}
