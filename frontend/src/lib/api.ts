@@ -1034,9 +1034,10 @@ export type ForeignHolding = {
   closing_quantity: string;
   gross_income_inr: string;
   gross_proceeds_inr: string;
-  /** ⚠ Coverage, stated rather than assumed — a peak over 40 observed days of a year is the
-   *  peak of those 40 days, and the interface has to be able to say so. */
+  /** ⚠ Coverage against the days it was HELD, not the length of the period. Comparing with
+   *  the period read as missing data for a share bought mid-year. */
   days_valued: number;
+  days_held: number;
   days_in_period: number;
   is_complete: boolean;
 };

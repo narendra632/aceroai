@@ -144,9 +144,13 @@ def test_coverage_is_reported_rather_than_assumed(db, book):
     to be visible or the figure quietly overstates its own authority."""
     (holding,) = schedulefa.report(db, book.id, YEAR).holdings
     assert holding.days_in_period == 365 + (1 if YEAR % 4 == 0 and YEAR % 100 != 0 else 0)
-    # Valued from the first observation to the end of the year, carried forward.
-    assert holding.days_valued == (dt.date(YEAR, 12, 31) - dt.date(YEAR, 1, 10)).days + 1
-    assert not holding.is_complete
+    # ⚠ Coverage is against the days HELD, not the length of the year. Bought on 10 January,
+    # so the days before that are not a gap in the record — they are days it was not owned.
+    expected = (dt.date(YEAR, 12, 31) - dt.date(YEAR, 1, 10)).days + 1
+    assert holding.days_held == expected
+    assert holding.days_valued == expected
+    assert holding.is_complete, "every day it was held carries a value"
+    assert holding.days_held < holding.days_in_period
 
 
 def test_income_and_proceeds_are_counted_only_inside_the_period(db, book):

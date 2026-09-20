@@ -71,15 +71,22 @@ class ForeignHolding:
     closing_quantity: Decimal
     gross_income_inr: Decimal
     gross_proceeds_inr: Decimal
-    #: ⚠ How many days of the period could actually be valued, against how many it contains.
-    #: The peak is the peak of what was observed; if a week is missing, it says so here rather
-    #: than presenting a maximum over an unstated subset.
+    #: ⚠ How many days of the period could actually be valued, against how many the holding
+    #: was HELD for — not against the length of the period.
+    #:
+    #: The first version compared against the whole period and read as missing data: "priced
+    #: on 97 of 263 days" for a share bought in June says the record has a hole in it, when
+    #: the truth is that it was not owned until June. Coverage is about the days there was
+    #: something to value, and a figure that cannot tell "not owned" from "not recorded" is
+    #: reporting a fault that does not exist.
     days_valued: int
+    days_held: int
     days_in_period: int
 
     @property
     def is_complete(self) -> bool:
-        return self.days_valued == self.days_in_period
+        """Every day it was held carries a value."""
+        return self.days_held > 0 and self.days_valued >= self.days_held
 
 
 @dataclass
@@ -168,6 +175,7 @@ def report(db: Session, portfolio_id: uuid.UUID, year: int) -> ScheduleFa:
     peak: dict[uuid.UUID, tuple[Decimal, dt.date]] = {}
     closing: dict[uuid.UUID, tuple[Decimal, dt.date]] = {}
     valued_days: dict[uuid.UUID, int] = {}
+    held_days: dict[uuid.UUID, int] = {}
     held_in_period: set[uuid.UUID] = set()
 
     day = min(t.trade_date for t in txns)
@@ -190,6 +198,7 @@ def report(db: Session, portfolio_id: uuid.UUID, year: int) -> ScheduleFa:
                 if not pos.is_open:
                     continue
                 held_in_period.add(key)
+                held_days[key] = held_days.get(key, 0) + 1
                 price = history.value_as_of(prices.get(key), day)
                 rate = history.value_as_of(rates.get(f"{pos.currency}INR"), day)
                 if price is None or rate is None:
@@ -217,6 +226,7 @@ def report(db: Session, portfolio_id: uuid.UUID, year: int) -> ScheduleFa:
             gross_income_inr=income.get(key, ZERO),
             gross_proceeds_inr=proceeds.get(key, ZERO),
             days_valued=valued_days.get(key, 0),
+            days_held=held_days.get(key, 0),
             days_in_period=days_in_period,
         )
         # Reportable if it was held at any point in the period OR disposed of during it —

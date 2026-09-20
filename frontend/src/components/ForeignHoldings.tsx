@@ -19,9 +19,10 @@ import { formatDateFull, formatQuantity, formatRupees } from "@/lib/format";
  *
  * ⚠ Two honesty rules run through the rendering, and neither is decoration:
  *
- *   - **Coverage is shown.** A peak over 40 observed days of a 365-day year is the peak of
- *     those 40 days. Where the year is not fully covered the card says so, because a maximum
- *     over an unstated subset is a figure pretending to more authority than it has.
+ *   - **Coverage is shown, against the days HELD.** A peak over 40 observed days is the peak
+ *     of those 40 days, and the card says so. ⚠ Measured against the days the holding existed
+ *     rather than the length of the year: "priced on 97 of 263 days" for a share bought in
+ *     June reads as a hole in the record, when the truth is that it was not owned until June.
  *   - **The rate is named as the wrong one.** The return requires SBI's TT buying rate for
  *     the relevant date; these figures use the rate the feed recorded. Every number carries
  *     the day it came from so the right rate can be looked up. Presenting these as
@@ -109,7 +110,8 @@ export default function ForeignHoldings() {
               </p>
               <p className="text-xs text-muted-foreground">
                 acquired {formatDateFull(h.acquired_on)} ·{" "}
-                {formatQuantity(h.closing_quantity)} held at the year end
+                {formatQuantity(h.closing_quantity)} held at the year end ·{" "}
+                {h.days_held} of {h.days_in_period} days held
               </p>
             </div>
 
@@ -139,11 +141,14 @@ export default function ForeignHoldings() {
               </Figure>
             </dl>
 
+            {/* ⚠ Against the days HELD, not the days in the year. The first version said
+                "priced on 97 of 263 days" for a share bought in June, which reads as a hole in
+                the record when the truth was that it was simply not owned yet. */}
             {!h.is_complete && (
               <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
-                Priced on {h.days_valued} of the period's {h.days_in_period}{" "}
-                days, so the peak is the highest of those days rather than of
-                the whole year.
+                Priced on {h.days_valued} of the {h.days_held} days it was held,
+                so the peak is the highest of those days rather than of every
+                day you owned it.
               </p>
             )}
           </div>

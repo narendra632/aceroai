@@ -96,9 +96,13 @@
 
 ## 10. Owed at the end of Phase 2
 
-- [ ] 10.1 **The walkthrough** — interface, arithmetic and framework layer, with worked
-      examples and simulated scenarios. ⚠ Phase 2 is not complete without it
-- [ ] 10.2 Schedule FA coverage wording: count days held, not days in the period
+- [x] 10.1 **The walkthrough** — `docs/INVESTMENTS-WALKTHROUGH.md`. The eight layers, the
+      arithmetic with worked examples from the real book, six simulated scenarios, how the
+      system will be judged, and what is not built. Written to be read once and kept
+- [x] 10.2 Schedule FA coverage counts days HELD, not days in the period. "Priced on 97 of
+      263 days" for a share bought in June read as a hole in the record when the truth was
+      that it was not owned yet — a figure that cannot tell "not owned" from "not recorded"
+      reports a fault that does not exist
 - [ ] 10.3 The six model-judged flags, with source ingestion
 - [x] 10.4 Trigger evaluation on a schedule — done in section 8
 - [x] 10.5 Claim resolution and the measures that rest on it — done in section 8

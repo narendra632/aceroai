@@ -637,9 +637,11 @@ class ForeignHoldingOut(BaseModel):
     closing_quantity: Decimal
     gross_income_inr: Decimal
     gross_proceeds_inr: Decimal
-    #: ⚠ Coverage, stated rather than assumed. A peak over 40 observed days of a 365-day year
-    #: is the peak of those 40 days, and the interface must be able to say so.
+    #: ⚠ Coverage against the days it was HELD, not against the length of the period.
+    #: Comparing with the period read as missing data for a share bought mid-year, when the
+    #: truth was simply that it was not owned yet.
     days_valued: int
+    days_held: int
     days_in_period: int
     is_complete: bool
 
