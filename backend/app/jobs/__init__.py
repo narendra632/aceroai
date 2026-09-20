@@ -22,6 +22,7 @@ quiet hours and the push cap — comes from the registry and cannot be forgotten
 from app.jobs import (  # noqa: F401  (registers the jobs)
     backups,
     brief,
+    evening,
     housekeeping,
     nudges,
     prices,

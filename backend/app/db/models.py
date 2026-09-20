@@ -774,3 +774,181 @@ class Fundamental(Base):
     taxonomy: Mapped[str] = mapped_column(sa.Text)
     supersedes_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("source_items.id"))
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class AgentRun(Base):
+    """One run of a thinking job. **APPEND-ONLY** (020).
+
+    ⚠ Written even when the run proposed nothing, which on most days is the correct outcome.
+    A system that only logs the days it acted can never be measured against the days it should
+    have acted and did not — the record becomes a highlight reel rather than evidence.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    agent_name: Mapped[str] = mapped_column(sa.Text)
+    occurrence_key: Mapped[str] = mapped_column(sa.Text)
+    started_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    finished_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(sa.Text)
+    inputs_seen: Mapped[int] = mapped_column(sa.Integer, default=0)
+    inputs_material: Mapped[int] = mapped_column(sa.Integer, default=0)
+    proposals_emitted: Mapped[int] = mapped_column(sa.Integer, default=0)
+    sources_unavailable: Mapped[list[str] | None] = mapped_column(ARRAY(sa.Text))
+    tokens_in: Mapped[int] = mapped_column(sa.Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(sa.Integer, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(sa.Numeric(10, 6), default=Decimal(0))
+    notes: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Proposal(Base):
+    """A suggested action, frozen with everything that produced it. **APPEND-ONLY** (020).
+
+    ⚠ `status` is written ONCE and is only ever `PENDING` or `BLOCKED` — what the system
+    itself decided as it wrote the row. What the HUMAN decided lives in `decisions`, and the
+    effective state is derived from the two. An editable status on an append-only table is a
+    contradiction: it would drift out of step with the decision record and nothing could say
+    which of the two was right.
+
+    ⚠ `price_snapshot`, `input_refs` and `gate_results` are FROZEN. What the system saw is a
+    different fact from what the market later did, and a review that recomputes the inputs is
+    reconstructing a decision rather than examining one.
+    """
+
+    __tablename__ = "proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    batch_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid)
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("agent_runs.id"))
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("portfolios.id"))
+    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    action: Mapped[str] = mapped_column(sa.Text)
+    target_amount_inr: Mapped[Decimal | None] = mapped_column(sa.Numeric(14, 2))
+    target_qty: Mapped[Decimal | None] = mapped_column(sa.Numeric(28, 8))
+    horizon_days: Mapped[int] = mapped_column(sa.Integer)
+    thesis: Mapped[str] = mapped_column(sa.Text)
+    confidence: Mapped[Decimal] = mapped_column(sa.Numeric(4, 3))
+    framework_version_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("framework_versions.id"))
+    #: ⚠ Three scores, never blended. The most valuable finding these frameworks produce is
+    #: "essential, excellent, and still a bad purchase today" — which an average destroys.
+    ab_score: Mapped[Decimal | None] = mapped_column(sa.Numeric(4, 2))
+    quality_earned: Mapped[Decimal | None] = mapped_column(sa.Numeric(4, 2))
+    quality_available: Mapped[Decimal | None] = mapped_column(sa.Numeric(4, 2))
+    reflexivity_flags_yes: Mapped[int] = mapped_column(sa.Integer, default=0)
+    quadrant: Mapped[str | None] = mapped_column(sa.Text)
+    price_snapshot: Mapped[dict] = mapped_column(JSONB)
+    input_refs: Mapped[dict] = mapped_column(JSONB)
+    gate_results: Mapped[dict] = mapped_column(JSONB)
+    urgency: Mapped[str] = mapped_column(sa.Text, default="BATCH")
+    model: Mapped[str | None] = mapped_column(sa.Text)
+    prompt_hash: Mapped[str | None] = mapped_column(sa.Text)
+    tokens_in: Mapped[int] = mapped_column(sa.Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(sa.Integer, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(sa.Numeric(10, 6), default=Decimal(0))
+    status: Mapped[str] = mapped_column(sa.Text, default="PENDING")
+    blocked_by: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Decision(Base):
+    """What the human did about a proposal. **APPEND-ONLY** (020).
+
+    ⚠ `reason_text` is NOT NULL on purpose. The reason in the user's own words is the data
+    that eventually reveals what kinds of proposal keep being turned down — which is the only
+    route by which the system learns anything about its own suggestions.
+    """
+
+    __tablename__ = "decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("proposals.id"))
+    decided_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    outcome: Mapped[str] = mapped_column(sa.Text)
+    modified_amount_inr: Mapped[Decimal | None] = mapped_column(sa.Numeric(14, 2))
+    reason_text: Mapped[str] = mapped_column(sa.Text)
+    decided_via: Mapped[str] = mapped_column(sa.Text)
+    resulting_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("transactions.id")
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class InvalidationTrigger(Base):
+    """What would prove the thesis wrong, stated before the outcome is known (020).
+
+    ⚠ A number, a comparison and a deadline — never prose. "If the story changes" cannot be
+    checked, so a position carrying it has no way of ever being wrong, which is the same as
+    carrying no invalidation condition at all.
+
+    Mutable in `status` alone: a trigger arms, then fires, expires or is cleared.
+    """
+
+    __tablename__ = "invalidation_triggers"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("proposals.id"))
+    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    metric_key: Mapped[str] = mapped_column(sa.Text)
+    comparator: Mapped[str] = mapped_column(sa.Text)
+    threshold: Mapped[Decimal] = mapped_column(sa.Numeric(24, 6))
+    unit: Mapped[str] = mapped_column(sa.Text)
+    window_until: Mapped[dt.date] = mapped_column(sa.Date)
+    description: Mapped[str] = mapped_column(sa.Text)
+    status: Mapped[str] = mapped_column(sa.Text, default="ARMED")
+    fired_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    fired_evidence: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Claim(Base):
+    """One falsifiable assertion a thesis made. **APPEND-ONLY** (020).
+
+    ⚠ This is where measuring the system becomes possible at all. Thirty-odd decisions a year
+    can say nothing statistical about returns for years — but each thesis makes several
+    specific, checkable assertions, so a year produces a few hundred testable predictions
+    instead of thirty outcomes. That is the difference between knowing in months and knowing
+    in decades.
+    """
+
+    __tablename__ = "claims"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("proposals.id"))
+    claim_text: Mapped[str] = mapped_column(sa.Text)
+    metric_key: Mapped[str | None] = mapped_column(sa.Text)
+    comparator: Mapped[str | None] = mapped_column(sa.Text)
+    threshold: Mapped[Decimal | None] = mapped_column(sa.Numeric(24, 6))
+    due_by: Mapped[dt.date] = mapped_column(sa.Date)
+    status: Mapped[str] = mapped_column(sa.Text, default="OPEN")
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    resolved_evidence: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class ShadowEntry(Base):
+    """A decision that did NOT happen, tracked with identical arithmetic (020).
+
+    Three books, and the third is the valuable one: what the user vetoed, what the budget
+    could not fund, and what the rules blocked. Only the last can answer whether the safety
+    rails are protecting or merely obstructing.
+
+    ⚠ Read in aggregate, on a schedule — never dipped into after a name that got away. A
+    rejected idea that went up is far more memorable than a rejected idea that went down, and
+    a shadow book read casually trains worse judgement rather than better.
+    """
+
+    __tablename__ = "shadow_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("portfolios.id"))
+    proposal_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("proposals.id"))
+    reason: Mapped[str] = mapped_column(sa.Text)
+    entry_price: Mapped[Decimal] = mapped_column(sa.Numeric(20, 6))
+    entry_date: Mapped[dt.date] = mapped_column(sa.Date)
+    quantity: Mapped[Decimal] = mapped_column(sa.Numeric(28, 8))
+    exit_price: Mapped[Decimal | None] = mapped_column(sa.Numeric(20, 6))
+    exit_date: Mapped[dt.date | None] = mapped_column(sa.Date)
+    exit_reason: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

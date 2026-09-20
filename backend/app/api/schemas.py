@@ -838,6 +838,98 @@ class FlagOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class GateOut(BaseModel):
+    """One rule and what it decided.
+
+    ⚠ `not_applicable` is distinct from `passed`: "not asked" and "asked and satisfied" are
+    different facts, and an interface that shows them alike overstates how much was checked.
+    """
+
+    gate: str
+    passed: bool
+    not_applicable: bool
+    detail: str
+
+
+class TriggerOut(BaseModel):
+    """What would prove the thesis wrong — a number, a comparison and a deadline."""
+
+    id: uuid.UUID
+    metric_key: str
+    comparator: str
+    threshold: Decimal
+    unit: str
+    window_until: dt.date
+    description: str
+    status: str
+    fired_at: dt.datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ClaimOut(BaseModel):
+    """One falsifiable assertion the thesis made."""
+
+    id: uuid.UUID
+    claim_text: str
+    metric_key: str | None
+    due_by: dt.date
+    status: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProposalOut(BaseModel):
+    """A suggestion, with everything it rests on.
+
+    ⚠ `price_snapshot`, `gate_results` and the three scores are FROZEN at the moment it was
+    made. What the system saw is a different fact from what the market later did.
+    """
+
+    id: uuid.UUID
+    symbol: str
+    name: str
+    action: str
+    #: PENDING · APPROVED · REJECTED · MODIFIED · EXPIRED · BLOCKED — derived, never stored.
+    status: str
+    blocked_by: str | None
+    target_amount_inr: Decimal | None
+    target_qty: Decimal | None
+    horizon_days: int
+    thesis: str
+    confidence: Decimal
+    ab_score: Decimal | None
+    quality_earned: Decimal | None
+    quality_available: Decimal | None
+    reflexivity_flags_yes: int
+    quadrant: str | None
+    price_snapshot: dict
+    gates: list[GateOut]
+    triggers: list[TriggerOut]
+    claims: list[ClaimOut]
+    created_at: dt.datetime
+    decided_at: dt.datetime | None = None
+    decision_reason: str | None = None
+
+
+class DecideIn(BaseModel):
+    """⚠ `reason` is required. It is the data that eventually reveals what kinds of suggestion
+    keep being turned down, which is the only way the system learns about its own judgement."""
+
+    outcome: str
+    reason: str
+    modified_amount_inr: Decimal | None = None
+
+
+class ProposalsOut(BaseModel):
+    open: list[ProposalOut]
+    recent: list[ProposalOut]
+    #: ⚠ Runs that suggested nothing are counted here. A system that only leaves a trace on
+    #: the days it acted can never be measured against the days it should have.
+    runs_recorded: int
+    last_run_at: dt.datetime | None
+
+
 class MappingOut(BaseModel):
     """Where one company sits in the framework, and what that is worth."""
 

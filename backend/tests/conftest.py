@@ -59,14 +59,18 @@ from sqlalchemy import update as sa_update
 from app.core.security import hash_password
 from app.db.models import (
     AbMapping,
+    AgentRun,
     ChatSession,
+    Claim,
     CorporateAction,
     DailyUsage,
+    Decision,
     FrameworkVersion,
     Fundamental,
     FxObservation,
     GeneratedReview,
     Instrument,
+    InvalidationTrigger,
     JobRun,
     JournalEntry,
     Message,
@@ -74,7 +78,9 @@ from app.db.models import (
     Portfolio,
     PriceObservation,
     ProfileFact,
+    Proposal,
     PushSubscription,
+    ShadowEntry,
     SourceItem,
     Span,
     Task,
@@ -194,6 +200,34 @@ def _purge(db):
             b.id for b in db.execute(select(Portfolio).where(Portfolio.user_id == u.id)).scalars()
         ]
         if book_ids:
+            # The decision layer, before the ledger it references.
+            #
+            # ⚠ Order is forced by the foreign keys and getting it wrong fails LATE: proposals
+            # reference portfolios, decisions reference both proposals and transactions, and
+            # the first attempt purged these AFTER the portfolios had gone — which surfaced as
+            # nineteen unrelated teardown errors rather than as one wrong line.
+            #
+            # Four of these are append-only with a trigger, lifted the same way transactions
+            # are: the guarantee that matters is that APPLICATION code cannot rewrite the
+            # record, not that a test cannot clean up after itself.
+            proposal_ids = select(Proposal.id).where(Proposal.portfolio_id.in_(book_ids))
+            for table in ("proposals", "decisions", "claims", "agent_runs"):
+                db.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {table}_append_only"))
+            try:
+                db.execute(delete(ShadowEntry).where(ShadowEntry.portfolio_id.in_(book_ids)))
+                db.execute(
+                    delete(InvalidationTrigger).where(
+                        InvalidationTrigger.proposal_id.in_(proposal_ids)
+                    )
+                )
+                db.execute(delete(Claim).where(Claim.proposal_id.in_(proposal_ids)))
+                db.execute(delete(Decision).where(Decision.proposal_id.in_(proposal_ids)))
+                db.execute(delete(Proposal).where(Proposal.portfolio_id.in_(book_ids)))
+                db.execute(delete(AgentRun))
+            finally:
+                for table in ("proposals", "decisions", "claims", "agent_runs"):
+                    db.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {table}_append_only"))
+
             # Corporate actions point at the transaction they wrote, so they must go before
             # it. Scoped to instruments this user's books touched, like everything else here.
             db.execute(

@@ -1111,6 +1111,77 @@ export type Flag = {
   computed: boolean;
 };
 
+/** One rule and what it decided. ⚠ `not_applicable` is distinct from `passed`: "not asked"
+ *  and "asked and satisfied" are different facts. */
+export type Gate = {
+  gate: string;
+  passed: boolean;
+  not_applicable: boolean;
+  detail: string;
+};
+
+/** What would prove the thesis wrong — a number, a comparison and a deadline. */
+export type Trigger = {
+  id: string;
+  metric_key: string;
+  comparator: string;
+  threshold: string;
+  unit: string;
+  window_until: string;
+  description: string;
+  status: string;
+  fired_at: string | null;
+};
+
+export type ProposalClaim = {
+  id: string;
+  claim_text: string;
+  metric_key: string | null;
+  due_by: string;
+  status: string;
+};
+
+/** A suggestion, with everything it rests on frozen at the moment it was made. */
+export type Proposal = {
+  id: string;
+  symbol: string;
+  name: string;
+  action: string;
+  status:
+    | "PENDING"
+    | "APPROVED"
+    | "REJECTED"
+    | "MODIFIED"
+    | "EXPIRED"
+    | "BLOCKED";
+  blocked_by: string | null;
+  target_amount_inr: string | null;
+  target_qty: string | null;
+  horizon_days: number;
+  thesis: string;
+  confidence: string;
+  ab_score: string | null;
+  quality_earned: string | null;
+  quality_available: string | null;
+  reflexivity_flags_yes: number;
+  quadrant: string | null;
+  price_snapshot: Record<string, unknown>;
+  gates: Gate[];
+  triggers: Trigger[];
+  claims: ProposalClaim[];
+  created_at: string;
+  decided_at: string | null;
+  decision_reason: string | null;
+};
+
+export type ProposalsView = {
+  open: Proposal[];
+  recent: Proposal[];
+  /** ⚠ Includes evenings that suggested nothing, which is usually the right answer. */
+  runs_recorded: number;
+  last_run_at: string | null;
+};
+
 export type Mapping = {
   id: string;
   instrument_id: string;
@@ -1578,5 +1649,35 @@ export async function reviseCrossings(
     },
   );
   if (!r.ok) return investmentError(r, "those crossings could not be saved");
+  return r.json();
+}
+
+/** What is waiting for you, and what recently happened — refusals included. */
+export async function getProposals(): Promise<ProposalsView> {
+  const r = await req("/api/investments/proposals");
+  if (!r.ok) throw new Error("could not load suggestions");
+  return r.json();
+}
+
+/** Approve, reject or modify a suggestion.
+ *
+ *  ⚠ `reason` is required by the database, not merely asked for. It is the data that
+ *  eventually reveals what kinds of suggestion keep being turned down, which is the only way
+ *  the system ever learns anything about its own judgement. */
+export async function decideProposal(
+  id: string,
+  outcome: "APPROVE" | "REJECT" | "MODIFY",
+  reason: string,
+  modifiedAmountInr?: string,
+): Promise<Proposal> {
+  const r = await req(`/api/investments/proposals/${id}/decide`, {
+    method: "POST",
+    body: JSON.stringify({
+      outcome,
+      reason,
+      modified_amount_inr: modifiedAmountInr ?? null,
+    }),
+  });
+  if (!r.ok) return investmentError(r, "that decision could not be recorded");
   return r.json();
 }

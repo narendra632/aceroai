@@ -28,17 +28,22 @@ from app.api.schemas import (
     AssetTotalOut,
     AttentionOut,
     BottleneckOut,
+    ClaimOut,
     CorporateActionOut,
     CrossingsIn,
     CurveOut,
+    DecideIn,
     DraftIn,
     DraftOut,
     FlagOut,
     FrameworkOut,
+    GateOut,
     HoldingDetailOut,
     HoldingOut,
     MappingOut,
     PriceRefreshOut,
+    ProposalOut,
+    ProposalsOut,
     QualityOut,
     RemapIn,
     ReverseIn,
@@ -46,8 +51,20 @@ from app.api.schemas import (
     SummaryOut,
     TotalsOut,
     TransactionOut,
+    TriggerOut,
 )
-from app.db.models import AbMapping, CorporateAction, Instrument, Transaction, User
+from app.db.models import (
+    AbMapping,
+    AgentRun,
+    Claim,
+    CorporateAction,
+    Decision,
+    Instrument,
+    InvalidationTrigger,
+    Proposal,
+    Transaction,
+    User,
+)
 from app.db.session import get_db
 from app.services.errors import NotFound
 from app.services.investments import (
@@ -58,6 +75,7 @@ from app.services.investments import (
     history,
     overview,
     pricing,
+    proposals,
     schedulefa,
     scoring,
 )
@@ -636,3 +654,119 @@ def revise_crossings(
     )
     db.commit()
     return get_framework(user=user, db=db)
+
+
+# --- proposals ------------------------------------------------------------------------------
+#
+# ⚠ Nothing here places an order or touches the real book. Approving updates the paper book the
+# system's own decisions build up; what the user does in life is their word, entered the same
+# way every other transaction is. The gap between the two books is one of the most interesting
+# numbers this module produces, and merging them would destroy it.
+
+
+def _proposal_out(db: Session, row: Proposal) -> ProposalOut:
+    inst = db.get(Instrument, row.instrument_id)
+    decision = db.execute(
+        sa.select(Decision).where(Decision.proposal_id == row.id)
+    ).scalar_one_or_none()
+    triggers = list(
+        db.execute(
+            sa.select(InvalidationTrigger)
+            .where(InvalidationTrigger.proposal_id == row.id)
+            .order_by(InvalidationTrigger.created_at)
+        ).scalars()
+    )
+    claims = list(
+        db.execute(
+            sa.select(Claim).where(Claim.proposal_id == row.id).order_by(Claim.created_at)
+        ).scalars()
+    )
+    return ProposalOut(
+        id=row.id,
+        symbol=inst.symbol if inst else "?",
+        name=inst.name if inst else "?",
+        action=row.action,
+        status=proposals.effective_status(db, row),
+        blocked_by=row.blocked_by,
+        target_amount_inr=row.target_amount_inr,
+        target_qty=row.target_qty,
+        horizon_days=row.horizon_days,
+        thesis=row.thesis,
+        confidence=row.confidence,
+        ab_score=row.ab_score,
+        quality_earned=row.quality_earned,
+        quality_available=row.quality_available,
+        reflexivity_flags_yes=row.reflexivity_flags_yes,
+        quadrant=row.quadrant,
+        price_snapshot=row.price_snapshot or {},
+        gates=[
+            GateOut(
+                gate=name,
+                passed=bool(result.get("passed")),
+                not_applicable=bool(result.get("not_applicable")),
+                detail=str(result.get("detail", "")),
+            )
+            for name, result in (row.gate_results or {}).items()
+        ],
+        triggers=[TriggerOut.model_validate(t) for t in triggers],
+        claims=[ClaimOut.model_validate(c) for c in claims],
+        created_at=row.created_at,
+        decided_at=decision.decided_at if decision else None,
+        decision_reason=decision.reason_text if decision else None,
+    )
+
+
+@router.get("/proposals")
+def list_proposals(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProposalsOut:
+    """What is waiting for you, and what recently happened — refusals included.
+
+    ⚠ Blocked suggestions are returned deliberately. A rule whose cost is invisible is a rule
+    nobody can evaluate, and seeing what the rails refused is the only way to judge whether
+    they protect or merely obstruct.
+    """
+    mirror = proposals.mirror(db, user.id)
+    db.commit()
+    runs = db.execute(
+        sa.select(sa.func.count(), sa.func.max(AgentRun.finished_at)).select_from(AgentRun)
+    ).one()
+    return ProposalsOut(
+        open=[_proposal_out(db, p) for p in proposals.open_proposals(db, mirror.id)],
+        recent=[_proposal_out(db, p) for p in proposals.recent(db, mirror.id)],
+        runs_recorded=runs[0] or 0,
+        last_run_at=runs[1],
+    )
+
+
+@router.post("/proposals/{proposal_id}/decide")
+def decide_proposal(
+    proposal_id: uuid.UUID,
+    body: DecideIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProposalOut:
+    """Approve, reject or modify — with a reason, which the database requires.
+
+    ⚠ The reason is not politeness. It is the data that eventually reveals what kinds of
+    suggestion keep being turned down, and that is the only route by which the system ever
+    learns anything about its own judgement.
+    """
+    mirror = proposals.mirror(db, user.id)
+    row = db.get(Proposal, proposal_id)
+    # An id is not an authorisation — the same rule every other write route follows.
+    if row is None or row.portfolio_id != mirror.id:
+        raise NotFound("proposal")
+
+    proposals.decide(
+        db,
+        row,
+        user_id=user.id,
+        outcome=body.outcome.upper(),
+        reason=body.reason,
+        modified_amount_inr=body.modified_amount_inr,
+        via="WEB",
+    )
+    db.commit()
+    return _proposal_out(db, row)

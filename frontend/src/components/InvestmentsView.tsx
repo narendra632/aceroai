@@ -5,6 +5,7 @@ import CorporateActions from "@/components/CorporateActions";
 import ForeignHoldings from "@/components/ForeignHoldings";
 import FrameworkPanel from "@/components/FrameworkPanel";
 import PositionSheet from "@/components/PositionSheet";
+import ProposalsPanel from "@/components/ProposalsPanel";
 import TransactionEntry from "@/components/TransactionEntry";
 import { InfoTip } from "@/components/InfoTip";
 import { Button } from "@/components/ui/button";
@@ -861,6 +862,11 @@ export default function InvestmentsView() {
               </>
             )}
           </section>
+
+          {/* ⚠ Above the framework, because a live decision outranks the reference material
+          behind it. Below the holdings, because a suggestion is only readable once you can
+          see what you already own. */}
+          <ProposalsPanel />
 
           {/* Below the holdings: this is where a company stops being a line in a ledger
           and becomes a position in a thesis. */}
