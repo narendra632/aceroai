@@ -43,10 +43,18 @@ from app.services.investments import portfolio as pf
 # because the bhavcopy is matched on it. Old names stay as aliases so chat still finds them.
 INSTRUMENTS = [
     # symbol, exchange, name, asset_class, currency, aliases, ids
-    ("HDFCBANK", "NSE", "HDFC Bank", "EQUITY_IN", "INR", None, {}),
-    ("KAYNES", "NSE", "Kaynes Technology", "EQUITY_IN", "INR", None, {}),
-    ("GVT&D", "NSE", "GE Vernova T&D India", "EQUITY_IN", "INR", ["GVTD"], {}),
-    ("SAILIFE", "NSE", "Sai Life Sciences", "EQUITY_IN", "INR", None, {}),
+    ("HDFCBANK", "NSE", "HDFC Bank", "EQUITY_IN", "INR", None, {"sector": "PRIVATE_BANK"}),
+    ("KAYNES", "NSE", "Kaynes Technology", "EQUITY_IN", "INR", None, {"sector": "EMS_ELECTRONICS"}),
+    (
+        "GVT&D",
+        "NSE",
+        "GE Vernova T&D India",
+        "EQUITY_IN",
+        "INR",
+        ["GVTD"],
+        {"sector": "CAPITAL_GOODS_POWER_EQUIPMENT"},
+    ),
+    ("SAILIFE", "NSE", "Sai Life Sciences", "EQUITY_IN", "INR", None, {"sector": "PHARMA_CDMO"}),
     ("SPCX", "NASDAQ", "SpaceX", "EQUITY_US", "USD", None, {}),
     # ⚠ Renamed under SEBI's scheme-naming standardisation, same ISIN. Both names are carried
     # or an AMFI lookup appears to break when only the label changed.
@@ -72,6 +80,72 @@ INSTRUMENTS = [
     ("BTC", "CRYPTO", "Bitcoin", "CRYPTO", "INR", None, {"coingecko_id": "bitcoin"}),
     ("ZIL", "CRYPTO", "Zilliqa", "CRYPTO", "INR", None, {"coingecko_id": "zilliqa"}),
     ("JASMY", "CRYPTO", "JasmyCoin", "CRYPTO", "INR", None, {"coingecko_id": "jasmycoin"}),
+]
+
+# --- watchlist ---------------------------------------------------------------------------
+# Companies the framework names that are NOT held. Tracked, priced and scored; no
+# transactions, so they never appear as a holding and never touch a return.
+#
+# ⚠ Without these the system can only ever say "hold" or "sell". A research analyst that can
+# only comment on what you already own is a bookkeeper with opinions — the whole point of the
+# structural framework is to say "look at this", and it has nothing to look at until here.
+WATCHLIST = [
+    # symbol, exchange, name, asset_class, currency, aliases, ids
+    (
+        "APARINDS",
+        "NSE",
+        "Apar Industries",
+        "EQUITY_IN",
+        "INR",
+        None,
+        {"sector": "CABLES_CONDUCTORS"},
+    ),
+    (
+        "SOLARINDS",
+        "NSE",
+        "Solar Industries India",
+        "EQUITY_IN",
+        "INR",
+        None,
+        {"sector": "DEFENCE_MANUFACTURING"},
+    ),
+    (
+        "NEULANDLAB",
+        "NSE",
+        "Neuland Laboratories",
+        "EQUITY_IN",
+        "INR",
+        None,
+        {"sector": "PHARMA_CDMO"},
+    ),
+    (
+        "GENUSPOWER",
+        "NSE",
+        "Genus Power Infrastructures",
+        "EQUITY_IN",
+        "INR",
+        None,
+        {"sector": "SMART_METERING"},
+    ),
+    (
+        "SYRMA",
+        "NSE",
+        "Syrma SGS Technology",
+        "EQUITY_IN",
+        "INR",
+        None,
+        {"sector": "EMS_ELECTRONICS"},
+    ),
+    (
+        "PREMIERENE",
+        "NSE",
+        "Premier Energies",
+        "EQUITY_IN",
+        "INR",
+        None,
+        {"sector": "SOLAR_MANUFACTURING"},
+    ),
+    ("ROLEXRINGS", "NSE", "Rolex Rings", "EQUITY_IN", "INR", None, {"sector": "AUTO_COMPONENTS"}),
 ]
 
 # (symbol, date, quantity, price, fx_rate, note)
@@ -172,7 +246,12 @@ def _instruments(db: Session) -> dict[str, Instrument]:
     holding's transactions across two instruments, and the page would show both halves.
     """
     out: dict[str, Instrument] = {}
-    for symbol, exchange, name, asset_class, currency, aliases, ids in INSTRUMENTS:
+    # Held and watched go through the identical path: an instrument is an instrument, and
+    # what makes one a holding is having transactions, not a flag on this row.
+    for symbol, exchange, name, asset_class, currency, aliases, ids in (
+        *INSTRUMENTS,
+        *WATCHLIST,
+    ):
         names = [symbol, *(aliases or [])]
         found = (
             db.execute(

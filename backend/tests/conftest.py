@@ -54,12 +54,15 @@ subprocess.run(
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, text
+from sqlalchemy import update as sa_update
 
 from app.core.security import hash_password
 from app.db.models import (
+    AbMapping,
     ChatSession,
     CorporateAction,
     DailyUsage,
+    FrameworkVersion,
     FxObservation,
     GeneratedReview,
     Instrument,
@@ -242,6 +245,21 @@ def _purge(db):
     # EXCLUSIVE lock, and this purge runs twice for every test in the suite — issuing that
     # DDL unconditionally took the full run from 2.5 minutes to over ten. Almost no test
     # touches the ledger, so the common path must not pay for the rare one.
+    # The framework, and where each company sits in it.
+    #
+    # ⚠ Unscoped, unlike almost everything above, and for a stated reason: neither table has a
+    # user column and neither can be keyed to a test. They are safe to clear wholesale only
+    # because the suite runs against its OWN database — the same licence the FX purge takes.
+    # A mapping points at an instrument, so it must go before the orphan sweep below, and a
+    # mapping points at a version, so versions go after.
+    #
+    # `superseded_by_id` is nulled first: the column references this same table, so deleting
+    # every row in one statement can trip its own foreign key depending on the order Postgres
+    # reaches them.
+    db.execute(sa_update(AbMapping).values(superseded_by_id=None))
+    db.execute(delete(AbMapping))
+    db.execute(delete(FrameworkVersion))
+
     orphaned = ~Instrument.id.in_(select(Transaction.instrument_id))
     if db.execute(select(Instrument.id).where(orphaned).limit(1)).first() is not None:
         db.execute(

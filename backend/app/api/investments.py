@@ -23,24 +23,39 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.schemas import (
+    AbScoreOut,
+    ApproveIn,
     AssetTotalOut,
+    AttentionOut,
+    BottleneckOut,
     CorporateActionOut,
     CurveOut,
     DraftIn,
     DraftOut,
+    FrameworkOut,
     HoldingDetailOut,
     HoldingOut,
+    MappingOut,
     PriceRefreshOut,
+    RemapIn,
     ReverseIn,
     ScheduleFaOut,
     SummaryOut,
     TotalsOut,
     TransactionOut,
 )
-from app.db.models import CorporateAction, Instrument, Transaction, User
+from app.db.models import AbMapping, CorporateAction, Instrument, Transaction, User
 from app.db.session import get_db
 from app.services.errors import NotFound
-from app.services.investments import corpactions, entry, history, overview, schedulefa
+from app.services.investments import (
+    corpactions,
+    entry,
+    frameworks,
+    history,
+    overview,
+    schedulefa,
+)
+from app.services.investments import portfolio as pf
 from app.services.marketdata import feed
 
 router = APIRouter(prefix="/api/investments", tags=["investments"])
@@ -403,3 +418,150 @@ def get_schedule_fa(
     return ScheduleFaOut.model_validate(
         schedulefa.report(db, book.id, year or dt.date.today().year)
     )
+
+
+# --- the framework ----------------------------------------------------------------------
+#
+# ⚠ These routes exist so that the one guard the structural score rests on is a real gesture
+# a person makes. A model may propose that a company clears a national bottleneck; the claim
+# is worth nothing until someone agrees with it here. Read the approve route as the whole
+# reason the score can be trusted, not as a piece of interface plumbing.
+
+
+def _mapping_out(
+    db: Session, spec: dict, inst: Instrument, mapping, held: set[uuid.UUID]
+) -> MappingOut:
+    row = frameworks.bottleneck(spec, mapping.b_bottleneck)
+    multiple = frameworks.multiple_for(spec, inst.sector)
+    return MappingOut(
+        id=mapping.id,
+        instrument_id=inst.id,
+        symbol=inst.symbol,
+        name=inst.name,
+        sector=inst.sector,
+        multiple=multiple.value,
+        multiple_is_fallback=multiple.is_fallback,
+        multiple_why=multiple.why,
+        b_bottleneck=mapping.b_bottleneck,
+        bottleneck_name=row["name"] if row else None,
+        a_imperatives=list(mapping.a_imperatives or []),
+        crosses_a_count=mapping.crosses_a_count,
+        crossings_status=mapping.crossings_status,
+        is_crisis_accelerated=mapping.is_crisis_accelerated,
+        inflection_quarter=mapping.inflection_quarter,
+        investability=mapping.investability,
+        rationale=mapping.rationale,
+        proposed_by=mapping.proposed_by,
+        approved_at=mapping.approved_at,
+        review_after=mapping.review_after,
+        off_framework=mapping.off_framework,
+        is_held=inst.id in held,
+        score=AbScoreOut.model_validate(frameworks.ab_score(mapping, spec)),
+    )
+
+
+def _tracked_equities(db: Session) -> list[Instrument]:
+    return list(
+        db.execute(
+            sa.select(Instrument)
+            .where(
+                Instrument.deleted_at.is_(None),
+                Instrument.is_tracked.is_(True),
+                Instrument.asset_class.in_(("EQUITY_IN", "EQUITY_US")),
+            )
+            .order_by(Instrument.symbol)
+        ).scalars()
+    )
+
+
+@router.get("/framework")
+def get_framework(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FrameworkOut:
+    """The framework in force, where every tracked company sits in it, and what needs you."""
+    book = overview.real_book(db, user.id)
+    version = frameworks.current(db)
+    spec = version.spec
+    held = {p.instrument_id for p in pf.positions(db, book.id)}
+
+    mappings = []
+    for inst in _tracked_equities(db):
+        mapping = frameworks.live_mapping(db, inst.id)
+        if mapping is not None:
+            mappings.append(_mapping_out(db, spec, inst, mapping, held))
+
+    return FrameworkOut(
+        version=version.version,
+        approved_at=version.approved_at,
+        imperatives=spec.get("imperatives", []),
+        bottlenecks=[BottleneckOut.model_validate(b) for b in spec.get("bottlenecks", [])],
+        mappings=mappings,
+        attention=[AttentionOut.model_validate(a) for a in frameworks.needs_attention(db, spec)],
+    )
+
+
+def _owned_mapping(db: Session, mapping_id: uuid.UUID):
+    mapping = db.get(AbMapping, mapping_id)
+    if mapping is None:
+        raise NotFound("mapping")
+    return mapping
+
+
+@router.post("/framework/mappings/{mapping_id}/approve")
+def approve_mapping(
+    mapping_id: uuid.UUID,
+    body: ApproveIn | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MappingOut:
+    """Agree that this company clears this bottleneck.
+
+    ⚠ This single click is what lets the company score at all. Before it, the mapping is a
+    suggestion and the structural score is zero however strong the company looks — which is
+    the design, not a defect.
+    """
+    book = overview.real_book(db, user.id)
+    version = frameworks.current(db)
+    mapping = _owned_mapping(db, mapping_id)
+    frameworks.approve_mapping(db, mapping, note=body.note if body else None)
+    db.commit()
+
+    inst = db.get(Instrument, mapping.instrument_id)
+    held = {p.instrument_id for p in pf.positions(db, book.id)}
+    return _mapping_out(db, version.spec, inst, mapping, held)
+
+
+@router.post("/framework/mappings/{mapping_id}/remap")
+def remap(
+    mapping_id: uuid.UUID,
+    body: RemapIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MappingOut:
+    """Correct where a company sits — a different bottleneck, or out of the framework.
+
+    The replacement is written UNAPPROVED and supersedes the old one, so the company drops
+    to zero until it is confirmed. A re-mapping is a fresh claim, not one that inherits the
+    agreement given to the claim it replaced.
+    """
+    book = overview.real_book(db, user.id)
+    version = frameworks.current(db)
+    mapping = _owned_mapping(db, mapping_id)
+    inst = db.get(Instrument, mapping.instrument_id)
+    if inst is None:
+        raise NotFound("instrument")
+
+    fresh = frameworks.propose_mapping(
+        db,
+        inst,
+        b_bottleneck=None if body.off_framework else body.b_bottleneck,
+        spec=version.spec,
+        framework_version_id=version.id,
+        proposed_by="USER",
+        rationale=body.rationale,
+        off_framework=body.off_framework,
+    )
+    db.commit()
+    held = {p.instrument_id for p in pf.positions(db, book.id)}
+    return _mapping_out(db, version.spec, inst, fresh, held)

@@ -747,6 +747,118 @@ class AssetTotalOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class FrameworkComponentOut(BaseModel):
+    """One part of the structural score, with the sentence explaining what it measured."""
+
+    name: str
+    points: Decimal
+    available: Decimal
+    detail: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AbScoreOut(BaseModel):
+    """How much durable demand the framework says a company has.
+
+    ⚠ `total` is `None` when the framework does not APPLY — a US company, or one the user has
+    called off-thesis. That is a different answer from zero, which means "measured against
+    this framework and found wanting", and an interface that renders them the same way is
+    telling the reader something false.
+    """
+
+    total: Decimal | None
+    available: Decimal
+    components: list[FrameworkComponentOut]
+    unavailable_because: str | None
+    #: ⚠ The crossing count is a floor, not an established figure — the score may be
+    #: understated and must not be presented as a ceiling.
+    breadth_is_floor: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BottleneckOut(BaseModel):
+    """One bottleneck from the framework, for the picker and for explaining a mapping."""
+
+    id: str
+    name: str
+    summary: str
+    crosses: list[str]
+    crossings_status: str
+    crisis: str
+    inflection_text: str
+    investability: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MappingOut(BaseModel):
+    """Where one company sits in the framework, and what that is worth."""
+
+    id: uuid.UUID
+    instrument_id: uuid.UUID
+    symbol: str
+    name: str
+    sector: str | None
+    #: ⚠ True when this sector has no fair multiple of its own and the default is standing in.
+    #: The margin of safety computed from it is a guess wearing the clothes of a calculation.
+    multiple: Decimal
+    multiple_is_fallback: bool
+    multiple_why: str
+    b_bottleneck: str | None
+    bottleneck_name: str | None
+    a_imperatives: list[str]
+    crosses_a_count: int
+    crossings_status: str
+    is_crisis_accelerated: bool
+    inflection_quarter: str | None
+    investability: str | None
+    rationale: str | None
+    proposed_by: str
+    #: None means proposed and not yet agreed with — it scores nothing until it is.
+    approved_at: dt.datetime | None
+    review_after: dt.date | None
+    off_framework: bool
+    is_held: bool
+    score: AbScoreOut
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AttentionOut(BaseModel):
+    """One thing the framework needs a person for."""
+
+    kind: str
+    symbol: str
+    detail: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FrameworkOut(BaseModel):
+    version: int
+    approved_at: dt.datetime | None
+    imperatives: list[dict]
+    bottlenecks: list[BottleneckOut]
+    mappings: list[MappingOut]
+    attention: list[AttentionOut]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RemapIn(BaseModel):
+    """Move a company to a different bottleneck, or out of the framework entirely."""
+
+    b_bottleneck: str | None = None
+    off_framework: bool = False
+    rationale: str | None = None
+
+
+class ApproveIn(BaseModel):
+    note: str | None = None
+
+
 class SummaryOut(BaseModel):
     portfolio_id: uuid.UUID
     name: str

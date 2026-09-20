@@ -1049,6 +1049,88 @@ export type ScheduleFa = {
   years_available: number[];
 };
 
+/** One part of the structural score, with the sentence explaining what it measured. */
+export type FrameworkComponent = {
+  name: string;
+  points: string;
+  available: string;
+  detail: string;
+};
+
+/** How much durable demand the framework says a company has.
+ *
+ *  ⚠ `total` is null when the framework does not APPLY — a US company, or one called
+ *  off-thesis. That is a different answer from "0", which means measured and found wanting.
+ *  Rendering them the same way tells the reader something false. */
+export type AbScore = {
+  total: string | null;
+  available: string;
+  components: FrameworkComponent[];
+  unavailable_because: string | null;
+  /** The crossing count is a floor, not a ceiling — the score may be understated. */
+  breadth_is_floor: boolean;
+};
+
+export type Bottleneck = {
+  id: string;
+  name: string;
+  summary: string;
+  crosses: string[];
+  crossings_status: string;
+  crisis: string;
+  inflection_text: string;
+  investability: string;
+};
+
+export type Mapping = {
+  id: string;
+  instrument_id: string;
+  symbol: string;
+  name: string;
+  sector: string | null;
+  multiple: string;
+  /** ⚠ No multiple exists for this sector; the default is standing in, so any margin of
+   *  safety computed from it is a guess wearing the clothes of a calculation. */
+  multiple_is_fallback: boolean;
+  multiple_why: string;
+  b_bottleneck: string | null;
+  bottleneck_name: string | null;
+  a_imperatives: string[];
+  crosses_a_count: number;
+  crossings_status: string;
+  is_crisis_accelerated: boolean;
+  inflection_quarter: string | null;
+  investability: string | null;
+  rationale: string | null;
+  proposed_by: string;
+  /** null = proposed and not yet agreed with. It scores nothing until it is. */
+  approved_at: string | null;
+  review_after: string | null;
+  off_framework: boolean;
+  is_held: boolean;
+  score: AbScore;
+};
+
+export type FrameworkAttention = {
+  kind:
+    | "UNMAPPED"
+    | "UNAPPROVED"
+    | "EXPIRED"
+    | "BREADTH_FLOOR"
+    | "NO_MULTIPLE";
+  symbol: string;
+  detail: string;
+};
+
+export type Framework = {
+  version: number;
+  approved_at: string | null;
+  imperatives: Array<Record<string, unknown>>;
+  bottlenecks: Bottleneck[];
+  mappings: Mapping[];
+  attention: FrameworkAttention[];
+};
+
 export type Holding = {
   instrument_id: string;
   symbol: string;
@@ -1393,5 +1475,47 @@ export async function getScheduleFa(year?: number): Promise<ScheduleFa> {
     `/api/investments/schedule-fa${year ? `?year=${year}` : ""}`,
   );
   if (!r.ok) throw new Error("could not load the foreign-holdings schedule");
+  return r.json();
+}
+
+/** The framework in force, where every tracked company sits in it, and what needs you. */
+export async function getFramework(): Promise<Framework> {
+  const r = await req("/api/investments/framework");
+  if (!r.ok) throw new Error("could not load the framework");
+  return r.json();
+}
+
+/** Agree that a company clears the bottleneck it is mapped to.
+ *
+ *  ⚠ This one call is what lets the company score at all. Until it happens the mapping is a
+ *  suggestion and the structural score is zero, however strong the company looks — that is
+ *  the guard the whole score rests on, not a defect to work around. */
+export async function approveMapping(
+  id: string,
+  note?: string,
+): Promise<Mapping> {
+  const r = await req(`/api/investments/framework/mappings/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? null }),
+  });
+  if (!r.ok) return investmentError(r, "that mapping could not be approved");
+  return r.json();
+}
+
+/** Move a company to a different bottleneck, or out of the framework entirely. The
+ *  replacement arrives unapproved, so the company drops to zero until it is confirmed. */
+export async function remapInstrument(
+  id: string,
+  input: { b_bottleneck?: string | null; off_framework?: boolean; rationale?: string },
+): Promise<Mapping> {
+  const r = await req(`/api/investments/framework/mappings/${id}/remap`, {
+    method: "POST",
+    body: JSON.stringify({
+      b_bottleneck: input.b_bottleneck ?? null,
+      off_framework: input.off_framework ?? false,
+      rationale: input.rationale ?? null,
+    }),
+  });
+  if (!r.ok) return investmentError(r, "that company could not be remapped");
   return r.json();
 }

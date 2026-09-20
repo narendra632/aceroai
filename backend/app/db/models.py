@@ -630,3 +630,79 @@ class CorporateAction(Base):
     applied_txn_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("transactions.id"))
     note: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class FrameworkVersion(Base):
+    """The theory, frozen at a version (migration 018).
+
+    Holds the ten imperatives, the bottlenecks and what each one blocks, the fair multiple per
+    sector, and the scoring weights — all in `spec`.
+
+    ⚠ Every score and every proposal carries the version that produced it. That is what makes
+    it possible to improve the framework without corrupting the record: a review can always
+    ask "under which rules was this decided?", and changing a weight never silently rewrites
+    the history of decisions made under the old one.
+
+    `approved_at IS NULL` means the version is a **proposal**. A newly suggested bottleneck
+    lands in one, and nothing scores against it until a person agrees.
+    """
+
+    __tablename__ = "framework_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    #: india_ab · buffett_soros · gates — versioned independently, so a change to one does
+    #: not reset the comparability of decisions made under the others.
+    family: Mapped[str] = mapped_column(sa.Text)
+    version: Mapped[int] = mapped_column(sa.Integer)
+    spec: Mapped[dict] = mapped_column(JSONB)
+    effective_from: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(sa.Text)
+    approved_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    approved_note: Mapped[str | None] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class AbMapping(Base):
+    """Where one company sits in the framework (migration 018).
+
+    ⚠ **A row with `approved_at IS NULL` scores ZERO.** This is the guard the whole structural
+    score rests on: a model may *propose* that a company solves a national bottleneck, and the
+    claim is worth nothing until a person agrees with it. Without it, a system that reads
+    enough news will eventually narrate an unrelated small-cap into strategic importance, and
+    the score would have no way to tell that apart from the real thing.
+
+    Kept out of `framework_versions.spec` deliberately. Companies are added often; the theory
+    changes rarely. Folding them together would make adding a watchlist name look like a new
+    epoch of the framework, and every past decision would appear to have been made under
+    different rules.
+    """
+
+    __tablename__ = "ab_mappings"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    a_imperatives: Mapped[list[str] | None] = mapped_column(ARRAY(sa.Text))
+    b_bottleneck: Mapped[str | None] = mapped_column(sa.Text)
+    crosses_a_count: Mapped[int] = mapped_column(sa.Integer, default=0)
+    #: ⚠ Where the count came from. `CONFIRMED` is stated in the framework; `PARTIAL` means
+    #: "at least this many, and the rest was never established" — it scores on what is known
+    #: and the interface calls the figure a floor. A gap in the notes is not a finding, and
+    #: scoring one as though it were would mark a company weak for a documentation reason.
+    crossings_status: Mapped[str] = mapped_column(sa.Text, default="PARTIAL")
+    is_crisis_accelerated: Mapped[bool] = mapped_column(sa.Boolean, default=False)
+    inflection_quarter: Mapped[str | None] = mapped_column(sa.Text)
+    investability: Mapped[str | None] = mapped_column(sa.Text)
+    rationale: Mapped[str | None] = mapped_column(sa.Text)
+    proposed_by: Mapped[str] = mapped_column(sa.Text)
+    approved_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    approved_note: Mapped[str | None] = mapped_column(sa.Text)
+    #: A mapping is a judgement about what a company does *today*. Businesses change, so the
+    #: judgement expires and is re-proposed rather than standing for ever.
+    review_after: Mapped[dt.date | None] = mapped_column(sa.Date)
+    #: ⚠ Outside the framework by construction — a non-Indian company, or one the user has
+    #: called off-thesis. The framework asks what INDIA must build, so no imperative applies
+    #: to SpaceX. Scored differently rather than scored badly.
+    off_framework: Mapped[bool] = mapped_column(sa.Boolean, default=False)
+    framework_version_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("framework_versions.id"))
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("ab_mappings.id"))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
