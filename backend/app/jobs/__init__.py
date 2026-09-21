@@ -27,6 +27,7 @@ from app.jobs import (  # noqa: F401  (registers the jobs)
     nudges,
     prices,
     reading,
+    reviews,
 )
 from app.jobs.registry import (
     Job,

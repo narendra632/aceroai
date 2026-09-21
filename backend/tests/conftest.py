@@ -84,6 +84,7 @@ from app.db.models import (
     ProfileFact,
     Proposal,
     PushSubscription,
+    Review,
     ShadowEntry,
     Source,
     SourceItem,
@@ -194,6 +195,13 @@ def _purge(db):
         db.execute(delete(PushSubscription).where(PushSubscription.user_id == u.id))
         db.execute(delete(UserJobPref).where(UserJobPref.user_id == u.id))
         db.execute(delete(GeneratedReview).where(GeneratedReview.user_id == u.id))
+        # Investment reviews are append-only, so teardown lifts the guard the same way the
+        # rest of the ledger does — what matters is that APPLICATION code cannot rewrite one.
+        db.execute(text("ALTER TABLE reviews DISABLE TRIGGER reviews_append_only"))
+        try:
+            db.execute(delete(Review).where(Review.user_id == u.id))
+        finally:
+            db.execute(text("ALTER TABLE reviews ENABLE TRIGGER reviews_append_only"))
         # The investment ledger is APPEND-ONLY, enforced by a database trigger, so an
         # ordinary DELETE raises. Test teardown is the one legitimate exception to that
         # rule, and it is made explicit here rather than by weakening the trigger: the

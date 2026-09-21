@@ -49,6 +49,8 @@ from app.api.schemas import (
     HeardOut,
     HoldingDetailOut,
     HoldingOut,
+    InvestmentReviewOut,
+    InvestmentReviewsOut,
     MappingOut,
     MeasureOut,
     PriceRefreshOut,
@@ -97,6 +99,7 @@ from app.services.investments import (
     pricing,
     proposals,
     reading,
+    reviews,
     schedulefa,
     scoring,
     watching,
@@ -1054,3 +1057,24 @@ def analyse_candidate(
     if line is None:
         raise NotFound("candidate")
     return QueueLineOut.model_validate(line)
+
+
+@router.get("/reviews")
+def get_reviews(
+    limit: int = 12,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> InvestmentReviewsOut:
+    """The looks backwards, newest first.
+
+    ⚠ Read, never regenerated. A review states what was true at a moment with the data
+    available then; recomputing March's in June would show a position that recovered as never
+    having fallen, and the most interesting part of a review is the part that turned out to be
+    wrong.
+    """
+    return InvestmentReviewsOut(
+        reviews=[
+            InvestmentReviewOut.model_validate(row)
+            for row in reviews.recent(db, user.id, limit=limit)
+        ]
+    )

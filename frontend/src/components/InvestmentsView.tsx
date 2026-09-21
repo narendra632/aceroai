@@ -10,6 +10,7 @@ import ProposalsPanel from "@/components/ProposalsPanel";
 import ReadingPanel from "@/components/ReadingPanel";
 import InboxDrop from "@/components/InboxDrop";
 import ResearchPanel from "@/components/ResearchPanel";
+import ReviewsPanel from "@/components/ReviewsPanel";
 import TransactionEntry from "@/components/TransactionEntry";
 import { InfoTip } from "@/components/InfoTip";
 import { Button } from "@/components/ui/button";
@@ -898,6 +899,11 @@ export default function InvestmentsView() {
           on a schedule, and putting it higher would invite exactly the casual dipping-in that
           trains worse judgement. */}
           <BooksPanel />
+
+          {/* ⚠ Beside the books and collapsed for the same reason. Both are for reading in
+          aggregate on a schedule, and a what-if ledger or a past review browsed after a name
+          that got away trains worse judgement rather than better. */}
+          <ReviewsPanel />
 
           {/* Below the holdings and above the ledger: it is a yearly obligation rather
           than something to check on open, but it belongs with the record it reads. */}

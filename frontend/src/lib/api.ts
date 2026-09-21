@@ -1944,3 +1944,66 @@ export async function analyseCandidate(id: string): Promise<QueueLine> {
   if (!r.ok) return investmentError(r, "that company could not be analysed");
   return r.json();
 }
+
+// --- looking backwards ------------------------------------------------------------------
+
+/** One look backwards, as the facts that were true then.
+ *
+ *  ⚠ `content` is a structure of figures assembled by code, never prose written by a model.
+ *  A review is almost entirely numbers, and a summary paragraph would be the one place a
+ *  figure could be restated wrongly with nothing to check it against. */
+export type InvestmentReview = {
+  id: string;
+  kind: string;
+  period_start: string;
+  period_end: string;
+  generated_at: string;
+  headline: string;
+  content: {
+    kind: string;
+    period: { start: string; end: string };
+    decisions: {
+      counts: Record<string, number>;
+      decisions: {
+        outcome: string;
+        action: string;
+        thesis: string;
+        reason: string;
+        on: string;
+      }[];
+    };
+    blocked: { action: string; blocked_by: string | null }[];
+    approaching: {
+      description: string;
+      metric: string;
+      value: string;
+      threshold: string;
+      due_by: string;
+    }[];
+    queue: { waiting: number; oldest_days: number; stale: { symbol: string; age_days: number }[] };
+    budget: { budget_inr: string; committed_inr: string; unspent_inr: string };
+    books: {
+      readable: boolean;
+      lines: { kind: string; name: string; gain_pct: string | null; positions: number }[];
+      unaided: string[];
+    };
+    /** ⚠ `value` is null until the sample is big enough, and `detail` says why in words. */
+    measures: { name: string; value: string | null; n: number; detail: string }[];
+    sources?: {
+      source: string;
+      trust_tier: number;
+      named: number;
+      directional: number;
+      hit_rate: string | null;
+      n: number;
+      detail: string;
+    }[];
+  };
+};
+
+/** The looks backwards, newest first. ⚠ Read, never regenerated. */
+export async function getInvestmentReviews(limit = 12): Promise<InvestmentReview[]> {
+  const r = await req(`/api/investments/reviews?limit=${limit}`);
+  if (!r.ok) throw new Error("could not load the reviews");
+  return (await r.json()).reviews;
+}

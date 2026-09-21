@@ -1150,3 +1150,35 @@ class Candidate(Base):
     reviewed_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
     dismissed_reason: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Review(Base):
+    """What was true at the end of a week, a month or a quarter (025).
+
+    The artefact actually worth reading. The daily notifications are operational; this is
+    where the thinking accumulates.
+
+    ⚠ **APPEND-ONLY, for the reason `framework_scores` is.** A review states what was true at
+    a moment, with the data available then. Regenerating March's review in June with June's
+    figures would show a position that recovered as never having fallen, and a prediction that
+    failed as never having been made. The most interesting thing a review can hold is the part
+    that turned out to be wrong — and a review that can be rewritten cannot hold it.
+
+    ⚠ **`content` is facts, and no model writes it.** Everywhere else in this module a model
+    is forbidden from producing a number; a review is almost entirely numbers, so it is
+    assembled by code from records that already exist. A prose summary would be the one place
+    a figure could be restated wrongly with nothing to check it against.
+    """
+
+    __tablename__ = "reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(sa.Text)
+    period_start: Mapped[dt.date] = mapped_column(sa.Date)
+    period_end: Mapped[dt.date] = mapped_column(sa.Date)
+    generated_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    content: Mapped[dict] = mapped_column(JSONB)
+    #: One line, for the notification and the list — composed from the same facts.
+    headline: Mapped[str] = mapped_column(sa.Text)
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

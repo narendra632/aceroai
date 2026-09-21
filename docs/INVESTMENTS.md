@@ -676,3 +676,172 @@ collide with its own insert and lose the whole round to a rollback.
 Code: `backend/app/services/investments/reading.py`, `backend/app/services/marketdata/feeds.py`,
 `backend/app/jobs/reading.py`, `backend/app/scripts/seed_sources.py`,
 `frontend/src/components/ReadingPanel.tsx`. Migration 023.
+
+---
+
+## 16. Discovery: saying "look at this", not only "hold or sell"
+
+A system that only recognises companies you already own can say hold, trim or sell and nothing
+else. A research analyst that can only comment on what you already own is a bookkeeper with
+opinions — so the reader's vocabulary is **the exchange's own equity list**: 2,595 companies,
+symbol and legal name, no key, refreshed weekly.
+
+⚠ **Why not just ask a model which companies were discussed.** A model that can produce names
+can produce ones that do not exist, and a fictional company written into `mentions` is
+indistinguishable from a real one — in the very table the source-attribution measure counts.
+With the exchange's list as the vocabulary, recognising a company never heard of is exactly as
+deterministic as recognising one already held.
+
+Eleven regexes were fine; 2,595 would be the slowest thing in the module. Names are **looked
+up** instead: the text is tokenised once and its word-runs checked against a dictionary, which
+costs the length of the text rather than the size of the vocabulary. 330 live feed items
+against the full list in 1.5 seconds.
+
+### Four things the real data taught
+
+| What | Why it mattered |
+|---|---|
+| The exchange lists TARIL as *Transformers **And** Rectifiers*; everyone writes *Transformers **&** Rectifiers* | Tokenised literally the two never meet, and the company is invisible — silently, because a name that fails to match looks exactly like one never said |
+| The instrument is *Kaynes Technology*; the exchange says *Kaynes Technology India Limited* | Longest-match-wins picks the listed spelling, so without resolving back to the holding, a filing about something you own would open a research line for it |
+| One poll of five NSE feeds named **184** companies, 21 of them one asset manager's routine ETF notices | A company filing its own paperwork is not recommending itself |
+| The exchange carries 165 symbols of 3 characters or fewer and 214 one-word names — ACE, ETERNAL, AMAL are real companies *and* ordinary English | A missed mention costs an idea; a false one corrupts the denominator, and nothing downstream can tell it from a real one |
+
+So **filings open no research lines and record no mentions of companies nobody follows.** The
+mention table exists to judge sources that make calls, and the exchange makes none. Filings
+about companies already followed are recorded in full — that is news about your own book.
+
+And discovery gets a **higher symbol floor and an explicit ambiguity list**, while a ticker you
+already follow keeps the lower one, because that one you chose.
+
+### The research queue
+
+A company something named, that you neither hold nor watch.
+
+⚠ **A candidate is deliberately not priced.** Pricing every name ever mentioned would spend the
+API allowance and the disk budget on companies nobody has decided to care about. It has an
+identity so it can be referenced and counted; **promotion is what starts the meter.**
+
+⚠ **Dismissal demands a reason**, enforced by a database CHECK rather than by politeness. It is
+the only record of what kinds of idea keep being refused, and a queue that could be cleared
+silently would discard that every time it was tidied. A dismissed candidate is **not** silently
+reopened by being named again — a channel repeating itself is the most ordinary thing a channel
+does — though its count still moves, so a review can see it is being pushed.
+
+### The inbox
+
+Drop a link, a video, or just what a friend said — on the page in one always-visible line, or
+in chat (*"my friend says Voltamp looks good"*). It is read, the listed companies in it are
+recognised the same deterministic way, and anything not already followed opens a queue line.
+
+**You become a measured source.** What you drop is filed with mentions behind it, so in six
+months the scorecard can answer whether the tips you act on beat the exchange feed you ignore.
+Your official drops and your tips register separately: a page from SEBI and a remark over chai
+are different species, and averaging them would make both unreadable.
+
+⚠ **The listing-page problem, measured.** A live Economic Times "stocks in news" page names
+**32** companies. Queueing those would bury the handful anyone argued for under a page of
+navigation, so a drop naming more than twelve is refused as a listing page and says so —
+including its mentions, because a nav bar makes no claims.
+
+Every unhappy path says what happened. A page that came back nearly empty is reported as
+needing a browser, because *"nothing was read"* and *"nobody was named"* are different outcomes.
+A PDF is refused outright rather than tag-stripped: stripping a binary produces plausible
+nonsense, and plausible nonsense in a research note is worse than an honest refusal.
+
+---
+
+## 17. From a name to a decision
+
+A candidate goes through the same four steps every holding does, with the same code.
+
+**1 · Where does it sit?** The model reads what sources said and names a bottleneck.
+
+⚠ **This is the one thing a model decides, and it is allowed to because it is not a number.**
+Which chokepoint a business solves is a judgement about what the business *is*. Every figure
+that follows — how many imperatives that bottleneck crosses, whether it is crisis-accelerated,
+what multiple is defensible, the quality score itself — is computed from the framework and from
+filed accounts.
+
+⚠ **It chooses from a closed list of 31 ids and the answer is matched back against it.**
+Anything unrecognised becomes *no mapping*, which scores zero rather than guessing.
+`NONE` is a first-class and common answer — most listed companies are ordinary businesses this
+framework is not about, and forcing a fit is how a random small-cap becomes strategic.
+
+⚠ **And the placement is a proposal.** It scores zero until you agree, with no exception for a
+claim that arrived with a confident tone.
+
+**2 · What does it report?** Its annual filings, read and stored beside the words they came
+from. **3 · Is it good, and sensibly priced?** From those figures alone. **4 · What stops it?**
+The gates, unchanged.
+
+⚠ **No shortcuts for a candidate.** Scoring a company nobody owns more loosely — fewer years, a
+guessed sector, a default multiple — would make a new idea look better than an existing holding
+purely because less was known about it.
+
+### Verified end to end, on real companies
+
+| Company | Placement | Filings | Quality | Price |
+|---|---|---|---|---|
+| Voltamp Transformers | B1.1 Power Transmission, 95% | 4 read | **4 of 7 scorable** | ₹10,879 |
+| Transformers & Rectifiers | B1.1 Power Transmission, 100% | — | — | — |
+| Nestle India | **refused** — "does not address any of the bottlenecks" | — | — | — |
+
+Analysis and following are separate acts, and the split is a spending decision: analysing reads
+filings once and fetches one price; following joins the daily price loop for as long as the
+company is kept.
+
+---
+
+## 18. When a condition you wrote comes true
+
+A fired invalidation condition used to raise a notification and stop, which left the acting
+entirely to whoever happened to read it. **Trigger discipline is the one go/no-go criterion
+that is not statistical** — ignore your own conditions even a few times and this never gets
+real money whatever the returns say — and a design that only alerts is one where that erodes
+without anyone deciding to let it.
+
+So a firing now forms a suggestion, through the same gates and into the same books, because a
+proposal raised in a hurry should be held to the rules hardest. One suggestion per company: one
+contradiction asks to **reduce**, two asks to **leave**.
+
+⚠ **Never a purchase.** A condition firing is the thesis being contradicted, and a design that
+let that produce "add more" would have invented averaging down as a policy.
+
+⚠ **A flaw this exposed.** The confidence gate was action-blind, so low confidence in a company
+blocked the suggestion to *leave* it — the less the system understood a holding, the harder it
+became to get out of. Confidence is a reason to commit money; its absence is a reason to stop,
+never a reason to stay. That gate now applies to buying only.
+
+---
+
+## 19. Looking backwards
+
+Saturdays, month end, quarter end. Sunday is deliberately empty: there is a real risk a system
+like this fills every slot with output, and output is not insight.
+
+⚠ **Assembled by code, never written by a model.** Everywhere else here a model is forbidden
+from producing a number, and a review is almost entirely numbers. A summary paragraph would be
+the single place a figure could be restated wrongly with nothing to check it against.
+
+⚠ **APPEND-ONLY.** A review states what was true at a moment. Regenerating March's in June
+would show a position that recovered as never having fallen, and a prediction that failed as
+never having been made — and the most interesting thing a review holds is the part that turned
+out to be wrong.
+
+What it refuses to soften:
+
+- **Every measure withholds itself below its sample**, in a full sentence rather than a blank.
+  A blank reads as zero to anyone scanning; *"0 of 20 resolved claims needed before this means
+  anything"* cannot.
+- **A queue nobody cleared is named, not counted.** "Three have been waiting a month" prompts
+  nothing; naming them turns a statistic into a decision.
+- **Unspent budget is reported without apology.** The budget is a ceiling, not a target, and
+  framing it as a shortfall would be arguing for activity — the one bias this design is built
+  against.
+- **The headline leads with what needs doing**, not with the week's return. A review whose
+  first line is a number invites reading only that number.
+- **Source attribution is monthly and up.** Over seven days it is noise wearing a number.
+
+Code: `services/investments/{reading,candidates,deduce,reviews}.py`,
+`services/marketdata/{universe,webpage}.py`, `jobs/{reading,reviews}.py`.
+Migrations 024 and 025.

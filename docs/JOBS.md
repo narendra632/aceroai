@@ -69,6 +69,15 @@ Each job says how late it may still run.
 | `corporate_actions_watch` | 20:00 weekdays | +12 h | Actions are announced days before their ex-date |
 | `investments_disk_watch` | 09:00 Mondays | +12 h | A 50 MB/year budget does not need a daily reading |
 | `sources_poll` | 08:10, 12:10, 16:10, 20:10, 23:10 | +2 h | The feed is a window that empties; a gap cannot be re-asked |
+| `universe_sync` | 06:30 Sundays | +2 days | The exchange list changes by a handful a month; stale costs a missed match, not a wrong one |
+| `candidate_analysis` | 20:30 | +2 h | Half an hour before the evening run, so the day's new names are placed before proposals form |
+| `investments_weekly_review` | 09:00 Saturdays | +12 h | No market is open, nothing is urgent, the week is complete |
+| `investments_monthly_review` | 09:30 on the 1st | +12 h | After the weekly has had its Saturday |
+| `investments_quarterly_review` | 10:30, 1 Jan/Apr/Jul/Oct | +12 h | An hour after the monthly, so both exist and neither races |
+
+⚠ **Sunday is deliberately empty of reviews.** There is a real risk in a system like this
+that it fills every available slot with output, and output is not insight. `universe_sync`
+runs on a Sunday because it is bookkeeping nobody reads; nothing that asks for attention does.
 
 ⚠ **Why `sources_poll` closes the day at 23:10.** NSE's announcement feed is not a history,
 it is a *window that empties*: it held 56 items at 23:40 on 20 Sep 2026 and 0 the next
@@ -301,7 +310,8 @@ backend/app/jobs/
   scheduler.py     the ticker — APScheduler holds exactly one job
   run.py           python -m app.jobs.run
   housekeeping.py  retention_sweep, disk_watch, investments_disk_watch
-  reading.py       sources_poll
+  reading.py       sources_poll, universe_sync, candidate_analysis
+  reviews.py       investments_weekly_review, investments_monthly_review, investments_quarterly_review
   brief.py         morning_brief, day_end_summary   (the only jobs that call a model)
   nudges.py        task_nudge, budget_watch, journal_nudge
   backups.py       db_backup, restore_check, backup_watch

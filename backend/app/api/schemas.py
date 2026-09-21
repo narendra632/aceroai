@@ -1422,3 +1422,27 @@ class DropOut(BaseModel):
     note: str | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class InvestmentReviewOut(BaseModel):
+    """One look backwards, as the facts that were true then.
+
+    ⚠ `content` is a structure of figures assembled by code, never prose written by a model.
+    Everywhere else in this module a model is forbidden from producing a number, and a review
+    is almost entirely numbers — a summary paragraph would be the one place a figure could be
+    restated wrongly with nothing to check it against.
+    """
+
+    id: uuid.UUID
+    kind: str
+    period_start: dt.date
+    period_end: dt.date
+    generated_at: dt.datetime
+    headline: str
+    content: dict
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InvestmentReviewsOut(BaseModel):
+    reviews: list[InvestmentReviewOut]
