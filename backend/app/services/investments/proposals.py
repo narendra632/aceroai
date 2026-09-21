@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
 import sqlalchemy as sa
@@ -738,6 +739,152 @@ class Batch:
             "blocked": len(self.blocked),
             "blockers": sorted({p.blocked_by for p in self.blocked if p.blocked_by}),
         }
+
+
+# --- when a condition you wrote comes true ---------------------------------------------------
+#
+# ⚠ **A system that writes invalidation conditions and then rationalises past them has quietly
+# stopped being a system.** Until now a fired condition raised a notification and nothing else,
+# which left the acting entirely to whoever happened to read it — and "did the system act when
+# its own condition fired" is the one go/no-go criterion that is not statistical. If it ignored
+# its own conditions even a few times, it does not get real money whatever the returns say.
+#
+# ⚠ **The proposal it raises is never a buy.** A condition firing is the thesis being
+# contradicted, and the only honest responses are to reduce, to leave, or to say out loud why
+# neither — which is what a HOLD carrying a reason is. A design that let a fired condition
+# produce "add more" would have invented averaging down as a policy.
+
+
+#: Below this fraction of the position still held, trimming is not worth the charges and the
+#: honest suggestion is to leave entirely.
+MIN_TRIM_FRACTION = Decimal("0.25")
+
+
+def response_to(fired: list, held: set[uuid.UUID]) -> str:
+    """What a fired condition asks for. ⚠ Never a purchase; see above."""
+    return "EXIT" if len(fired) > 1 else "TRIM"
+
+
+def on_triggers_fired(
+    db: Session,
+    user_id: uuid.UUID,
+    watch,
+    *,
+    occurrence_key: str,
+    today: dt.date | None = None,
+) -> Batch:
+    """Raise a suggestion for every holding whose own invalidation condition came true.
+
+    ⚠ Formed and written the way the evening batch is, through the same gates and into the
+    same books — because a proposal raised in a hurry is exactly the kind that should be held
+    to the rules hardest. The only difference is which companies are looked at and that the
+    action is a reduction.
+
+    ⚠ Zero is a normal outcome and the run is still recorded. A system that leaves a trace
+    only on the days it acted cannot be measured against the days it should have.
+    """
+    today = today or dt.date.today()
+    started = dt.datetime.now(dt.UTC)
+    batch_id = uuid.uuid4()
+
+    version = frameworks.current(db)
+    spec = version.spec
+    real = db.execute(
+        sa.select(Portfolio).where(
+            Portfolio.user_id == user_id,
+            Portfolio.kind == "REAL",
+            Portfolio.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if real is None:
+        raise NotFound("no REAL portfolio")
+    mirror_book = mirror(db, user_id)
+    held = {p.instrument_id for p in pf.positions(db, real.id)}
+
+    by_instrument: dict[uuid.UUID, list] = defaultdict(list)
+    for fired in getattr(watch, "fired", ()):
+        by_instrument[fired.trigger.instrument_id].append(fired)
+
+    decided: list[tuple[Draft, gates.Verdict]] = []
+    for instrument_id, entries in by_instrument.items():
+        inst = db.get(Instrument, instrument_id)
+        if inst is None:
+            continue
+        draft = draft_for(db, mirror_book, inst, spec, held)
+        if draft is None:
+            continue
+
+        action = response_to(entries, held)
+        why = "; ".join(
+            f"{row.trigger.description} — {row.trigger.metric_key} is {row.value}"
+            for row in entries
+        )
+        draft = replace(
+            draft,
+            action=action,
+            thesis=(
+                f"A condition written when this position was taken has come true: {why}. "
+                f"{draft.thesis}"
+            ),
+        )
+
+        mapping = frameworks.live_mapping(db, inst.id)
+        candidate = gates.Candidate(
+            instrument=inst,
+            action=draft.action,
+            mapping=mapping,
+            ab_score=draft.ab_score,
+            quality=scoring.quality_score(db, inst, spec, market_cap=_cap(db, inst, draft)),
+            quadrant=draft.quadrant,
+            confidence=draft.confidence,
+            horizon_days=draft.horizon_days,
+            triggers=draft.triggers,
+            target_amount_inr=draft.target_amount_inr,
+            off_framework=bool(mapping and mapping.off_framework),
+            off_framework_share=ZERO,
+            in_batch=0,
+            this_month=0,
+        )
+        decided.append((draft, gates.evaluate(db, mirror_book.id, candidate)))
+
+    passing = sum(1 for _, v in decided if v.passed)
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_name="trigger_response",
+        occurrence_key=occurrence_key,
+        started_at=started,
+        finished_at=dt.datetime.now(dt.UTC),
+        status="OK",
+        inputs_seen=sum(len(v) for v in by_instrument.values()),
+        inputs_material=len(by_instrument),
+        proposals_emitted=passing,
+        notes=f"{len(decided) - passing} blocked by the rules",
+    )
+    db.add(run)
+    db.flush()
+
+    proposed: list[Proposal] = []
+    blocked: list[Proposal] = []
+    for draft, verdict in decided:
+        row = write(
+            db,
+            book_row=mirror_book,
+            user_id=user_id,
+            draft=draft,
+            verdict=verdict,
+            batch_id=batch_id,
+            framework_version_id=version.id,
+            agent_run_id=run.id,
+        )
+        (proposed if verdict.passed else blocked).append(row)
+    db.flush()
+    return Batch(
+        run_id=run.id,
+        batch_id=batch_id,
+        proposed=proposed,
+        blocked=blocked,
+        considered=len(decided),
+    )
 
 
 def synthesise(

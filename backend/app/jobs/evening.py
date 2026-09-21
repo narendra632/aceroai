@@ -16,6 +16,7 @@ urgent.
 
 import datetime as dt
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import Instrument, User
@@ -97,6 +98,13 @@ def position_watch(db: Session, user: User) -> JobResult:
     ⚠ It fires whether or not the story still looks good. A system that writes invalidation
     conditions and then reasons past them has quietly stopped being a system, and the measure
     of that — trigger discipline — is the one criterion that is not statistical.
+
+    ⚠ **And it raises a suggestion, not only an alert.** Telling someone their thesis has been
+    contradicted and then leaving the acting entirely to whoever happens to read the
+    notification is how trigger discipline erodes without anyone deciding to let it. The
+    suggestion is a reduction — never a purchase — because a condition firing is the thesis
+    being contradicted, and a design that let that produce "add more" would have invented
+    averaging down as a policy.
     """
     watch = watching.check_triggers(db)
     resolved = watching.resolve_claims(db)
@@ -105,6 +113,27 @@ def position_watch(db: Session, user: User) -> JobResult:
     detail = {**watch.detail(), "claims": resolved.detail()}
     if not watch.fired:
         return JobResult(silent=True, detail=detail)
+
+    # ⚠ Formed after the firings are committed, and its own failure must not lose them. A
+    # thesis being contradicted is the fact; a suggestion about it is a convenience, and
+    # losing the first to save the second would be exactly backwards.
+    raised = 0
+    try:
+        batch = proposals.on_triggers_fired(
+            db,
+            user.id,
+            watch,
+            occurrence_key=f"fired-{dt.date.today().isoformat()}",
+        )
+        db.commit()
+        # ⚠ Proposed only. A suggestion the gates refused is recorded and shadow-booked,
+        # but telling the user one is "waiting" when nothing reached them would be a lie
+        # about the one thing this notification exists to say.
+        raised = len(batch.proposed)
+    except (NotFound, IntegrityError) as exc:
+        db.rollback()
+        detail["response"] = f"no suggestion raised: {type(exc).__name__}"
+    detail["proposals_raised"] = raised
 
     first = watch.fired[0]
     more = len(watch.fired) - 1
@@ -118,6 +147,7 @@ def position_watch(db: Session, user: User) -> JobResult:
             body=(
                 f"{first.trigger.description} It now stands at {first.value}. "
                 "This was written down before the position was taken."
+                + (" A suggestion is waiting." if raised else "")
             ),
             url="/#investments",
             tag=f"fired-{first.trigger.id}",

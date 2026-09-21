@@ -328,8 +328,18 @@ def _g9_caps(c: Candidate) -> GateResult:
 
 
 def _g11_confidence(c: Candidate) -> GateResult:
-    """Below the threshold, it is a research note rather than a suggestion."""
+    """Below the threshold, it is a research note rather than a suggestion.
+
+    ⚠ **Buying only, and the asymmetry is the point.** This gate was action-blind, which meant
+    low confidence in a company blocked the suggestion to *leave* it — so the less the system
+    understood a holding, the harder it became to get out of. That is backwards on its own
+    terms: confidence is a reason to commit money, and its absence is a reason to stop, never
+    a reason to stay. Found when a fired invalidation condition raised an exit and this gate
+    refused it.
+    """
     gate = "G11_confidence"
+    if c.action not in BUYING:
+        return _na(gate, "reducing or leaving does not need confidence in the company")
     if c.confidence < MIN_CONFIDENCE:
         return _no(
             gate,
