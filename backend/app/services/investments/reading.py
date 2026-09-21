@@ -43,10 +43,19 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.core import llm
-from app.db.models import Instrument, Mention, Portfolio, Source, SourceItem, Transaction
+from app.db.models import (
+    Candidate,
+    Instrument,
+    ListedCompany,
+    Mention,
+    Portfolio,
+    Source,
+    SourceItem,
+    Transaction,
+)
 from app.services.investments import history, watching
 from app.services.investments import portfolio as pf
-from app.services.marketdata import feeds, http
+from app.services.marketdata import feeds, http, universe
 from app.services.marketdata.http import ProviderError
 
 log = logging.getLogger(__name__)
@@ -59,9 +68,133 @@ FILING, PRESS, COMMENTARY = 1, 2, 3
 #: would put noise straight into the attribution numbers.
 STANCE_READ_FROM_TIER = PRESS
 
+#: Source kinds that make a CLAIM about a company rather than filing paperwork on its own
+#: behalf. Two things follow from being on this list, and both matter.
+#:
+#: ⚠ **Only these open a research-queue line.** Your own product brief says it plainly — *a
+#: stock mentioned on a channel enters the research queue* — and the reason is arithmetic. A
+#: single live poll of NSE's five feeds named 184 listed companies, of which 21 were one
+#: asset manager's routine ETF notices. A company filing its own paperwork is not recommending
+#: itself; treating it as a lead would put several hundred entries a day into a queue meant to
+#: hold the handful of things worth a look, and the queue would be abandoned within a week.
+#:
+#: ⚠ **Only these record a mention of a company nobody follows.** The mention table exists to
+#: be the survivorship-proof denominator for judging sources *that make calls*. The exchange
+#: makes none, so counting its 184 daily names would add roughly 65,000 rows a year to measure
+#: a source that never claimed anything. Filings about companies already followed are still
+#: recorded in full — that is news about your own book.
+CLAIMING_KINDS = frozenset({"RSS_NEWS", "YOUTUBE", "USER_DROP", "MACRO"})
+
 #: Below this many characters a symbol is too short to match safely. "ON", "IT" and "GO" are
-#: all real tickers somewhere and all appear constantly in ordinary prose.
+#: all real tickers somewhere and all appear constantly in ordinary prose. This floor applies
+#: to companies already held or watched — symbols you confirmed by following them.
 MIN_SYMBOL_LEN = 3
+
+#: ⚠ A higher floor for the 2,595 companies merely *listed*. The exchange carries 165 symbols
+#: of three characters or fewer — ACC, ACE, BSE, BEL — and at that length a ticker in ordinary
+#: uppercase text is far more often an abbreviation than a company. The asymmetry is
+#: deliberate: a missed mention costs an idea, a false one corrupts the denominator the
+#: attribution measure divides by, and nothing downstream can tell a false mention from a
+#: real one.
+MIN_DISCOVERY_SYMBOL_LEN = 4
+
+#: A one-word company name has to be at least this long to be matched on. "Amal" and "ACC"
+#: are real companies; their names are also strings that appear constantly in unrelated text.
+MIN_SOLO_NAME = 6
+
+#: Words that are company names AND ordinary English, where matching would produce far more
+#: noise than signal. ⚠ Checked lower-cased against both single-word names and tickers, so
+#: "Eternal Limited" and a sentence about eternal optimism do not collide. Kept short and
+#: explicit: a long list quietly becomes a blind spot nobody can see the shape of.
+AMBIGUOUS = frozenset(
+    {
+        "ace",
+        "acc",
+        "apex",
+        "beta",
+        "deep",
+        "bang",
+        "eternal",
+        "antarctica",
+        "midwest",
+        "best",
+        "bright",
+        "capital",
+        "career",
+        "central",
+        "century",
+        "choice",
+        "cosmic",
+        "crown",
+        "dynamic",
+        "elegant",
+        "empire",
+        "excel",
+        "focus",
+        "force",
+        "fortune",
+        "future",
+        "global",
+        "golden",
+        "grand",
+        "growth",
+        "heritage",
+        "ideal",
+        "impact",
+        "india",
+        "integra",
+        "jump",
+        "legacy",
+        "liberty",
+        "lotus",
+        "magnum",
+        "marathon",
+        "master",
+        "mega",
+        "modern",
+        "nova",
+        "onward",
+        "option",
+        "orient",
+        "panorama",
+        "paramount",
+        "pioneer",
+        "premier",
+        "prime",
+        "pulse",
+        "quest",
+        "regency",
+        "reliance",
+        "revival",
+        "rich",
+        "rising",
+        "royal",
+        "sanguine",
+        "select",
+        "shine",
+        "signal",
+        "simple",
+        "smart",
+        "sovereign",
+        "spark",
+        "sterling",
+        "summit",
+        "supreme",
+        "swadeshi",
+        "titan",
+        "trend",
+        "trust",
+        "unique",
+        "united",
+        "universal",
+        "valiant",
+        "venture",
+        "victory",
+        "vision",
+        "vital",
+        "zenith",
+    }
+)
 
 #: The corporate form at the END of a name, which is registration rather than identity.
 #:
@@ -98,21 +231,29 @@ class Unapproved(Exception):
 
 @dataclass(frozen=True)
 class Target:
-    """One instrument, and the shapes its name takes in text."""
+    """One company the reader can recognise, and the spellings it goes by.
 
-    instrument_id: uuid.UUID
+    ⚠ Either an instrument (something the portfolio already has an opinion about) or a listed
+    company (something merely on the exchange), never both. Which one it is decides what a
+    mention of it does: attach to a holding, or open a line in the research queue.
+    """
+
+    instrument_id: uuid.UUID | None
+    listed_company_id: uuid.UUID | None
     symbol: str
     name: str
-    patterns: tuple[re.Pattern, ...]
+    spellings: tuple[str, ...]
 
-    def find(self, text: str) -> str | None:
-        """The sentence that named it, or `None`. ⚠ The excerpt is the evidence: without it
-        an attribution number cannot be checked back against what was actually said."""
-        for pattern in self.patterns:
-            match = pattern.search(text)
-            if match:
-                return _sentence_around(text, match.start())
-        return None
+    @property
+    def is_known(self) -> bool:
+        """Whether this is already held or watched, as opposed to merely listed."""
+        return self.instrument_id is not None
+
+    @property
+    def key(self) -> str:
+        """⚠ Identity for de-duplication within one item. A company can be reached by its
+        name and by its ticker in the same sentence, and that is one mention, not two."""
+        return f"{self.symbol}|{self.instrument_id or self.listed_company_id}"
 
 
 @dataclass
@@ -127,6 +268,8 @@ class PollResult:
     silent: bool = False
     error: str | None = None
     names: list[str] = field(default_factory=list)
+    #: Companies newly added to the research queue by this poll.
+    discovered: list[str] = field(default_factory=list)
 
 
 # --- the register --------------------------------------------------------------------------
@@ -191,27 +334,126 @@ def registered(db: Session, *, only_readable: bool = False) -> list[Source]:
 
 
 # --- who was named -------------------------------------------------------------------------
+#
+# ⚠ **This scans an index, it does not sweep patterns.** With eleven tracked companies a
+# regex each was fine. The vocabulary is now the exchange's whole equity list — 2,595
+# companies — and 2,595 regexes against every item of every feed would be the slowest thing
+# in the module by a wide margin. So names are looked up: the text is tokenised once and its
+# word-runs are checked against a dictionary, which costs the length of the text rather than
+# the size of the vocabulary.
 
 
-def _name_key(name: str) -> list[str]:
+def _normalise(text: str) -> str:
+    """⚠ An ampersand is the word "and".
+
+    The exchange lists TARIL as *Transformers **And** Rectifiers (India) Limited*; everyone
+    who writes about it types *Transformers **&** Rectifiers*. Tokenised literally the two
+    never meet, and the company is simply invisible to the reader — silently, because a name
+    that fails to match looks exactly like a name that was never said.
+    """
+    return text.replace("&", " and ")
+
+
+def _name_key(name: str) -> tuple[str, ...]:
     """A company name reduced to the words that identify it, in order.
 
     Strips the trailing legal form and nothing else, so *Apar Industries Limited* keeps both
     words that make it Apar Industries and not some other Apar.
     """
     core = _TRAILING_FORM.sub("", (name or "").strip())
-    return [word for word in re.split(r"[^A-Za-z0-9]+", core.lower()) if word]
+    return tuple(word for word in re.split(r"[^A-Za-z0-9]+", _normalise(core).lower()) if word)
+
+
+def _tokens(text: str) -> list[tuple[str, str, int]]:
+    """Every word in the text as `(lowercase, as-written, where it starts)`.
+
+    ⚠ The same splitter as `_name_key`, deliberately. A vocabulary tokenised one way and a
+    text tokenised another would fail to match exactly the awkward names — *GE Vernova T&D* —
+    that most need matching, and would do it silently.
+    """
+    # ⚠ Offsets are taken from the ORIGINAL text, not the normalised copy, so an excerpt
+    # quotes what was actually written. `_normalise` only ever replaces one character with a
+    # padded word, which shifts positions — hence the two are walked separately.
+    out: list[tuple[str, str, int]] = []
+    for m in re.finditer(r"[A-Za-z0-9]+|&", text):
+        written = m.group(0)
+        out.append(("and" if written == "&" else written.lower(), written, m.start()))
+    return out
 
 
 def _sentence_around(text: str, index: int) -> str:
-    start = max(text.rfind(". ", 0, index), text.rfind("\n", 0, index)) + 1
+    start = max(text.rfind(". ", 0, index), text.rfind(chr(10), 0, index)) + 1
     end = text.find(". ", index)
     end = len(text) if end == -1 else end + 1
     return text[start:end].strip()[:EXCERPT_CHARS]
 
 
-def catalogue(db: Session) -> list[Target]:
-    """Every tracked instrument, with the patterns that would name it in text.
+@dataclass
+class Vocabulary:
+    """Every name the reader can recognise, indexed for lookup rather than for scanning."""
+
+    #: word-tuple → entry. Multi-word names live here, and single-word ones that pass the floor.
+    by_name: dict[tuple[str, ...], Target] = field(default_factory=dict)
+    #: exact uppercase symbol → entry.
+    by_symbol: dict[str, Target] = field(default_factory=dict)
+    #: Symbols carrying punctuation ("GVT&D") cannot be found by word lookup, so the few that
+    #: exist keep a pattern each.
+    odd_symbols: list[tuple[re.Pattern, Target]] = field(default_factory=list)
+    #: ⚠ Every symbol the portfolio already follows, whatever its name length. A held company
+    #: and its entry on the exchange's list are the same company under two spellings — the
+    #: instrument is "Kaynes Technology", the list says "Kaynes Technology India Limited" — and
+    #: longest-match-wins would pick the listed one. A filing about something already owned
+    #: would then open a research-queue line for a company sitting in the book.
+    known_symbols: dict[str, Target] = field(default_factory=dict)
+    longest: int = 1
+
+    def resolve(self, target: Target) -> Target:
+        """The held instrument for this company where there is one, else the target itself."""
+        if target.is_known:
+            return target
+        return self.known_symbols.get(target.symbol.upper(), target)
+
+    def add(self, target: Target, *, min_symbol: int) -> None:
+        symbol = target.symbol.strip()
+        if target.is_known and symbol:
+            self.known_symbols[symbol.upper()] = target
+        # ⚠ The ambiguity guard applies to DISCOVERY only. "ACE" is both a listed company and
+        # a word about a good quarter, so it must not be plucked out of the wider exchange —
+        # but if you follow Action Construction Equipment, you chose that ticker, and a system
+        # that refused to recognise news about your own holding would be protecting you from
+        # your own decision.
+        ambiguous = not target.is_known and symbol.lower() in AMBIGUOUS
+        if len(symbol) >= min_symbol and not ambiguous:
+            if symbol.isalnum():
+                self.by_symbol.setdefault(symbol.upper(), target)
+            else:
+                self.odd_symbols.append(
+                    (
+                        re.compile(rf"(?<![A-Za-z0-9]){re.escape(symbol)}(?![A-Za-z0-9])"),
+                        target,
+                    )
+                )
+
+        for spelling in target.spellings:
+            words = _name_key(spelling)
+            if not words:
+                continue
+            # ⚠ A one-word name has to clear a height and not be an ordinary word. "Amal
+            # Limited" and "ACC Limited" are real companies whose names appear constantly in
+            # prose that has nothing to do with them, and a false mention is worse than a
+            # missed one: it enters the denominator the attribution measure divides by, and
+            # nothing downstream can tell it from a real one.
+            if len(words) == 1 and not target.is_known:
+                if len(words[0]) < MIN_SOLO_NAME or words[0] in AMBIGUOUS:
+                    continue
+            if sum(len(w) for w in words) < MIN_NAME_LEN:
+                continue
+            self.by_name.setdefault(words, target)
+            self.longest = max(self.longest, len(words))
+
+
+def _known(db: Session) -> list[Target]:
+    """The companies the portfolio already has an opinion about — held or watched.
 
     ⚠ Indian equities only. A mention of "Bitcoin" in a video is not an idea about an
     instrument in the sense this table measures, and a crypto ticker like `ETH` inside prose
@@ -224,45 +466,308 @@ def catalogue(db: Session) -> list[Target]:
             Instrument.asset_class == "EQUITY_IN",
         )
     ).scalars()
+    return [
+        Target(
+            instrument_id=row.id,
+            listed_company_id=None,
+            symbol=(row.symbol or "").strip(),
+            name=row.name,
+            spellings=tuple([row.name, *(row.aliases or [])]),
+        )
+        for row in rows
+    ]
 
-    out: list[Target] = []
-    for row in rows:
-        patterns: list[re.Pattern] = []
-        symbol = (row.symbol or "").strip()
-        if len(symbol) >= MIN_SYMBOL_LEN:
-            # ⚠ Case-SENSITIVE on the symbol. Lower-cased, "apar" and "rolex" are ordinary
-            # words; as tickers they are shouted, and requiring the shout removes most of
-            # the false positives a symbol match would otherwise produce.
-            patterns.append(re.compile(rf"(?<![A-Za-z0-9]){re.escape(symbol)}(?![A-Za-z0-9])"))
 
-        for candidate in [row.name, *(row.aliases or [])]:
-            words = _name_key(candidate)
-            if sum(len(word) for word in words) >= MIN_NAME_LEN:
-                loose = _JOIN.join(re.escape(word) for word in words)
-                patterns.append(
-                    re.compile(rf"(?<![A-Za-z0-9]){loose}(?![A-Za-z0-9])", re.IGNORECASE)
-                )
+def _listed(db: Session) -> list[Target]:
+    """Every other company on the exchange — the half that makes discovery possible."""
+    rows = db.execute(sa.select(ListedCompany).where(ListedCompany.delisted_at.is_(None))).scalars()
+    return [
+        Target(
+            instrument_id=None,
+            listed_company_id=row.id,
+            symbol=(row.symbol or "").strip(),
+            name=row.name,
+            spellings=(row.name,),
+        )
+        for row in rows
+    ]
 
-        if patterns:
-            out.append(
-                Target(
-                    instrument_id=row.id,
-                    symbol=symbol,
-                    name=row.name,
-                    patterns=tuple(patterns),
+
+def vocabulary(db: Session) -> Vocabulary:
+    """What the reader can recognise: what you already follow, then the whole exchange.
+
+    ⚠ **Order matters and is load-bearing.** A company you hold is added first, so a mention
+    of it resolves to *your holding* rather than to an anonymous listed name. Reversed, a
+    filing about Apar would create a research-queue entry for a company already in the book.
+    """
+    vocab = Vocabulary()
+    for target in _known(db):
+        # A symbol you already follow is one you confirmed, so the shorter floor applies.
+        vocab.add(target, min_symbol=MIN_SYMBOL_LEN)
+    for target in _listed(db):
+        vocab.add(target, min_symbol=MIN_DISCOVERY_SYMBOL_LEN)
+    return vocab
+
+
+def named_in(text: str, vocab: Vocabulary) -> list[tuple[Target, str]]:
+    """Every company the text names, with the sentence that named it.
+
+    Longest name first at each position, so *Solar Industries India* is never read as some
+    other company called *Solar*.
+    """
+    tokens = _tokens(text)
+    found: dict[str, tuple[Target, str]] = {}
+
+    index = 0
+    while index < len(tokens):
+        step = 1
+        for width in range(min(vocab.longest, len(tokens) - index), 0, -1):
+            words = tuple(word for word, _, _ in tokens[index : index + width])
+            hit = vocab.by_name.get(words)
+            if hit is not None:
+                target = vocab.resolve(hit)
+                found.setdefault(target.key, (target, _sentence_around(text, tokens[index][2])))
+                step = width
+                break
+        index += step
+
+    # ⚠ Case-SENSITIVE on the symbol, and a separate pass because a ticker is not a word in
+    # the sentence. Lower-cased, "apar" and "rolex" are ordinary English; as tickers they are
+    # shouted, and requiring the shout removes most of the false positives a symbol match
+    # would otherwise produce.
+    for _, written, at in tokens:
+        hit = vocab.by_symbol.get(written)
+        if hit is not None and written.isupper():
+            target = vocab.resolve(hit)
+            found.setdefault(target.key, (target, _sentence_around(text, at)))
+
+    for pattern, hit in vocab.odd_symbols:
+        match = pattern.search(text)
+        if match:
+            target = vocab.resolve(hit)
+            found.setdefault(target.key, (target, _sentence_around(text, match.start())))
+
+    return list(found.values())
+
+
+# --- the vocabulary, kept current ------------------------------------------------------------
+
+
+def sync_universe(db: Session, c: httpx.Client | None = None) -> dict:
+    """Refresh the exchange's equity list.
+
+    ⚠ **A company that has left the list is marked delisted, never deleted.** It was still
+    named by sources while it was listed, and removing it would make those mentions
+    unresolvable — quietly shrinking the denominator the attribution measure divides by, in
+    the one direction that flatters every source.
+    """
+    listed = universe.fetch(c)
+    now = dt.datetime.now(dt.UTC)
+
+    existing = {
+        (row.exchange, row.symbol): row for row in db.execute(sa.select(ListedCompany)).scalars()
+    }
+    added = updated = 0
+    for entry in listed:
+        row = existing.pop(("NSE", entry.symbol), None)
+        if row is None:
+            db.add(
+                ListedCompany(
+                    id=uuid.uuid4(),
+                    symbol=entry.symbol,
+                    exchange="NSE",
+                    name=entry.name,
+                    series=entry.series,
+                    isin=entry.isin,
+                    listed_on=entry.listed_on,
+                    refreshed_at=now,
                 )
             )
-    return out
+            added += 1
+        else:
+            if row.name != entry.name or row.delisted_at is not None:
+                updated += 1
+            row.name = entry.name
+            row.series = entry.series
+            row.isin = entry.isin or row.isin
+            row.delisted_at = None
+            row.refreshed_at = now
+
+    gone = 0
+    for row in existing.values():
+        if row.delisted_at is None:
+            row.delisted_at = now
+            gone += 1
+
+    db.flush()
+    return {"listed": len(listed), "added": added, "updated": updated, "delisted": gone}
 
 
-def named_in(text: str, targets: list[Target]) -> list[tuple[Target, str]]:
-    """Every target the text names, with the sentence that named it."""
-    found: list[tuple[Target, str]] = []
-    for target in targets:
-        excerpt = target.find(text)
-        if excerpt:
-            found.append((target, excerpt))
-    return found
+# --- the research queue ------------------------------------------------------------------
+#
+# ⚠ A candidate is a company something NAMED. It is deliberately not priced and not scored
+# until someone decides it is worth the spend — pricing every name ever mentioned would put
+# the API allowance and the disk budget behind companies nobody has chosen to care about.
+
+
+def note_candidate(
+    db: Session,
+    target: Target,
+    mention: Mention,
+    source: Source,
+    *,
+    when: dt.datetime | None = None,
+) -> bool:
+    """Open or refresh a line in the research queue. True if this is the first sighting.
+
+    ⚠ A candidate already dismissed is **not** silently reopened. Being named again is not new
+    information — a channel repeating itself is the most ordinary thing a channel does — and a
+    queue that resurrected everything you refused would train you to stop refusing. Its count
+    and its date still move, so a review can see it is being pushed.
+    """
+    when = when or dt.datetime.now(dt.UTC)
+    row = db.execute(
+        sa.select(Candidate).where(Candidate.listed_company_id == target.listed_company_id)
+    ).scalar_one_or_none()
+
+    if row is not None:
+        row.mention_count += 1
+        row.last_seen_at = when
+        row.best_trust_tier = min(row.best_trust_tier, source.trust_tier)
+        db.flush()
+        return False
+
+    db.add(
+        Candidate(
+            id=uuid.uuid4(),
+            listed_company_id=target.listed_company_id,
+            status="QUEUED",
+            first_mention_id=mention.id,
+            first_seen_at=when,
+            last_seen_at=when,
+            mention_count=1,
+            best_trust_tier=source.trust_tier,
+        )
+    )
+    db.flush()
+    return True
+
+
+@dataclass(frozen=True)
+class QueueLine:
+    """One company waiting to be looked at."""
+
+    id: uuid.UUID
+    symbol: str
+    name: str
+    status: str
+    mention_count: int
+    best_trust_tier: int
+    first_seen_at: dt.datetime
+    last_seen_at: dt.datetime
+    age_days: int
+    named_by: str | None
+    stance: str | None
+    excerpt: str | None
+    proposed_bottleneck: str | None
+    dismissed_reason: str | None
+
+
+def queue(db: Session, *, statuses: tuple[str, ...] = ("QUEUED", "ANALYSING")) -> list[QueueLine]:
+    """The research queue, the ones pushed hardest first.
+
+    ⚠ Ordered by how good the best source was and then by how often it has been named — not by
+    date. A company three sources keep returning to is a different proposition from one named
+    once in passing, and newest-first would bury it under today's noise.
+    """
+    rows = db.execute(
+        sa.select(Candidate, ListedCompany, Mention, SourceItem, Source)
+        .join(ListedCompany, Candidate.listed_company_id == ListedCompany.id)
+        .join(Mention, Candidate.first_mention_id == Mention.id, isouter=True)
+        .join(SourceItem, Mention.source_item_id == SourceItem.id, isouter=True)
+        .join(Source, SourceItem.source_id == Source.id, isouter=True)
+        .where(Candidate.status.in_(statuses))
+        .order_by(
+            Candidate.best_trust_tier,
+            Candidate.mention_count.desc(),
+            Candidate.last_seen_at.desc(),
+        )
+    ).all()
+
+    today = dt.datetime.now(dt.UTC)
+    return [
+        QueueLine(
+            id=candidate.id,
+            symbol=company.symbol,
+            name=company.name,
+            status=candidate.status,
+            mention_count=candidate.mention_count,
+            best_trust_tier=candidate.best_trust_tier,
+            first_seen_at=candidate.first_seen_at,
+            last_seen_at=candidate.last_seen_at,
+            age_days=(today - candidate.first_seen_at).days,
+            named_by=source.name if source else (item.source if item else None),
+            stance=mention.stance if mention else None,
+            excerpt=mention.claim_excerpt if mention else None,
+            proposed_bottleneck=candidate.proposed_bottleneck,
+            dismissed_reason=candidate.dismissed_reason,
+        )
+        for candidate, company, mention, item, source in rows
+    ]
+
+
+def promote(db: Session, candidate: Candidate, *, sector: str | None = None) -> Instrument:
+    """Start following a candidate: it becomes priced, filed and scored.
+
+    ⚠ **This is the moment the meter starts**, which is why it is an explicit act rather than
+    something the queue does on its own. Until now the candidate has cost nothing.
+    """
+    company = db.get(ListedCompany, candidate.listed_company_id)
+    existing = db.execute(
+        sa.select(Instrument).where(
+            Instrument.symbol == company.symbol,
+            Instrument.exchange == company.exchange,
+            Instrument.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        existing = Instrument(
+            id=uuid.uuid4(),
+            symbol=company.symbol,
+            exchange=company.exchange,
+            isin=company.isin,
+            name=company.name,
+            asset_class="EQUITY_IN",
+            currency="INR",
+            sector=sector,
+            is_tracked=True,
+        )
+        db.add(existing)
+        db.flush()
+    else:
+        existing.is_tracked = True
+
+    candidate.instrument_id = existing.id
+    candidate.status = "PROMOTED"
+    candidate.reviewed_at = dt.datetime.now(dt.UTC)
+    db.flush()
+    return existing
+
+
+def dismiss(db: Session, candidate: Candidate, reason: str) -> Candidate:
+    """Drop a candidate, with a reason the database insists on.
+
+    ⚠ The reason is the data. It is the only record of what kinds of idea keep being refused,
+    and without it a tidied queue is indistinguishable from one that was never filled.
+    """
+    if not (reason or "").strip():
+        raise ValueError("dismissing a candidate needs a reason")
+    candidate.status = "DISMISSED"
+    candidate.dismissed_reason = reason.strip()
+    candidate.reviewed_at = dt.datetime.now(dt.UTC)
+    db.flush()
+    return candidate
 
 
 # --- which direction was meant --------------------------------------------------------------
@@ -426,12 +931,19 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
         source.last_polled_at = dt.datetime.now(dt.UTC)
         return result
 
-    targets = catalogue(db)
+    vocab = vocabulary(db)
     now = dt.datetime.now(dt.UTC)
+
+    # Whether this source is making a claim about a company or filing its own paperwork.
+    claims = source.kind in CLAIMING_KINDS
 
     for item in fresh:
         text = f"{item.title}\n{item.body}".strip()
-        found = named_in(text, targets)
+        found = named_in(text, vocab)
+        # ⚠ An exchange feed is read for news about what you already follow. It names a couple
+        # of hundred other companies a day as a matter of routine, and none of that is a lead.
+        if not claims:
+            found = [(target, excerpt) for target, excerpt in found if target.is_known]
 
         # ⚠ Every judgement about this item is formed BEFORE a single row is written, because
         # `mentions` refuses to be corrected afterwards.
@@ -443,7 +955,9 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
         row = SourceItem(
             id=uuid.uuid4(),
             kind=source.kind,
-            instrument_id=found[0][0].instrument_id if len(found) == 1 else None,
+            instrument_id=(
+                found[0][0].instrument_id if len(found) == 1 and found[0][0].is_known else None
+            ),
             source_id=source.id,
             source=source.name,
             external_id=item.external_id,
@@ -460,17 +974,24 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
         result.stored += 1
 
         for target, excerpt in found:
-            db.add(
-                Mention(
-                    id=uuid.uuid4(),
-                    source_item_id=row.id,
-                    instrument_id=target.instrument_id,
-                    stance=stances.get(target.symbol, "MENTION_ONLY"),
-                    claim_excerpt=excerpt,
-                )
+            mention = Mention(
+                id=uuid.uuid4(),
+                source_item_id=row.id,
+                instrument_id=target.instrument_id,
+                listed_company_id=target.listed_company_id,
+                stance=stances.get(target.symbol, "MENTION_ONLY"),
+                claim_excerpt=excerpt,
             )
+            db.add(mention)
+            db.flush()
             result.mentions += 1
             result.names.append(target.symbol)
+
+            # ⚠ A company nobody follows opens a line in the research queue rather than being
+            # dropped. This is the whole difference between a system that can say "look at
+            # this" and one that can only ever say hold, trim or sell.
+            if not target.is_known and note_candidate(db, target, mention, source, when=now):
+                result.discovered.append(target.symbol)
 
     source.last_polled_at = now
     db.flush()

@@ -449,11 +449,19 @@ class UserJobPref(Base):
 
 
 class Instrument(Base):
-    """Something that can be held. Created by recording a holding, never separately.
+    """Something the portfolio has an opinion about — held, or watched and waiting.
 
-    There is deliberately no "add to watchlist" action: a tracked set maintained apart from
-    holdings is a tracked set that will disagree with them, and the disagreement surfaces as
-    a filing nobody was watching.
+    ⚠ **`is_tracked` is a spending decision, not a label.** A tracked instrument is priced
+    every day, has its filings pulled and is scored; an untracked one costs nothing. That is
+    why a company merely *named* by a source is a `Candidate` against the exchange's listed
+    list rather than an instrument — pricing every name anyone ever mentioned would spend the
+    API allowance and the disk budget on companies nobody has decided to care about.
+
+    Promotion is the moment the meter starts, and it is deliberate: from the research queue,
+    or by asking for it directly. An earlier version of this docstring claimed there was
+    "deliberately no add-to-watchlist action", which was wrong on its own terms — the seed
+    script has always maintained a watchlist by hand, and without one the system can only
+    ever say hold, trim or sell.
     """
 
     __tablename__ = "instruments"
@@ -1060,8 +1068,85 @@ class Mention(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     source_item_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("source_items.id"))
-    instrument_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("instruments.id"))
+    #: ⚠ Exactly ONE of these two, insisted on by a database CHECK (024). A mention is about a
+    #: company; sometimes that company is one the portfolio follows and sometimes it is merely
+    #: listed on the exchange. 023 wrote `instrument_id NOT NULL`, which quietly assumed every
+    #: company anyone names is one you already own — the same assumption that made discovery
+    #: impossible in the first place.
+    instrument_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("instruments.id"))
+    listed_company_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("listed_companies.id")
+    )
     stance: Mapped[str] = mapped_column(sa.Text)
     claim_excerpt: Mapped[str | None] = mapped_column(sa.Text)
     became_proposal_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("proposals.id"))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class ListedCompany(Base):
+    """One company on the exchange's own equity list (024).
+
+    ⚠ **The vocabulary the reader recognises names with**, and the reason discovery does not
+    need a model to produce names. A model that can generate company names can generate ones
+    that do not exist, and a fictional company written into `mentions` is indistinguishable
+    from a real one once there — in the very table the source-attribution measure counts. With
+    the exchange's list as the vocabulary, recognising a company never heard of is exactly as
+    deterministic as recognising one already held.
+
+    ⚠ This is a fact about the exchange, not about the portfolio. Being listed says nothing
+    about being worth owning, and nothing here scores or filters.
+
+    A delisting is recorded, never deleted: the company was still named by sources while it
+    was listed, and removing it would make those mentions unresolvable.
+    """
+
+    __tablename__ = "listed_companies"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    symbol: Mapped[str] = mapped_column(sa.Text)
+    exchange: Mapped[str] = mapped_column(sa.Text, default="NSE")
+    name: Mapped[str] = mapped_column(sa.Text)
+    series: Mapped[str | None] = mapped_column(sa.Text)
+    isin: Mapped[str | None] = mapped_column(sa.Text)
+    listed_on: Mapped[dt.date | None] = mapped_column(sa.Date)
+    delisted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    refreshed_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+
+
+class Candidate(Base):
+    """A company something named, not held and not watched, waiting to be looked at (024).
+
+    The research queue. Without it the system can only ever say hold, trim or sell — a
+    research analyst that can only comment on what you already own is a bookkeeper with
+    opinions.
+
+    ⚠ **A candidate is deliberately not priced.** Pricing every name ever mentioned would
+    spend the API allowance and the disk budget on companies nobody has decided to care
+    about. It has an identity so it can be referenced and counted; promoting it is what starts
+    the meter, and `instrument_id` stays NULL until then.
+
+    ⚠ `best_trust_tier` is the best tier that has **ever** named it, not the latest and not
+    the worst. A company named once by a filing and ten times by commentary is a filing-grade
+    lead, and tier is what the sourcing gate reads.
+
+    ⚠ `dismissed_reason` is required by a database CHECK, not by politeness. It is the only
+    record of what kinds of idea keep being refused, and a queue that could be cleared
+    silently would discard that every time it was tidied.
+    """
+
+    __tablename__ = "candidates"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    listed_company_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("listed_companies.id"))
+    instrument_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("instruments.id"))
+    status: Mapped[str] = mapped_column(sa.Text, default="QUEUED")
+    first_mention_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("mentions.id"))
+    first_seen_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    last_seen_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
+    mention_count: Mapped[int] = mapped_column(sa.Integer, default=1)
+    best_trust_tier: Mapped[int] = mapped_column(sa.Integer, default=3)
+    #: Proposed by the system, approved by a person — exactly like an `AbMapping`.
+    proposed_bottleneck: Mapped[str | None] = mapped_column(sa.Text)
+    reviewed_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    dismissed_reason: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

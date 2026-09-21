@@ -37,6 +37,7 @@ from app.api.schemas import (
     CrossingsIn,
     CurveOut,
     DecideIn,
+    DismissIn,
     DraftIn,
     DraftOut,
     FiredTriggerOut,
@@ -49,11 +50,14 @@ from app.api.schemas import (
     MappingOut,
     MeasureOut,
     PriceRefreshOut,
+    PromoteIn,
     ProposalOut,
     ProposalsOut,
     QualityOut,
+    QueueLineOut,
     ReadingOut,
     RemapIn,
+    ResearchQueueOut,
     ReverseIn,
     ScheduleFaOut,
     SourceOut,
@@ -65,11 +69,13 @@ from app.api.schemas import (
 from app.db.models import (
     AbMapping,
     AgentRun,
+    Candidate,
     Claim,
     CorporateAction,
     Decision,
     Instrument,
     InvalidationTrigger,
+    ListedCompany,
     Proposal,
     Source,
     Transaction,
@@ -905,3 +911,85 @@ def set_source_active(
     reading.set_active(db, source, active=body.is_active)
     db.commit()
     return SourceOut.model_validate(source)
+
+
+# --- the research queue ----------------------------------------------------------------------
+#
+# ⚠ Without this the system can only ever say hold, trim or sell. A research analyst that can
+# only comment on what you already own is a bookkeeper with opinions.
+
+
+@router.get("/research")
+def get_research_queue(
+    include_closed: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResearchQueueOut:
+    """Companies something named that you neither hold nor watch."""
+    statuses = (
+        ("QUEUED", "ANALYSING", "PROMOTED", "DISMISSED")
+        if include_closed
+        else ("QUEUED", "ANALYSING")
+    )
+    size, refreshed = db.execute(
+        sa.select(sa.func.count(), sa.func.max(ListedCompany.refreshed_at)).where(
+            ListedCompany.delisted_at.is_(None)
+        )
+    ).one()
+    return ResearchQueueOut(
+        lines=[QueueLineOut.model_validate(line) for line in reading.queue(db, statuses=statuses)],
+        universe_size=size,
+        universe_refreshed_at=refreshed,
+    )
+
+
+@router.post("/research/{candidate_id}/promote")
+def promote_candidate(
+    candidate_id: uuid.UUID,
+    body: PromoteIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> QueueLineOut:
+    """Start following a candidate, so it is priced, filed and scored.
+
+    ⚠ An explicit act, because it is the moment the candidate starts costing something. Until
+    now it has been a name in a list.
+    """
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise NotFound("candidate")
+    reading.promote(db, candidate, sector=body.sector)
+    db.commit()
+    line = next(
+        (row for row in reading.queue(db, statuses=("PROMOTED",)) if row.id == candidate_id),
+        None,
+    )
+    if line is None:
+        raise NotFound("candidate")
+    return QueueLineOut.model_validate(line)
+
+
+@router.post("/research/{candidate_id}/dismiss")
+def dismiss_candidate(
+    candidate_id: uuid.UUID,
+    body: DismissIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> QueueLineOut:
+    """Drop a candidate, with a reason.
+
+    ⚠ The reason is data, not politeness — it is the only record of what kinds of idea keep
+    being refused, and the database refuses a dismissal without one.
+    """
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise NotFound("candidate")
+    reading.dismiss(db, candidate, body.reason)
+    db.commit()
+    line = next(
+        (row for row in reading.queue(db, statuses=("DISMISSED",)) if row.id == candidate_id),
+        None,
+    )
+    if line is None:
+        raise NotFound("candidate")
+    return QueueLineOut.model_validate(line)

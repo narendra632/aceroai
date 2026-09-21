@@ -60,6 +60,7 @@ from app.core.security import hash_password
 from app.db.models import (
     AbMapping,
     AgentRun,
+    Candidate,
     ChatSession,
     Claim,
     CorporateAction,
@@ -74,6 +75,7 @@ from app.db.models import (
     InvalidationTrigger,
     JobRun,
     JournalEntry,
+    ListedCompany,
     Mention,
     Message,
     Notification,
@@ -304,6 +306,11 @@ def _purge(db):
     # so teardown lifts it exactly as it does for transactions — the guarantee that matters is
     # that APPLICATION code cannot rewrite the record, not that a test cannot clean up.
     # Figures reference documents, so they go first.
+    # ⚠ The research queue goes FIRST. A candidate points at the mention that opened it, so
+    # deleting mentions before candidates trips that foreign key and aborts the whole purge —
+    # which is exactly how this list stays complete rather than quietly leaking rows.
+    db.execute(delete(Candidate))
+
     if db.execute(select(SourceItem.id).limit(1)).first() is not None:
         for table in ("fundamentals", "source_items"):
             db.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {table}_append_only"))
@@ -319,6 +326,9 @@ def _purge(db):
             db.execute(text("ALTER TABLE mentions ENABLE TRIGGER mentions_no_delete"))
             for table in ("fundamentals", "source_items"):
                 db.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {table}_append_only"))
+
+    # The vocabulary, after the mentions that resolve against it.
+    db.execute(delete(ListedCompany))
 
     # The register itself. ⚠ After the documents that cite it, or the foreign key refuses —
     # which is the same ordering rule the rest of this teardown follows, and the reason a

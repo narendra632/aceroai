@@ -8,6 +8,7 @@ import PositionSheet from "@/components/PositionSheet";
 import BooksPanel from "@/components/BooksPanel";
 import ProposalsPanel from "@/components/ProposalsPanel";
 import ReadingPanel from "@/components/ReadingPanel";
+import ResearchPanel from "@/components/ResearchPanel";
 import TransactionEntry from "@/components/TransactionEntry";
 import { InfoTip } from "@/components/InfoTip";
 import { Button } from "@/components/ui/button";
@@ -869,6 +870,11 @@ export default function InvestmentsView() {
           behind it. Below the holdings, because a suggestion is only readable once you can
           see what you already own. */}
           <ProposalsPanel />
+
+          {/* ⚠ Above the framework, and open by default. New ideas are the most actionable
+          thing on this page after a live decision — and the framework below is the reference
+          material that a candidate gets judged against, so it reads in that order. */}
+          <ResearchPanel />
 
           {/* Below the holdings: this is where a company stops being a line in a ledger
           and becomes a position in a thesis. */}

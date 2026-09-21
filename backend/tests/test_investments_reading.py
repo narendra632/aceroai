@@ -110,39 +110,37 @@ def _item(external_id, title, body="", when=None):
 
 def test_a_company_is_found_by_its_full_filed_name(db, tracked):
     """The exchange writes the legal name, so that is the form that must match."""
-    targets = reading.catalogue(db)
+    vocab = reading.vocabulary(db)
     text = "Apar Industries Limited has informed the Exchange about bagging of orders."
 
-    found = reading.named_in(text, targets)
+    found = reading.named_in(text, vocab)
     assert [t.symbol for t, _ in found] == ["APARINDS"]
 
 
 def test_stripping_the_trailing_form_does_not_strip_the_name(db, tracked):
     """⚠ The bug this guards. Stripping "Industries" everywhere left `apar` — four
     characters, under the floor — so Apar could never be matched by name at all."""
-    targets = reading.catalogue(db)
-    apar = next(t for t in targets if t.symbol == "APARINDS")
-
-    assert apar.find("A report on Apar Industries today") is not None
-    assert reading._name_key("Apar Industries Limited") == ["apar", "industries"]
+    vocab = reading.vocabulary(db)
+    assert reading.named_in("A report on Apar Industries today", vocab)
+    assert reading._name_key("Apar Industries Limited") == ("apar", "industries")
 
 
 def test_a_ticker_is_matched_only_when_it_is_shouted(db, tracked):
     """⚠ Case-sensitive on purpose. Lower-cased, half the tickers on the exchange are
     ordinary English words."""
-    targets = reading.catalogue(db)
+    vocab = reading.vocabulary(db)
 
-    assert reading.named_in("I am buying APARINDS today", targets)
-    assert not reading.named_in("the aparinds of the matter", targets)
+    assert reading.named_in("I am buying APARINDS today", vocab)
+    assert not reading.named_in("the aparinds of the matter", vocab)
 
 
 def test_an_ordinary_word_that_happens_to_be_part_of_a_name_is_not_a_mention(db, tracked):
     """⚠ A false mention is worse than a missed one: it enters the denominator the
     attribution measure divides by, and nothing downstream can tell it from a real one."""
-    targets = reading.catalogue(db)
+    vocab = reading.vocabulary(db)
 
-    assert reading.named_in("Rolex Rings Limited declared results", targets)
-    assert not reading.named_in("I wear a Rolex watch", targets)
+    assert reading.named_in("Rolex Rings Limited declared results", vocab)
+    assert not reading.named_in("I wear a Rolex watch", vocab)
 
 
 def test_only_indian_equities_are_matched(db, tracked):
@@ -159,7 +157,7 @@ def test_only_indian_equities_are_matched(db, tracked):
     db.flush()
     db.commit()
 
-    assert coin.symbol not in {t.symbol for t in reading.catalogue(db)}
+    assert coin.symbol not in reading.vocabulary(db).by_symbol
 
 
 # --- every one of them -------------------------------------------------------------------

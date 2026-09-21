@@ -113,3 +113,22 @@ def sources_poll(db: Session, user: User) -> JobResult:
             tag=f"filings-{dt.date.today().isoformat()}",
         ),
     )
+
+
+@job(
+    "universe_sync",
+    # Weekly, Sunday morning. The exchange's list changes by a handful of names a month —
+    # listings, delistings, renames — and a stale entry costs a missed match, not a wrong one.
+    "30 6 * * sun",
+    description="Refreshes the list of listed companies the reader recognises names with.",
+    catch_up=dt.timedelta(days=2),
+)
+def universe_sync(db: Session, user: User) -> JobResult:
+    """Keep the vocabulary current.
+
+    ⚠ Silent by design. Nobody needs telling that the exchange listed four companies this
+    week, and a job that notified on it would be teaching its reader to dismiss notifications.
+    """
+    report = reading.sync_universe(db)
+    db.commit()
+    return JobResult(silent=True, detail=report)

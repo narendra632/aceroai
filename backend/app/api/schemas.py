@@ -1324,3 +1324,56 @@ class ActiveIn(BaseModel):
     """Switch a source on or off. ⚠ Never a delete: see `SourceOut`."""
 
     is_active: bool
+
+
+class QueueLineOut(BaseModel):
+    """One company waiting to be looked at.
+
+    ⚠ `mention_count` and `best_trust_tier` are what the queue is ordered by, not the date. A
+    company three sources keep returning to is a different proposition from one named once in
+    passing, and newest-first would bury it under today's noise.
+    """
+
+    id: uuid.UUID
+    symbol: str
+    name: str
+    status: str
+    mention_count: int
+    #: 1 = a filing or regulator · 2 = press · 3 = commentary. The BEST tier that has ever
+    #: named it, because that is what the sourcing gate will read.
+    best_trust_tier: int
+    first_seen_at: dt.datetime
+    last_seen_at: dt.datetime
+    #: ⚠ How long it has sat here. A queue nobody clears is a queue that stopped being read,
+    #: and the weekly review asks this question by name.
+    age_days: int
+    named_by: str | None
+    stance: str | None
+    excerpt: str | None
+    proposed_bottleneck: str | None
+    dismissed_reason: str | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ResearchQueueOut(BaseModel):
+    """The research queue, and how big the vocabulary behind it is."""
+
+    lines: list[QueueLineOut]
+    #: How many companies the reader can recognise. Shown because a vocabulary that failed to
+    #: load would make discovery silently stop, and a count of zero says so immediately.
+    universe_size: int
+    universe_refreshed_at: dt.datetime | None
+
+
+class DismissIn(BaseModel):
+    """⚠ A reason is required by the database, not merely requested. It is the only record of
+    what kinds of idea keep being refused."""
+
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class PromoteIn(BaseModel):
+    """Start following a candidate. ⚠ This is the moment it starts costing prices and calls."""
+
+    sector: str | None = None

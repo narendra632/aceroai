@@ -1823,3 +1823,66 @@ export async function setSourceActive(id: string, isActive: boolean): Promise<So
   if (!r.ok) return investmentError(r, "that source could not be changed");
   return r.json();
 }
+
+// --- the research queue -----------------------------------------------------------------
+
+/** One company something named that you neither hold nor watch. */
+export type QueueLine = {
+  id: string;
+  symbol: string;
+  name: string;
+  status: string;
+  /** ⚠ What the queue is ordered by, with the tier — not the date. A company several sources
+   *  keep returning to is a different proposition from one named once in passing. */
+  mention_count: number;
+  best_trust_tier: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  /** How long it has sat here. The weekly review asks this by name. */
+  age_days: number;
+  named_by: string | null;
+  stance: string | null;
+  excerpt: string | null;
+  proposed_bottleneck: string | null;
+  dismissed_reason: string | null;
+};
+
+export type ResearchQueue = {
+  lines: QueueLine[];
+  /** ⚠ How many companies the reader can recognise. Shown because a vocabulary that failed
+   *  to load would make discovery stop silently, and a zero says so immediately. */
+  universe_size: number;
+  universe_refreshed_at: string | null;
+};
+
+/** Companies worth a look, that you do not already follow. */
+export async function getResearchQueue(includeClosed = false): Promise<ResearchQueue> {
+  const r = await req(`/api/investments/research?include_closed=${includeClosed}`);
+  if (!r.ok) throw new Error("could not load the research queue");
+  return r.json();
+}
+
+/** Start following a candidate — it becomes priced, filed and scored.
+ *
+ *  ⚠ This is the moment it starts costing something. Until now it has been a name in a list. */
+export async function promoteCandidate(id: string, sector?: string): Promise<QueueLine> {
+  const r = await req(`/api/investments/research/${id}/promote`, {
+    method: "POST",
+    body: JSON.stringify({ sector: sector ?? null }),
+  });
+  if (!r.ok) return investmentError(r, "that company could not be promoted");
+  return r.json();
+}
+
+/** Drop a candidate, with a reason.
+ *
+ *  ⚠ The reason is data, not politeness. It is the only record of what kinds of idea keep
+ *  being refused, and the database refuses a dismissal without one. */
+export async function dismissCandidate(id: string, reason: string): Promise<QueueLine> {
+  const r = await req(`/api/investments/research/${id}/dismiss`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+  if (!r.ok) return investmentError(r, "that company could not be dismissed");
+  return r.json();
+}
