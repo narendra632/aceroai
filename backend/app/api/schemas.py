@@ -1352,6 +1352,16 @@ class QueueLineOut(BaseModel):
     excerpt: str | None
     proposed_bottleneck: str | None
     dismissed_reason: str | None
+    #: ⚠ These two travel together and must be SHOWN together. "4" means nothing on its own:
+    #: four out of four is excellent and four out of ten is mediocre, and the difference is
+    #: entirely whether the company's filings had been read.
+    quality_earned: Decimal | None = None
+    quality_available: Decimal | None = None
+    price: Decimal | None = None
+    bottleneck_name: str | None = None
+    #: Why the model placed it there, in its own words — so a wrong placement can be seen to
+    #: be wrong rather than merely doubted.
+    bottleneck_why: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1845,6 +1845,16 @@ export type QueueLine = {
   excerpt: string | null;
   proposed_bottleneck: string | null;
   dismissed_reason: string | null;
+  /** ⚠ These two travel together and must be SHOWN together. "4" means nothing on its own:
+   *  four out of four is excellent and four out of ten is mediocre, and the difference is
+   *  entirely whether the company's filings had been read. */
+  quality_earned: string | null;
+  quality_available: string | null;
+  price: string | null;
+  bottleneck_name: string | null;
+  /** Why the model placed it there, in its own words — so a wrong placement can be seen to
+   *  be wrong rather than merely doubted. */
+  bottleneck_why: string | null;
 };
 
 export type ResearchQueue = {
@@ -1921,5 +1931,16 @@ export async function dropIntoInbox(input: {
     body: JSON.stringify({ url: input.url ?? null, text: input.text ?? null }),
   });
   if (!r.ok) return investmentError(r, "that could not be read");
+  return r.json();
+}
+
+/** Read this company's filings and place it in the framework.
+ *
+ *  ⚠ The placement is a PROPOSAL — it scores zero until you agree with it. And this does not
+ *  start following the company: that is promotion, which puts a name into the daily price
+ *  loop and is what costs something every day. */
+export async function analyseCandidate(id: string): Promise<QueueLine> {
+  const r = await req(`/api/investments/research/${id}/analyse`, { method: "POST" });
+  if (!r.ok) return investmentError(r, "that company could not be analysed");
   return r.json();
 }

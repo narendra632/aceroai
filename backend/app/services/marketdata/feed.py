@@ -343,6 +343,61 @@ def fill_closes(
     return report
 
 
+def close_for(
+    db: Session,
+    instrument: Instrument,
+    *,
+    day: dt.date | None = None,
+    c: httpx.Client | None = None,
+    look_back: int = 7,
+) -> Decimal | None:
+    """One close for one company, without pricing the whole book.
+
+    ⚠ **For a company being looked at, not one being followed.** `fill_closes` walks every
+    span the portfolio has an opinion about and fills every missing day — right for a holding,
+    and far too much for a name somebody mentioned yesterday. A candidate needs a single price
+    so its valuation can be compared against a defensible multiple; it does not need a curve,
+    and a year of closes for every name anyone mentions is exactly the spend this design
+    avoids.
+
+    ⚠ Still written through this module, because `feed` is the only writer of prices. A second
+    place that wrote `price_observations` is a second place that could drift about what counts
+    as a trusted price.
+
+    Walks back over `look_back` days: the bhavcopy does not exist for a weekend or a holiday,
+    and "not published" is not "no price".
+    """
+    end = day or dt.date.today()
+    now = dt.datetime.now(dt.UTC)
+
+    for offset in range(look_back):
+        on = end - dt.timedelta(days=offset)
+        if on.weekday() >= 5:
+            continue
+        try:
+            rows = nse.bhavcopy(on, c)
+        except nse.NotPublished:
+            continue
+        except ProviderError:
+            return None
+
+        row = _bhav_row(rows, instrument)
+        if row is None:
+            # ⚠ Not retried on an earlier day. The file was published and this company was not
+            # in it, which is a fact about the company — suspended, delisted, or a symbol that
+            # does not trade — and walking back would eventually find a stale price for a name
+            # that has stopped trading and present it as today's.
+            return None
+
+        _learn_from_bhav(instrument, row)
+        _write_prices(
+            db, [_price(instrument, nse_close_at(on), nse.PROVIDER, "CLOSE", row.close)], now
+        )
+        return row.close
+
+    return None
+
+
 def _fill_nse(db: Session, all_spans: list[Span], now, c, report: Report) -> None:
     mine = [s for s in all_spans if s.instrument.exchange == "NSE"]
     needed: dict[dt.date, list[Span]] = defaultdict(list)

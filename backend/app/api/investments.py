@@ -87,6 +87,7 @@ from app.db.session import get_db
 from app.services.errors import NotFound
 from app.services.investments import (
     books,
+    candidates,
     corpactions,
     entry,
     frameworks,
@@ -1021,3 +1022,35 @@ def drop_into_inbox(
         already_followed=result.already_followed,
         note=result.note,
     )
+
+
+@router.post("/research/{candidate_id}/analyse")
+def analyse_candidate(
+    candidate_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> QueueLineOut:
+    """Read this company's filings and place it in the framework.
+
+    ⚠ The placement is a **proposal**. It scores zero until you agree with it — the same rule
+    that has governed every mapping since the framework was installed, and it has no exception
+    for a claim that arrived with a confident tone.
+
+    ⚠ This reads filings and fetches one price. It does **not** start following the company:
+    that is promotion, and it is what puts a name into the daily price loop.
+    """
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise NotFound("candidate")
+
+    version = frameworks.current(db)
+    candidates.analyse(db, candidate, version.spec, version.id)
+    db.commit()
+
+    line = next(
+        (row for row in reading.queue(db, statuses=("ANALYSING",)) if row.id == candidate_id),
+        None,
+    )
+    if line is None:
+        raise NotFound("candidate")
+    return QueueLineOut.model_validate(line)

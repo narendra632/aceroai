@@ -20,7 +20,8 @@ from sqlalchemy.orm import Session
 from app.db.models import User
 from app.jobs.registry import JobResult, job
 from app.jobs.registry import Notification as NotificationSpec
-from app.services.investments import reading
+from app.services.errors import NotFound
+from app.services.investments import candidates, frameworks, reading
 
 #: Reg-30 subjects worth being told about the same evening. ⚠ Deliberately short. Everything
 #: else is still recorded and still appears in the reading list; it simply does not buzz.
@@ -132,3 +133,49 @@ def universe_sync(db: Session, user: User) -> JobResult:
     report = reading.sync_universe(db)
     db.commit()
     return JobResult(silent=True, detail=report)
+
+
+@job(
+    "candidate_analysis",
+    # 20:30, half an hour before the evening synthesis — so anything the day's reading turned
+    # up has already been placed, read and scored by the time proposals are formed.
+    "30 20 * * *",
+    description="Reads the filings of companies your sources named, and places them.",
+    uses_ai=True,
+    catch_up=dt.timedelta(hours=2),
+)
+def candidate_analysis(db: Session, user: User) -> JobResult:
+    """Take the next few queued candidates through placement, filings and scoring.
+
+    ⚠ A few, not all. Each costs a model call and several filing fetches, and a queue that
+    suddenly gained forty names would otherwise spend an evening's whole budget on companies
+    nobody has looked at yet.
+
+    ⚠ Silent. A company having been read is not news — what it turned out to be worth is, and
+    that reaches you through the research queue and the evening's proposals rather than as an
+    interruption of its own.
+    """
+    try:
+        version = frameworks.current(db)
+    except NotFound:
+        return JobResult(silent=True, detail={"reason": "no approved framework yet"})
+
+    results = candidates.analyse_pending(db, version.spec, version.id)
+    db.commit()
+
+    if not results:
+        return JobResult(silent=True, detail={"analysed": 0})
+
+    return JobResult(
+        silent=True,
+        detail={
+            "analysed": len(results),
+            "placed": {r.symbol: r.bottleneck_id for r in results if r.bottleneck_id},
+            "unplaced": [r.symbol for r in results if not r.bottleneck_id],
+            "scores": {
+                r.symbol: f"{r.quality_earned}/{r.quality_available}"
+                for r in results
+                if r.is_scoreable
+            },
+        },
+    )

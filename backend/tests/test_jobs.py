@@ -465,13 +465,21 @@ def test_every_registered_job_is_well_formed():
         assert entry.catch_up is None or entry.catch_up > dt.timedelta(0)
 
 
-def test_only_the_digests_call_a_model():
-    """Most work should be SQL. A model is only involved where prose is genuinely needed,
-    and this asserts nobody quietly added a third."""
+def test_almost_nothing_calls_a_model():
+    """Most work should be SQL. A model is involved only where a judgement is genuinely
+    needed, and this asserts nobody quietly added another.
+
+    ⚠ `candidate_analysis` is the third, and it earns its place on a narrow rule: which of
+    India's structural bottlenecks a business solves is a judgement about what the business
+    *is*, not a number. Every figure that follows from it — how many imperatives that
+    bottleneck crosses, what multiple is defensible, the quality score itself — is computed
+    from the framework and from filed accounts. And the model chooses from a closed list of 31
+    ids, so it can place a company but cannot invent a place for one.
+    """
     from app.jobs import all_jobs
 
     using_ai = sorted(j.name for j in all_jobs() if j.uses_ai)
-    assert using_ai == ["day_end_summary", "morning_brief"]
+    assert using_ai == ["candidate_analysis", "day_end_summary", "morning_brief"]
 
 
 # --- a first boot is not a backlog of failures --------------------------------------

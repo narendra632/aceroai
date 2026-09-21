@@ -43,14 +43,38 @@ function age(days: number) {
   return `${Math.round(days / 30)} months ago`;
 }
 
+/* ⚠ Earned AND available, always both. "4" says nothing on its own — four out of four is
+   excellent and four out of ten is mediocre, and the difference is entirely whether the
+   company's filings had been read. A bare score here would quietly make a company nobody has
+   read look worse than one that was read and found wanting. */
+function Quality({ line }: { line: QueueLine }) {
+  if (line.quality_available == null) return null;
+  const available = Number(line.quality_available);
+  if (available === 0) {
+    return (
+      <span className="text-muted-foreground">
+        not enough filed data to score it yet
+      </span>
+    );
+  }
+  return (
+    <span>
+      quality <strong>{line.quality_earned}</strong>
+      <span className="text-muted-foreground"> of {line.quality_available} scorable</span>
+    </span>
+  );
+}
+
 function Row({
   line,
   busy,
+  onAnalyse,
   onPromote,
   onDismiss,
 }: {
   line: QueueLine;
   busy: boolean;
+  onAnalyse: (line: QueueLine) => void;
   onPromote: (line: QueueLine) => void;
   onDismiss: (line: QueueLine) => void;
 }) {
@@ -74,6 +98,34 @@ function Row({
         </p>
       )}
 
+      {/* What reading its filings turned up. ⚠ Absent until something has actually been read —
+          a score shown before then would be a score of nothing. */}
+      {line.proposed_bottleneck && (
+        <div className="mt-2 rounded-lg bg-muted/30 p-2 text-xs">
+          <p>
+            Solves <strong>{line.proposed_bottleneck}</strong>
+            {line.bottleneck_name && ` — ${line.bottleneck_name}`}
+            {/* ⚠ Said out loud, because an unapproved mapping scores ZERO and a reader who
+                did not know that would read a low score as a verdict on the company. */}
+            <span className="text-muted-foreground">
+              {" "}· proposed, and scores nothing until you agree
+            </span>
+          </p>
+          {line.bottleneck_why && (
+            <p className="mt-1 text-muted-foreground">{line.bottleneck_why}</p>
+          )}
+          <p className="mt-1">
+            <Quality line={line} />
+            {line.price && (
+              <span className="text-muted-foreground">
+                {line.quality_available != null && " · "}
+                last ₹{Number(line.price).toLocaleString("en-IN")}
+              </span>
+            )}
+          </p>
+        </div>
+      )}
+
       {line.status === "DISMISSED" ? (
         <p className="mt-2 text-xs text-muted-foreground">
           Not taken up — {line.dismissed_reason}
@@ -82,13 +134,26 @@ function Row({
         <p className="mt-2 text-xs text-muted-foreground">Now followed.</p>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
+          {/* ⚠ Two separate acts, and the labels say which is which. Reading its filings costs
+              a handful of requests once; following it costs them every day for as long as you
+              keep it. */}
+          {line.status === "QUEUED" && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onAnalyse(line)}
+              className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+            >
+              Read its filings
+            </button>
+          )}
           <button
             type="button"
             disabled={busy}
             onClick={() => onPromote(line)}
             className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
           >
-            Look at it
+            Follow it
           </button>
           <button
             type="button"
@@ -153,8 +218,9 @@ export default function ResearchPanel({ reloadKey = 0 }: { reloadKey?: number })
           <InfoTip label="Where these come from">
             Companies a source named that you neither hold nor watch. They are
             leads, not recommendations — a suggestion resting on commentary
-            alone is refused by the rules whatever the commentary said. Nothing
-            here is priced or scored until you ask for it.
+            alone is refused by the rules whatever the commentary said. Reading
+            a company's filings places it in the framework and scores it;
+            following it is separate, and is what costs a price every day.
           </InfoTip>
           {data.lines.length > 0 && (
             <span className="rounded-full border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
@@ -186,6 +252,7 @@ export default function ResearchPanel({ reloadKey = 0 }: { reloadKey?: number })
                   key={line.id}
                   line={line}
                   busy={busy}
+                  onAnalyse={(l) => act(() => api.analyseCandidate(l.id))}
                   onPromote={(l) => act(() => api.promoteCandidate(l.id))}
                   onDismiss={(l) => {
                     setDismissing(l);

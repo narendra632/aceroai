@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.core import llm
 from app.db.models import (
+    AbMapping,
     Candidate,
     Instrument,
     ListedCompany,
@@ -53,7 +54,8 @@ from app.db.models import (
     SourceItem,
     Transaction,
 )
-from app.services.investments import history, watching
+from app.services.errors import NotFound
+from app.services.investments import frameworks, history, pricing, scoring, watching
 from app.services.investments import portfolio as pf
 from app.services.marketdata import feeds, http, universe, webpage
 from app.services.marketdata.http import ProviderError
@@ -671,6 +673,17 @@ class QueueLine:
     excerpt: str | None
     proposed_bottleneck: str | None
     dismissed_reason: str | None
+    #: Filled once the candidate has been analysed. ⚠ `quality_earned` and `quality_available`
+    #: travel together and must be SHOWN together: "4" means nothing on its own, because four
+    #: out of four is excellent and four out of ten is mediocre, and the difference is entirely
+    #: whether the filings had been read.
+    quality_earned: Decimal | None = None
+    quality_available: Decimal | None = None
+    price: Decimal | None = None
+    bottleneck_name: str | None = None
+    #: Why the model placed it where it did, in its own words — so a wrong placement can be
+    #: seen to be wrong rather than merely doubted.
+    bottleneck_why: str | None = None
 
 
 def queue(db: Session, *, statuses: tuple[str, ...] = ("QUEUED", "ANALYSING")) -> list[QueueLine]:
@@ -695,32 +708,97 @@ def queue(db: Session, *, statuses: tuple[str, ...] = ("QUEUED", "ANALYSING")) -
     ).all()
 
     today = dt.datetime.now(dt.UTC)
-    return [
-        QueueLine(
-            id=candidate.id,
-            symbol=company.symbol,
-            name=company.name,
-            status=candidate.status,
-            mention_count=candidate.mention_count,
-            best_trust_tier=candidate.best_trust_tier,
-            first_seen_at=candidate.first_seen_at,
-            last_seen_at=candidate.last_seen_at,
-            age_days=(today - candidate.first_seen_at).days,
-            named_by=source.name if source else (item.source if item else None),
-            stance=mention.stance if mention else None,
-            excerpt=mention.claim_excerpt if mention else None,
-            proposed_bottleneck=candidate.proposed_bottleneck,
-            dismissed_reason=candidate.dismissed_reason,
+    # ⚠ Scored only for candidates something has actually looked at. Running the quality score
+    # over every queued name would read filings nobody has asked about, which is the spend the
+    # whole candidate/instrument split exists to avoid.
+    analysed = {
+        row.id: row
+        for row in (
+            db.execute(
+                sa.select(Instrument).where(
+                    Instrument.id.in_(
+                        [c.instrument_id for c, *_ in rows if c.instrument_id is not None]
+                    )
+                )
+            ).scalars()
         )
-        for candidate, company, mention, item, source in rows
-    ]
+    }
+    # ⚠ The APPROVED framework, and a queue that cannot find one simply shows no scores
+    # rather than falling back to an unapproved proposal — which would let a suggested
+    # bottleneck take effect before anyone agreed to it.
+    spec = None
+    if analysed:
+        try:
+            spec = frameworks.current(db).spec
+        except NotFound:
+            spec = None
+
+    def _scored(candidate: Candidate) -> tuple:
+        instrument = analysed.get(candidate.instrument_id)
+        if instrument is None or spec is None:
+            return (None, None, None)
+        quality = scoring.quality_score(db, instrument, spec)
+        mark = pricing.latest(db, [instrument.id]).get(instrument.id)
+        return (quality.earned, quality.available, mark.price if mark else None)
+
+    out: list[QueueLine] = []
+    for candidate, company, mention, item, source in rows:
+        earned, available, price = _scored(candidate)
+        detail = (
+            frameworks.bottleneck(spec, candidate.proposed_bottleneck)
+            if spec and candidate.proposed_bottleneck
+            else None
+        )
+        out.append(
+            QueueLine(
+                id=candidate.id,
+                symbol=company.symbol,
+                name=company.name,
+                status=candidate.status,
+                mention_count=candidate.mention_count,
+                best_trust_tier=candidate.best_trust_tier,
+                first_seen_at=candidate.first_seen_at,
+                last_seen_at=candidate.last_seen_at,
+                age_days=(today - candidate.first_seen_at).days,
+                named_by=source.name if source else (item.source if item else None),
+                stance=mention.stance if mention else None,
+                excerpt=mention.claim_excerpt if mention else None,
+                proposed_bottleneck=candidate.proposed_bottleneck,
+                dismissed_reason=candidate.dismissed_reason,
+                quality_earned=earned,
+                quality_available=available,
+                price=price,
+                bottleneck_name=detail.get("name") if detail else None,
+                bottleneck_why=_mapping_rationale(db, candidate),
+            )
+        )
+    return out
 
 
-def promote(db: Session, candidate: Candidate, *, sector: str | None = None) -> Instrument:
-    """Start following a candidate: it becomes priced, filed and scored.
+def _mapping_rationale(db: Session, candidate: Candidate) -> str | None:
+    """Why the model placed this company where it did, in its own words."""
+    if candidate.instrument_id is None:
+        return None
+    return db.execute(
+        sa.select(AbMapping.rationale)
+        .where(
+            AbMapping.instrument_id == candidate.instrument_id,
+            AbMapping.superseded_by_id.is_(None),
+        )
+        .order_by(AbMapping.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
 
-    ⚠ **This is the moment the meter starts**, which is why it is an explicit act rather than
-    something the queue does on its own. Until now the candidate has cost nothing.
+
+def identity_for(
+    db: Session, candidate: Candidate, *, sector: str | None = None, tracked: bool = False
+) -> Instrument:
+    """The instrument record a candidate needs before anything can be read about it.
+
+    ⚠ **`tracked` is the spending decision, and it defaults to False.** A company being
+    analysed has its filings read once and a price fetched once; a *tracked* company joins the
+    daily price loop for as long as it is followed. Analysing therefore costs a handful of
+    requests, and following costs them every day — which is why they are separate acts.
     """
     company = db.get(ListedCompany, candidate.listed_company_id)
     existing = db.execute(
@@ -741,18 +819,29 @@ def promote(db: Session, candidate: Candidate, *, sector: str | None = None) -> 
             asset_class="EQUITY_IN",
             currency="INR",
             sector=sector,
-            is_tracked=True,
+            is_tracked=tracked,
         )
         db.add(existing)
         db.flush()
-    else:
+    elif tracked:
         existing.is_tracked = True
 
     candidate.instrument_id = existing.id
+    db.flush()
+    return existing
+
+
+def promote(db: Session, candidate: Candidate, *, sector: str | None = None) -> Instrument:
+    """Start following a candidate: it joins the daily price loop and is scored from then on.
+
+    ⚠ **This is the moment the meter starts**, which is why it is an explicit act rather than
+    something the queue does on its own.
+    """
+    instrument = identity_for(db, candidate, sector=sector, tracked=True)
     candidate.status = "PROMOTED"
     candidate.reviewed_at = dt.datetime.now(dt.UTC)
     db.flush()
-    return existing
+    return instrument
 
 
 def dismiss(db: Session, candidate: Candidate, reason: str) -> Candidate:
