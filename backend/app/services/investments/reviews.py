@@ -30,7 +30,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.db.models import Decision, InvalidationTrigger, Portfolio, Proposal, Review, User
-from app.services.investments import books, reading, watching
+from app.services.investments import benchmarks, books, reading, watching
 
 #: How close to its threshold a condition has to be before a review mentions it. ⚠ Reported
 #: because a condition at 97% of its threshold is the most useful thing a weekly review can
@@ -257,6 +257,36 @@ def sources_state(db: Session, *, today: dt.date | None = None) -> list[dict]:
     ]
 
 
+def benchmark_state(db: Session, user_id: uuid.UUID, start: dt.date, end: dt.date) -> dict:
+    """The book against what could have been bought instead, over this same window.
+
+    ⚠ The caveat travels with the figures rather than instead of them. Crypto and funds are in
+    the portfolio's own return and no index stands in for them, so when they are a large share
+    the two sides measure different things — and quietly excluding them would be picking the
+    flattering subset.
+    """
+    comparison = benchmarks.compare(db, user_id, start=start, end=end)
+    return {
+        "readable": comparison.readable,
+        "portfolio_pct": comparison.portfolio_pct,
+        "blended_pct": comparison.blended_pct,
+        "weights": comparison.weights,
+        "non_equity_share": comparison.non_equity_share,
+        "caveat": comparison.caveat,
+        "detail": comparison.detail,
+        "lines": [
+            {
+                "key": line.key,
+                "name": line.name,
+                "proxy_for": line.proxy_for,
+                "change_pct": line.change_pct,
+                "detail": line.detail,
+            }
+            for line in comparison.lines
+        ],
+    }
+
+
 # --- putting it together -----------------------------------------------------------------------
 
 
@@ -307,6 +337,10 @@ def assemble(
         "queue": queue_health(db),
         "budget": budget_state(db, user_id, start, end),
         "books": books_state(db, user_id),
+        # ⚠ Over the review's own window, not a rolling year. A weekly review comparing a
+        # twelve-month portfolio figure against a seven-day benchmark would be comparing two
+        # different spans and reading like one.
+        "benchmarks": benchmark_state(db, user_id, start, end),
         # ⚠ Every one of these withholds itself below its sample size, and says so in its own
         # words. "Not yet" is the honest state for most of the first year.
         "measures": [

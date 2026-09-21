@@ -60,6 +60,8 @@ from app.core.security import hash_password
 from app.db.models import (
     AbMapping,
     AgentRun,
+    Benchmark,
+    BenchmarkValue,
     Candidate,
     ChatSession,
     Claim,
@@ -342,6 +344,15 @@ def _purge(db):
     # which is the same ordering rule the rest of this teardown follows, and the reason a
     # missing delete here breaks the purge outright instead of leaking rows quietly.
     db.execute(delete(Source))
+
+    # Benchmarks: the values are append-only, so teardown lifts the guard the same way the
+    # rest of the ledger does. Values before definitions, or the foreign key refuses.
+    db.execute(text("ALTER TABLE benchmark_values DISABLE TRIGGER benchmark_values_append_only"))
+    try:
+        db.execute(delete(BenchmarkValue))
+    finally:
+        db.execute(text("ALTER TABLE benchmark_values ENABLE TRIGGER benchmark_values_append_only"))
+    db.execute(delete(Benchmark))
 
     db.execute(sa_update(AbMapping).values(superseded_by_id=None))
     db.execute(delete(AbMapping))

@@ -29,6 +29,8 @@ from app.api.schemas import (
     AssetTotalOut,
     AttentionOut,
     AttributionOut,
+    BenchmarkLineOut,
+    BenchmarksOut,
     BookLineOut,
     BooksOut,
     BottleneckOut,
@@ -88,6 +90,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.services.errors import NotFound
 from app.services.investments import (
+    benchmarks,
     books,
     candidates,
     corpactions,
@@ -1077,4 +1080,33 @@ def get_reviews(
             InvestmentReviewOut.model_validate(row)
             for row in reviews.recent(db, user.id, limit=limit)
         ]
+    )
+
+
+@router.get("/benchmarks")
+def get_benchmarks(
+    days: int = 365,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BenchmarksOut:
+    """The book against what you could have bought instead.
+
+    ⚠ The alternative is an index **fund**, not an index: an index cannot be bought, and a
+    fund's NAV carries the expense ratio and tracking error a real alternative would have
+    charged. That makes this slightly harder to beat than a raw total-return index, which is
+    the honest direction for the asymmetry to run.
+    """
+    start = dt.date.today() - dt.timedelta(days=days)
+    comparison = benchmarks.compare(db, user.id, start=start)
+    return BenchmarksOut(
+        start=comparison.start,
+        end=comparison.end,
+        portfolio_pct=comparison.portfolio_pct,
+        lines=[BenchmarkLineOut.model_validate(line) for line in comparison.lines],
+        weights=comparison.weights,
+        blended_pct=comparison.blended_pct,
+        readable=comparison.readable,
+        detail=comparison.detail,
+        non_equity_share=comparison.non_equity_share,
+        caveat=comparison.caveat,
     )

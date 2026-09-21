@@ -18,7 +18,7 @@ from app.db.models import Instrument, User
 from app.jobs.registry import JobResult, job
 from app.jobs.registry import Notification as NotificationSpec
 from app.services.errors import NotFound
-from app.services.investments import corpactions, fundamentals, overview
+from app.services.investments import benchmarks, corpactions, fundamentals, overview
 from app.services.marketdata import feed, nse
 from app.services.marketdata.http import ProviderError
 
@@ -176,3 +176,21 @@ def fundamentals_sync(db: Session, user: User) -> JobResult:
     report = fundamentals.sync(db)
     db.commit()
     return JobResult(silent=True, detail=report.detail())
+
+
+@job(
+    "benchmarks_sync",
+    # 08:00 daily. AMFI publishes NAVs after 23:00, so the morning after is the first moment
+    # yesterday's alternative is knowable.
+    "0 8 * * *",
+    description="Records what an index fund would have done, so there is something to beat.",
+    catch_up=dt.timedelta(hours=12),
+)
+def benchmarks_sync(db: Session, user: User) -> JobResult:
+    """Keep the alternatives current.
+
+    ⚠ Silent. Nobody needs telling that an index fund published a NAV. What the comparison
+    says is read on the page and in the reviews, where the portfolio's own figure is beside
+    it — a benchmark reported alone is a number with nothing to mean.
+    """
+    return JobResult(silent=True, detail=benchmarks.sync(db))

@@ -1182,3 +1182,45 @@ class Review(Base):
     #: One line, for the notification and the list — composed from the same facts.
     headline: Mapped[str] = mapped_column(sa.Text)
     created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class Benchmark(Base):
+    """What you could have bought instead (026).
+
+    ⚠ **An index FUND, not an index.** A total-return index is the right idea — the headline
+    price index understates the real alternative by roughly the dividend yield — but an index
+    cannot be bought. A fund's NAV is a total-return series by construction and is what was
+    actually available instead; it differs by the expense ratio and tracking error, both of
+    which are costs a real alternative would have charged. `proxy_for` says so in the
+    interface, because a benchmark that is a proxy has to announce it.
+    """
+
+    __tablename__ = "benchmarks"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    key: Mapped[str] = mapped_column(sa.Text)
+    name: Mapped[str] = mapped_column(sa.Text)
+    proxy_for: Mapped[str] = mapped_column(sa.Text)
+    source: Mapped[str] = mapped_column(sa.Text)
+    external_id: Mapped[str] = mapped_column(sa.Text)
+    #: IN or US — so a blended comparison can weight by the book's actual split.
+    region: Mapped[str] = mapped_column(sa.Text)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
+    last_synced_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)
+
+
+class BenchmarkValue(Base):
+    """One day of a benchmark. **APPEND-ONLY** (026).
+
+    ⚠ A benchmark whose past could be restated is a benchmark that can be moved under a result.
+    """
+
+    __tablename__ = "benchmark_values"
+
+    benchmark_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("benchmarks.id"), primary_key=True
+    )
+    on_day: Mapped[dt.date] = mapped_column(sa.Date, primary_key=True)
+    value: Mapped[Decimal] = mapped_column(sa.Numeric(20, 6))
+    created_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True), server_default=now)

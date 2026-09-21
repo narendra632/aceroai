@@ -2007,3 +2007,43 @@ export async function getInvestmentReviews(limit = 12): Promise<InvestmentReview
   if (!r.ok) throw new Error("could not load the reviews");
   return (await r.json()).reviews;
 }
+
+// --- what you could have bought instead --------------------------------------------------
+
+/** One alternative over one window.
+ *
+ *  ⚠ `proxy_for` is always shown. The alternative is an index FUND, not an index — an index
+ *  cannot be bought — and a benchmark that is a proxy has to announce it, or a comparison
+ *  against it reads as a comparison against the index itself. */
+export type BenchmarkLine = {
+  key: string;
+  name: string;
+  proxy_for: string;
+  region: string;
+  /** ⚠ null when the window is not covered on both sides. */
+  change_pct: string | null;
+  detail: string;
+};
+
+export type Benchmarks = {
+  start: string;
+  end: string;
+  portfolio_pct: string | null;
+  lines: BenchmarkLine[];
+  weights: Record<string, string>;
+  blended_pct: string | null;
+  readable: boolean;
+  detail: string;
+  non_equity_share: string;
+  /** ⚠ Present when the two sides measure materially different things — crypto and funds are
+   *  in the portfolio's own return and no index stands in for them. Shown beside the figures
+   *  rather than instead of them. */
+  caveat: string | null;
+};
+
+/** The book against what you could have bought instead, over the same window. */
+export async function getBenchmarks(days = 365): Promise<Benchmarks> {
+  const r = await req(`/api/investments/benchmarks?days=${days}`);
+  if (!r.ok) throw new Error("could not load the benchmarks");
+  return r.json();
+}

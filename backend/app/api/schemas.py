@@ -1446,3 +1446,39 @@ class InvestmentReviewOut(BaseModel):
 
 class InvestmentReviewsOut(BaseModel):
     reviews: list[InvestmentReviewOut]
+
+
+class BenchmarkLineOut(BaseModel):
+    """One alternative over one window."""
+
+    key: str
+    name: str
+    #: ⚠ Shown, always. A benchmark that is a proxy has to announce it, or a comparison against
+    #: it reads as a comparison against the index itself.
+    proxy_for: str
+    region: str
+    #: ⚠ None when the window is not covered on both sides. A return computed from a
+    #: carried-forward value at one end is a return against a date that never happened.
+    change_pct: Decimal | None
+    detail: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BenchmarksOut(BaseModel):
+    """The book against what you could have bought instead, over the same window."""
+
+    start: dt.date
+    end: dt.date
+    portfolio_pct: Decimal | None
+    lines: list[BenchmarkLineOut]
+    #: The book's India/US split, which is how the blend is weighted.
+    weights: dict[str, Decimal]
+    blended_pct: Decimal | None
+    readable: bool
+    detail: str
+    #: The share of the book no index stands in for — crypto and funds.
+    non_equity_share: Decimal
+    #: ⚠ Present when the two sides of the comparison are measuring materially different
+    #: things. Rendered beside the figures rather than instead of them.
+    caveat: str | None

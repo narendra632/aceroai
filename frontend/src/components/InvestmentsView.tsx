@@ -5,6 +5,7 @@ import CorporateActions from "@/components/CorporateActions";
 import ForeignHoldings from "@/components/ForeignHoldings";
 import FrameworkPanel from "@/components/FrameworkPanel";
 import PositionSheet from "@/components/PositionSheet";
+import BenchmarksPanel from "@/components/BenchmarksPanel";
 import BooksPanel from "@/components/BooksPanel";
 import ProposalsPanel from "@/components/ProposalsPanel";
 import ReadingPanel from "@/components/ReadingPanel";
@@ -898,6 +899,11 @@ export default function InvestmentsView() {
           {/* ⚠ Below the framework and collapsed by default. It is for reading in aggregate
           on a schedule, and putting it higher would invite exactly the casual dipping-in that
           trains worse judgement. */}
+          {/* ⚠ Immediately above the books, because the books answer "which of my ledgers did
+          best" and this answers "did any of them beat simply buying the index" — which is the
+          prior question, and the one it is easiest to avoid asking. */}
+          <BenchmarksPanel />
+
           <BooksPanel />
 
           {/* ⚠ Beside the books and collapsed for the same reason. Both are for reading in
