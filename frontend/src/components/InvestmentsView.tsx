@@ -8,6 +8,7 @@ import PositionSheet from "@/components/PositionSheet";
 import BooksPanel from "@/components/BooksPanel";
 import ProposalsPanel from "@/components/ProposalsPanel";
 import ReadingPanel from "@/components/ReadingPanel";
+import InboxDrop from "@/components/InboxDrop";
 import ResearchPanel from "@/components/ResearchPanel";
 import TransactionEntry from "@/components/TransactionEntry";
 import { InfoTip } from "@/components/InfoTip";
@@ -166,6 +167,9 @@ export default function InvestmentsView() {
   const [curve, setCurve] = useState<Curve | null>(null);
   const [transactions, setTransactions] = useState<InvestmentTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+  // Bumped when the inbox files something, so the research queue below refreshes without a
+  // page reload — dropping a link and not seeing it land reads as a failure.
+  const [researchNonce, setResearchNonce] = useState(0);
   const [failed, setFailed] = useState(false);
   const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("all");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
@@ -385,6 +389,11 @@ export default function InvestmentsView() {
     <div className="flex-1 overflow-hidden">
       <div className="h-full overflow-y-auto">
         <div className="mx-auto max-w-5xl space-y-8 p-4 pb-16">
+          {/* ⚠ At the very top, one line, always visible. Friction here kills the whole
+          input channel — an inbox that takes three taps to reach is one nobody uses, and the
+          ideas that would have gone into it go nowhere instead. */}
+          <InboxDrop onFiled={() => setResearchNonce((n) => n + 1)} />
+
           {/* --- what it is worth ------------------------------------------------------- */}
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {/* ⚠ `cost_basis_inr`, not `invested_inr`. The latter counts only priced,
@@ -874,7 +883,7 @@ export default function InvestmentsView() {
           {/* ⚠ Above the framework, and open by default. New ideas are the most actionable
           thing on this page after a live decision — and the framework below is the reference
           material that a candidate gets judged against, so it reads in that order. */}
-          <ResearchPanel />
+          <ResearchPanel reloadKey={researchNonce} />
 
           {/* Below the holdings: this is where a company stops being a line in a ledger
           and becomes a position in a thesis. */}

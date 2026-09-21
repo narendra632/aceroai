@@ -1886,3 +1886,40 @@ export async function dismissCandidate(id: string, reason: string): Promise<Queu
   if (!r.ok) return investmentError(r, "that company could not be dismissed");
   return r.json();
 }
+
+// --- the inbox --------------------------------------------------------------------------
+
+/** What came of something you dropped in.
+ *
+ *  ⚠ `stored: false` with a `note` is a real outcome, not an error. A page needing a browser,
+ *  a PDF, or a listing naming thirty companies each produce nothing — and an inbox that
+ *  swallowed them silently would train you to drop things into a void. */
+export type DropResult = {
+  stored: boolean;
+  title: string;
+  url: string | null;
+  /** 1 = a filing or regulator · 2 = press or your own note. */
+  trust_tier: number;
+  named: string[];
+  /** Companies this put into the research queue for the first time. */
+  discovered: string[];
+  /** Companies you already follow — filed against the holding rather than queued. */
+  already_followed: string[];
+  note: string | null;
+};
+
+/** Drop a link, a video or a note, filed against the companies it names.
+ *
+ *  ⚠ You become a measured source: what you drop is recorded the way a channel's uploads are,
+ *  which is what eventually answers whether your tips beat the feed you ignore. */
+export async function dropIntoInbox(input: {
+  url?: string;
+  text?: string;
+}): Promise<DropResult> {
+  const r = await req("/api/investments/inbox", {
+    method: "POST",
+    body: JSON.stringify({ url: input.url ?? null, text: input.text ?? null }),
+  });
+  if (!r.ok) return investmentError(r, "that could not be read");
+  return r.json();
+}

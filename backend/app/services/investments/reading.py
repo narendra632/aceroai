@@ -55,7 +55,7 @@ from app.db.models import (
 )
 from app.services.investments import history, watching
 from app.services.investments import portfolio as pf
-from app.services.marketdata import feeds, http, universe
+from app.services.marketdata import feeds, http, universe, webpage
 from app.services.marketdata.http import ProviderError
 
 log = logging.getLogger(__name__)
@@ -768,6 +768,176 @@ def dismiss(db: Session, candidate: Candidate, reason: str) -> Candidate:
     candidate.reviewed_at = dt.datetime.now(dt.UTC)
     db.flush()
     return candidate
+
+
+# --- the inbox ------------------------------------------------------------------------------
+#
+# ⚠ **You are a source, and you are measured like one.** A link from a friend, a video, a
+# note — all of it is recorded the same way a channel is, with the same mention rows behind
+# it. In six months that answers a question nothing else can: do the tips you act on beat the
+# exchange feed you ignore?
+
+
+#: Two registered sources, because the tier is a property of the source and a drop can be
+#: either. ⚠ A page from the exchange or a regulator is a filing; a page from anywhere else is
+#: a report of one. Splitting them keeps the sourcing gate meaningful and, incidentally,
+#: measures your official drops separately from your tips.
+INBOX_HANDLE = "inbox"
+INBOX_OFFICIAL_HANDLE = "inbox-official"
+
+#: ⚠ Above this many companies in one item, it is an index page rather than an article.
+#: Measured: a live Economic Times "stocks in news" listing named **32** on 21 Sep 2026. A
+#: drop naming thirty companies is not a lead about thirty companies, and queueing them would
+#: bury the handful that were actually argued for under a page of navigation.
+MAX_NAMES_PER_DROP = 12
+
+
+@dataclass
+class DropResult:
+    """What came of something you dropped in."""
+
+    stored: bool
+    title: str
+    url: str | None
+    named: list[str] = field(default_factory=list)
+    discovered: list[str] = field(default_factory=list)
+    already_followed: list[str] = field(default_factory=list)
+    #: ⚠ Why nothing happened, when nothing happened. A silent no-op is the one outcome an
+    #: inbox must never have — the user would go on dropping things into a void.
+    note: str | None = None
+    trust_tier: int = PRESS
+
+
+def inbox_source(db: Session, *, official: bool) -> Source:
+    """The register entry a drop is filed under. Approved on sight: you dropping it is the
+    approval, which is the whole difference between your inbox and a channel."""
+    return register(
+        db,
+        kind="USER_DROP",
+        name="You (from a filing)" if official else "You",
+        handle=INBOX_OFFICIAL_HANDLE if official else INBOX_HANDLE,
+        trust_tier=FILING if official else PRESS,
+        notes=(
+            "Pages you dropped in that came from an exchange or a regulator."
+            if official
+            else "Links, videos and notes you dropped in yourself."
+        ),
+        approved=True,
+    )
+
+
+def drop(
+    db: Session,
+    *,
+    url: str | None = None,
+    text: str | None = None,
+    c: httpx.Client | None = None,
+) -> DropResult:
+    """Read something you dropped in, and file it against the companies it names.
+
+    ⚠ Nothing is committed here; the caller owns the transaction.
+    """
+    url = (url or "").strip() or None
+    text = (text or "").strip() or None
+    if not url and not text:
+        return DropResult(stored=False, title="", url=None, note="there was nothing to read")
+
+    title = (text or "")[:120]
+    official = False
+
+    if url:
+        try:
+            page = (
+                webpage.youtube(url, c)
+                if webpage.video_id(url) is not None
+                else webpage.fetch(url, c)
+            )
+        except ProviderError as exc:
+            return DropResult(stored=False, title=url, url=url, note=exc.reason)
+        if page.is_thin and not text:
+            # ⚠ "Nothing was read" is not "nobody was named", and a page needing JavaScript
+            # produces exactly the same empty result as a page about nothing.
+            return DropResult(
+                stored=False,
+                title=page.title,
+                url=page.url,
+                note="that page gave almost no text — it may need a browser to render",
+            )
+        title = page.title
+        official = page.is_official
+        text = f"{page.text}\n{text}" if text else page.text
+
+    source = inbox_source(db, official=official)
+    vocab = vocabulary(db)
+    found = named_in(text, vocab)
+
+    if len(found) > MAX_NAMES_PER_DROP:
+        return DropResult(
+            stored=False,
+            title=title,
+            url=url,
+            trust_tier=source.trust_tier,
+            named=sorted({target.symbol for target, _ in found}),
+            note=(
+                f"that names {len(found)} companies, so it reads like a listing page rather "
+                f"than an argument about one — nothing was filed. Drop a specific article."
+            ),
+        )
+
+    external_id = url or hashlib.sha256(text.encode()).hexdigest()[:32]
+    if _already_seen(db, source, [external_id]):
+        return DropResult(
+            stored=False,
+            title=title,
+            url=url,
+            trust_tier=source.trust_tier,
+            note="that one is already filed",
+        )
+
+    stances = stances_for(text, [target.symbol for target, _ in found]) if found else {}
+
+    now = dt.datetime.now(dt.UTC)
+    item = SourceItem(
+        id=uuid.uuid4(),
+        kind="USER_DROP",
+        instrument_id=(
+            found[0][0].instrument_id if len(found) == 1 and found[0][0].is_known else None
+        ),
+        source_id=source.id,
+        source=source.name,
+        external_id=external_id,
+        url=url,
+        title=title[:500],
+        published_at=now,
+        fetched_at=now,
+        content_hash=hashlib.sha256(text.encode()).hexdigest(),
+        excerpt=text[:2000],
+        extraction={"feed": "inbox", "named": [t.symbol for t, _ in found]},
+    )
+    db.add(item)
+    db.flush()
+
+    result = DropResult(stored=True, title=title, url=url, trust_tier=source.trust_tier)
+    for target, excerpt in found:
+        mention = Mention(
+            id=uuid.uuid4(),
+            source_item_id=item.id,
+            instrument_id=target.instrument_id,
+            listed_company_id=target.listed_company_id,
+            stance=stances.get(target.symbol, "MENTION_ONLY"),
+            claim_excerpt=excerpt,
+        )
+        db.add(mention)
+        db.flush()
+        result.named.append(target.symbol)
+        if target.is_known:
+            result.already_followed.append(target.symbol)
+        elif note_candidate(db, target, mention, source, when=now):
+            result.discovered.append(target.symbol)
+
+    source.last_polled_at = now
+    db.flush()
+    return result
 
 
 # --- which direction was meant --------------------------------------------------------------

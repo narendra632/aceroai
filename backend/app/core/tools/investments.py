@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Portfolio
 from app.services.errors import Invalid, NotFound
-from app.services.investments import entry, pricing, taxrules
+from app.services.investments import entry, pricing, reading, taxrules
 from app.services.investments import portfolio as pf
 from app.services.marketdata import feed
 
@@ -74,6 +74,36 @@ def _date(value, field: str = "date") -> dt.date:
 
 
 SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "drop_source",
+            "description": (
+                "File something the user shares about the market: a link, a video, an article, "
+                "or just a remark like 'my friend says Voltamp looks good'. Reads it, works out "
+                "which listed companies it names, and puts any the user does not already follow "
+                "into the research queue. Use whenever the user passes on a tip, a link or a "
+                "name to look at. It records a LEAD, never a recommendation, and never buys "
+                "anything."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The link, if there is one. A YouTube link works.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "What the user said, in their words. Use alone when there is no "
+                            "link, or alongside one to record why it matters."
+                        ),
+                    },
+                },
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -368,8 +398,30 @@ def _fx_rates(db: Session, positions, marks) -> dict[str, Decimal]:
     return out
 
 
+def drop_source(db: Session, user_id: uuid.UUID, args: dict) -> dict:
+    """File a link, a video or a note against the companies it names.
+
+    ⚠ Writes immediately, unlike `record_transaction`, and deliberately. A transaction changes
+    the ledger and so is confirmed first; a drop only records that something was said, which
+    is reversible in the sense that nobody has to act on it — and making the user confirm
+    every link is how an inbox stops being used.
+    """
+    result = reading.drop(db, url=args.get("url"), text=args.get("text"))
+    db.commit()
+    return {
+        "stored": result.stored,
+        "title": result.title,
+        "trust_tier": result.trust_tier,
+        "named": result.named,
+        "added_to_research_queue": result.discovered,
+        "already_followed": result.already_followed,
+        "note": result.note,
+    }
+
+
 HANDLERS = {
     "record_transaction": record_transaction,
+    "drop_source": drop_source,
     "confirm_transaction": confirm_transaction,
     "get_portfolio": get_portfolio,
     "get_position": get_position,

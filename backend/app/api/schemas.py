@@ -1377,3 +1377,38 @@ class PromoteIn(BaseModel):
     """Start following a candidate. ⚠ This is the moment it starts costing prices and calls."""
 
     sector: str | None = None
+
+
+class DropIn(BaseModel):
+    """Something dropped into the inbox: a link, a video, or just a note.
+
+    ⚠ Either is enough, and both together is fine — a link with a line of your own about why
+    it matters reads better than the page alone.
+    """
+
+    url: str | None = Field(default=None, max_length=2000)
+    text: str | None = Field(default=None, max_length=8000)
+
+
+class DropOut(BaseModel):
+    """What came of it.
+
+    ⚠ `stored` false with a `note` is a real outcome, not an error. A page that needs a
+    browser, a PDF, or a listing naming thirty companies each produce nothing — and an inbox
+    that swallowed them silently would train its user to drop things into a void.
+    """
+
+    stored: bool
+    title: str
+    url: str | None
+    #: 1 = a filing or regulator · 2 = press or your own note. A drop from an exchange or a
+    #: regulator is a filing; anything else is a report of one.
+    trust_tier: int
+    named: list[str]
+    #: Companies this put into the research queue for the first time.
+    discovered: list[str]
+    #: Companies you already follow — filed against the holding rather than queued.
+    already_followed: list[str]
+    note: str | None
+
+    model_config = ConfigDict(from_attributes=True)

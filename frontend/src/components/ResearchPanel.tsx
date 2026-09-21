@@ -104,7 +104,7 @@ function Row({
   );
 }
 
-export default function ResearchPanel() {
+export default function ResearchPanel({ reloadKey = 0 }: { reloadKey?: number }) {
   const [data, setData] = useState<ResearchQueue | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(true);
@@ -121,7 +121,7 @@ export default function ResearchPanel() {
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, reloadKey]);
 
   if (failed || !data) return null;
 

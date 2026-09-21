@@ -219,10 +219,12 @@ def test_every_schema_has_a_handler_and_every_handler_a_schema(db, user):
     # A bare count is a deliberate tripwire: it catches a tool quietly disappearing, which
     # the set comparisons above would not. Broken down so the next person to add a domain
     # sees which number to change and why, rather than a naked integer.
-    assert len(tools.TOOLS) == 16, {
+    assert len(tools.TOOLS) == 17, {
         "tasks+journal": 7,
         "memory": 3,
-        "investments": 6,
+        # 6, plus `drop_source` — the one tool that files a LEAD rather than touching the
+        # ledger, so the user can pass on something they heard without leaving the chat.
+        "investments": 7,
         "actual": sorted(t["function"]["name"] for t in tools.TOOLS),
     }
 

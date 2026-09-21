@@ -40,6 +40,8 @@ from app.api.schemas import (
     DismissIn,
     DraftIn,
     DraftOut,
+    DropIn,
+    DropOut,
     FiredTriggerOut,
     FlagOut,
     FrameworkOut,
@@ -993,3 +995,29 @@ def dismiss_candidate(
     if line is None:
         raise NotFound("candidate")
     return QueueLineOut.model_validate(line)
+
+
+@router.post("/inbox")
+def drop_into_inbox(
+    body: DropIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DropOut:
+    """Drop a link, a video or a note, and have it filed against the companies it names.
+
+    ⚠ **You become a measured source.** What you drop is recorded exactly the way a channel's
+    uploads are, with the same mention rows behind it — which is what eventually answers
+    whether the tips you act on beat the exchange feed you ignore.
+    """
+    result = reading.drop(db, url=body.url, text=body.text)
+    db.commit()
+    return DropOut(
+        stored=result.stored,
+        title=result.title,
+        url=result.url,
+        trust_tier=result.trust_tier,
+        named=result.named,
+        discovered=result.discovered,
+        already_followed=result.already_followed,
+        note=result.note,
+    )
