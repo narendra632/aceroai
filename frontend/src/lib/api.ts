@@ -2047,3 +2047,39 @@ export async function getBenchmarks(days = 365): Promise<Benchmarks> {
   if (!r.ok) throw new Error("could not load the benchmarks");
   return r.json();
 }
+
+// --- the six criteria -------------------------------------------------------------------
+
+/** One condition for real money, and how far off it is. */
+export type Criterion = {
+  key: string;
+  question: string;
+  /** ⚠ null means NOT YET TESTABLE, which is different from failing. A criterion with no
+   *  sample behind it has not been failed; it has not been tested — and rendering those the
+   *  same way would turn "we do not know" into "we fell short". */
+  met: boolean | null;
+  value: string;
+  target: string;
+  detail: string;
+  n: number;
+  /** ⚠ Shown beside every return statistic. A number without its error bar is the mechanism
+   *  by which this system would mislead its owner. */
+  standard_error: string | null;
+};
+
+export type Verdict = {
+  criteria: Criterion[];
+  met: number;
+  failed: number;
+  untested: number;
+  all_met: boolean;
+  headline: string;
+  generated_at: string | null;
+};
+
+/** The six criteria for real money, written down in advance so they cannot be softened. */
+export async function getVerdict(): Promise<Verdict> {
+  const r = await req("/api/investments/verdict");
+  if (!r.ok) throw new Error("could not load the criteria");
+  return r.json();
+}

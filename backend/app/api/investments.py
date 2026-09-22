@@ -36,6 +36,7 @@ from app.api.schemas import (
     BottleneckOut,
     ClaimOut,
     CorporateActionOut,
+    CriterionOut,
     CrossingsIn,
     CurveOut,
     DecideIn,
@@ -71,6 +72,7 @@ from app.api.schemas import (
     TotalsOut,
     TransactionOut,
     TriggerOut,
+    VerdictOut,
 )
 from app.db.models import (
     AbMapping,
@@ -105,6 +107,7 @@ from app.services.investments import (
     reviews,
     schedulefa,
     scoring,
+    verdict,
     watching,
 )
 from app.services.investments import portfolio as pf
@@ -1109,4 +1112,28 @@ def get_benchmarks(
         detail=comparison.detail,
         non_equity_share=comparison.non_equity_share,
         caveat=comparison.caveat,
+    )
+
+
+@router.get("/verdict")
+def get_verdict(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> VerdictOut:
+    """The six criteria for real money, and where each one stands.
+
+    ⚠ They were written down in advance so they cannot be softened later. That is the whole
+    point: committing to a standard before knowing whether you will meet it is the only
+    version of the commitment worth anything, because afterwards every failed criterion has a
+    reason and every reason is persuasive to the person who needs it to be.
+    """
+    result = verdict.assess(db, user.id)
+    return VerdictOut(
+        criteria=[CriterionOut.model_validate(c) for c in result.criteria],
+        met=result.met,
+        failed=result.failed,
+        untested=result.untested,
+        all_met=result.all_met,
+        headline=result.headline,
+        generated_at=result.generated_at,
     )

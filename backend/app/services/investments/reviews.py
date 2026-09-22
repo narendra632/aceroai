@@ -30,7 +30,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.db.models import Decision, InvalidationTrigger, Portfolio, Proposal, Review, User
-from app.services.investments import benchmarks, books, reading, watching
+from app.services.investments import benchmarks, books, reading, verdict, watching
 
 #: How close to its threshold a condition has to be before a review mentions it. ⚠ Reported
 #: because a condition at 97% of its threshold is the most useful thing a weekly review can
@@ -348,6 +348,31 @@ def assemble(
             for m in watching.measures(db, today=end)
         ],
     }
+
+    if kind == "QUARTERLY":
+        # ⚠ Quarterly only. The six criteria move on a scale of months, and putting them in
+        # the weekly would invite watching them the way one watches a price — which is exactly
+        # the habit the pre-commitment exists to prevent.
+        result = verdict.assess(db, user_id, today=end)
+        content["verdict"] = {
+            "headline": result.headline,
+            "met": result.met,
+            "failed": result.failed,
+            "untested": result.untested,
+            "criteria": [
+                {
+                    "key": c.key,
+                    "question": c.question,
+                    "met": c.met,
+                    "value": c.value,
+                    "target": c.target,
+                    "detail": c.detail,
+                    "n": c.n,
+                    "standard_error": c.standard_error,
+                }
+                for c in result.criteria
+            ],
+        }
 
     if kind in ("MONTHLY", "QUARTERLY"):
         # ⚠ Monthly and up only. Source attribution over one week is noise wearing a number,

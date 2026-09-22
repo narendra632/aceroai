@@ -845,3 +845,103 @@ What it refuses to soften:
 Code: `services/investments/{reading,candidates,deduce,reviews}.py`,
 `services/marketdata/{universe,webpage}.py`, `jobs/{reading,reviews}.py`.
 Migrations 024 and 025.
+
+---
+
+## 20. Something to beat
+
+Beating nothing is easy. Three of the four benchmarks already existed as books — everything it
+ever proposed, the real portfolio, the shadow books — and the one that matters most did not
+exist at all.
+
+⚠ **The alternative is an index FUND, not an index, and that is a deliberate departure from
+the brief.** A total-return index is the right idea: the headline price index understates the
+real alternative by roughly the dividend yield, and benchmarking against it is winning by
+accounting. But **an index cannot be bought.** A fund's NAV is a total-return series by
+construction — dividends are reinvested into it — and it carries the expense ratio and
+tracking error a real alternative would have charged. So this is slightly *harder* to beat
+than a raw TRI would be for someone who cannot buy one, which is the honest direction for the
+asymmetry to run. Every line announces that it is a proxy, in the interface, always.
+
+It is also the only source reachable without a key. NSE's index archive refused every path
+tried, and niftyindices.com answered a CSV request with an HTML page — the same block-page trap
+the RSS adapter already guards against, caught because the parse was checked rather than
+trusted.
+
+| | Stands in for | Why this one |
+|---|---|---|
+| UTI Nifty 50 Index Fund, direct growth | Nifty 50 total return | The investable Indian alternative |
+| Motilal Oswal S&P 500 Index Fund, direct growth | S&P 500 total return, **in rupees** | The accounts are in rupees; a dollar benchmark would credit a currency move nobody decided on |
+
+Direct plans on both — a regular plan's distribution commission is one the investor would not
+have paid buying it themselves.
+
+### Two things the real data forced
+
+⚠ **The first version reported 3915%.** It subtracted net purchases from the change in value,
+which nets a *dollar* purchase at face value against a *rupee* portfolio, and lets money added
+late into a window that started small swamp the arithmetic. Both are precisely what TWR exists
+to solve, and this module already had one tested against Groww — so it routes through
+`overview._time_weighted` with the rolling-year trim disabled, because re-trimming would
+compare a twelve-month portfolio figure against a seven-day benchmark and read like one number.
+
+⚠ **The blend is weighted on equities; the portfolio's return includes everything.** On the
+real book that meant a 25% crypto-and-funds allocation was quietly making the two sides measure
+different things. That is now **stated beside the figures rather than corrected for** —
+excluding them would be picking the flattering subset, and the portfolio's return genuinely
+includes them.
+
+Measured on the real book over a year: **−59.1% against a blend of −1.7%**, with a quarter of
+it in things no index stands in for.
+
+And the blend needs both sides or it does not compute. Weighting one index at 100% because the
+other failed to load would present a single index as the whole alternative.
+
+---
+
+## 21. The six criteria, before any real money
+
+⚠ **Written down in advance so they cannot be softened later.** That is the entire point:
+committing to a standard before you know whether you will meet it is the only version of the
+commitment worth anything, because afterwards every failed criterion has a reason, and every
+reason is persuasive to the person who needs it to be. They are constants in code, not
+settings — a threshold editable from the interface is one that will be edited in the month it
+is nearly met.
+
+| | The question | Needs |
+|---|---|---|
+| 1 | Has it run long enough, across enough different markets? | 12 months, 2 conditions |
+| 2 | Have enough decisions actually been made? | 40 |
+| 3 | When it said 80%, was it right about 80% of the time? | Brier ≤ 0.20 |
+| 4 | Did the specific things the theses asserted actually happen? | ≥ 0.60 over 150 claims |
+| 5 | When a condition it wrote came true, did it act? | **1.00, exactly** |
+| 6 | Did it beat simply buying the index? | Above it, net of costs |
+
+### Three states, never two
+
+⚠ **Not-yet-testable is rendered differently from failed** — different icon, different colour,
+and a legend that says so. A criterion with no sample behind it has not been failed; it has not
+been tested. An interface that collapsed the two would turn *"we do not know"* into *"we fell
+short"*, and — worse — would let a reader seeing four greys read them as four nearly-theres.
+
+### The ones that resist flattery
+
+- **Criterion 5 has no sample-size defence.** A discipline score below 1.00 is a failure, not a
+  "nearly". And 1.00 over *zero* firings is **untested**, not a pass — recording it as a pass
+  would let the hardest criterion be met by inaction.
+- **Criterion 6 is deliberately last and least informative**, and carries its standard error.
+  Over twelve monthly observations that spread is about **±0.35**, which means a genuinely good
+  strategy and a mediocre one look the same. Without that printed, a good year reads as
+  evidence.
+- **Market conditions are read from the benchmark, not the portfolio.** A portfolio that
+  defined the conditions it is judged in could always claim to have seen enough of them.
+- **Nothing is annualised, extrapolated or projected.** A projection of when a criterion
+  *would* be met is exactly the kind of number that becomes a plan.
+- **Even on a clean sweep the headline counsels caution** — a small sleeve run in parallel for
+  another year, not a switch.
+
+The dashboard appears on the page, collapsed and last, and in the **quarterly** review only.
+The six move on a scale of months, and putting them anywhere higher would invite watching them
+the way one watches a price — the exact habit the pre-commitment exists to prevent.
+
+Code: `services/investments/{benchmarks,verdict}.py`. Migration 026.

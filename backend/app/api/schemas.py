@@ -1482,3 +1482,35 @@ class BenchmarksOut(BaseModel):
     #: ⚠ Present when the two sides of the comparison are measuring materially different
     #: things. Rendered beside the figures rather than instead of them.
     caveat: str | None
+
+
+class CriterionOut(BaseModel):
+    """One condition for real money, and how far off it is."""
+
+    key: str
+    question: str
+    #: ⚠ null means *not yet measurable*, which is different from failing. A criterion with no
+    #: sample behind it has not been failed; it has not been tested — and an interface that
+    #: rendered those the same way would turn "we do not know" into "we fell short".
+    met: bool | None
+    value: str
+    target: str
+    detail: str
+    n: int
+    #: ⚠ Shown beside every return statistic. A number without its error bar is the mechanism
+    #: by which this system would mislead its owner.
+    standard_error: Decimal | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VerdictOut(BaseModel):
+    """Where the whole thing stands against the six criteria committed to in advance."""
+
+    criteria: list[CriterionOut]
+    met: int
+    failed: int
+    untested: int
+    all_met: bool
+    headline: str
+    generated_at: dt.datetime | None

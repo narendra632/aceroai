@@ -6,6 +6,7 @@ import ForeignHoldings from "@/components/ForeignHoldings";
 import FrameworkPanel from "@/components/FrameworkPanel";
 import PositionSheet from "@/components/PositionSheet";
 import BenchmarksPanel from "@/components/BenchmarksPanel";
+import VerdictPanel from "@/components/VerdictPanel";
 import BooksPanel from "@/components/BooksPanel";
 import ProposalsPanel from "@/components/ProposalsPanel";
 import ReadingPanel from "@/components/ReadingPanel";
@@ -910,6 +911,11 @@ export default function InvestmentsView() {
           aggregate on a schedule, and a what-if ledger or a past review browsed after a name
           that got away trains worse judgement rather than better. */}
           <ReviewsPanel />
+
+          {/* ⚠ Last on the page, and collapsed. These six move on a scale of months; putting
+          them anywhere higher would invite watching them the way one watches a price, which is
+          exactly the habit writing them down in advance exists to prevent. */}
+          <VerdictPanel />
 
           {/* Below the holdings and above the ledger: it is a yearly obligation rather
           than something to check on open, but it belongs with the record it reads. */}

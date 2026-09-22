@@ -74,6 +74,7 @@ Each job says how late it may still run.
 | `investments_weekly_review` | 09:00 Saturdays | +12 h | No market is open, nothing is urgent, the week is complete |
 | `investments_monthly_review` | 09:30 on the 1st | +12 h | After the weekly has had its Saturday |
 | `investments_quarterly_review` | 10:30, 1 Jan/Apr/Jul/Oct | +12 h | An hour after the monthly, so both exist and neither races |
+| `benchmarks_sync` | 08:00 | +12 h | AMFI publishes NAVs after 23:00, so the morning after is the first moment yesterday's alternative is knowable |
 
 ⚠ **Sunday is deliberately empty of reviews.** There is a real risk in a system like this
 that it fills every available slot with output, and output is not insight. `universe_sync`
