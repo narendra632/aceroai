@@ -401,3 +401,45 @@ def test_the_queue_shows_a_score_only_once_something_has_been_read(
 
     after = auth_client.get("/api/investments/research").json()["lines"][0]
     assert after["quality_available"] is not None
+
+
+# --- the ten-flag checklist ----------------------------------------------------------
+
+
+def test_the_analysis_carries_the_checklist(db, queued, spec, version, monkeypatch, no_network):
+    """The four measured flags and the six judged ones, merged, with the band withheld when
+    most of the checklist is unanswered."""
+    _deduces(monkeypatch, "B1.1")
+
+    result = candidates.analyse(db, queued, spec, version.id)
+    db.commit()
+
+    # Nothing has been read about this company, so every judged flag is unknown and the band
+    # refuses to be computed — which is the honest state, not a failure.
+    assert result.unknown_flags > 0
+    assert result.flag_band is None
+    assert any("would say more about what has been read" in n for n in result.notes)
+
+
+def test_a_model_cannot_move_a_measured_flag_through_the_analysis(
+    db, queued, spec, version, monkeypatch, no_network
+):
+    """⚠ The end-to-end version of the guarantee. A persuasive argument must not be able to
+    change a number, and the merge is where that could quietly stop being true."""
+    from app.services.investments import judgement
+
+    _deduces(monkeypatch, "B1.1")
+    monkeypatch.setattr(
+        judgement,
+        "judged_flags",
+        lambda db_, inst, **kw: [
+            judgement.Judged(n, "q", "YES", "a quote long enough to pass the floor", "r")
+            for n in (2, 6, 8, 10)
+        ],
+    )
+
+    result = candidates.analyse(db, queued, spec, version.id)
+    db.commit()
+
+    # Every "judged" answer was for a measured flag, so none of them may be counted.
+    assert result.red_flags == 0

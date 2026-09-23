@@ -35,7 +35,15 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.db.models import AbMapping, Candidate, Instrument, ListedCompany, Mention
-from app.services.investments import deduce, frameworks, fundamentals, pricing, reading, scoring
+from app.services.investments import (
+    deduce,
+    frameworks,
+    fundamentals,
+    judgement,
+    pricing,
+    reading,
+    scoring,
+)
 from app.services.marketdata import feed
 from app.services.marketdata.http import ProviderError
 
@@ -63,6 +71,11 @@ class Analysis:
     quality_earned: Decimal | None = None
     quality_available: Decimal | None = None
     price: Decimal | None = None
+    #: The ten-flag checklist. ⚠ `flag_band` is None when too much of it is unanswered — a
+    #: band over two known flags reads exactly like one over all ten.
+    red_flags: int = 0
+    unknown_flags: int = 0
+    flag_band: str | None = None
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -174,6 +187,33 @@ def score(db: Session, instrument: Instrument, spec: dict, result: Analysis) -> 
     return result
 
 
+def read_flags(db: Session, instrument: Instrument, result: Analysis) -> Analysis:
+    """Step 4: the ten-flag checklist — four measured, six judged against cited words.
+
+    ⚠ The judged six only ever reach this through `judgement`, which refuses any verdict that
+    did not quote the evidence, whose quote is not actually in the evidence, that a second
+    reader disagreed with, or that calculated a figure. What survives is an opinion with its
+    receipt attached; what does not survives as UNKNOWN.
+
+    ⚠ The band is withheld when most of the checklist is unanswered. Four reds out of four
+    answered is not the same as four out of ten, and a band computed over two known flags
+    would read exactly like one computed over all of them.
+    """
+    computed = scoring.computed_flags(db, instrument, price=result.price)
+    judged = judgement.judged_flags(db, instrument)
+    checklist = judgement.checklist(computed, judged)
+
+    result.red_flags = checklist.red
+    result.unknown_flags = checklist.unknown
+    result.flag_band = checklist.band if checklist.is_readable else None
+    if not checklist.is_readable:
+        result.notes.append(
+            f"{checklist.unknown} of {len(checklist.flags)} flags are unanswered, so the risk "
+            f"band would say more about what has been read than about the company"
+        )
+    return result
+
+
 def analyse(
     db: Session,
     candidate: Candidate,
@@ -196,6 +236,7 @@ def analyse(
     read_filings(db, instrument, result, c)
     price_once(db, instrument, result, c)
     score(db, instrument, spec, result)
+    read_flags(db, instrument, result)
 
     candidate.status = "ANALYSING"
     candidate.reviewed_at = dt.datetime.now(dt.UTC)
