@@ -57,24 +57,52 @@ MAX_OUTPUT_TOKENS = 8192
 THINKING_BUDGET_LOW = 0
 THINKING_BUDGET_HIGH = 4096
 
-_BILLING_HINTS = ("billing", "credit", "quota", "payment", "exhausted", "disabled")
+#: Phrases that mean the ACCOUNT is the problem, not the pace.
+#:
+#: ⚠ **"quota" and "exhausted" are deliberately absent, and their presence here was a real
+#: bug.** Google's ordinary per-minute rate-limit message reads *"429 RESOURCE_EXHAUSTED.
+#: Quota exceeded for quota metric 'Generate Content API requests per minute'"* — it contains
+#: both words. So every rate limit on a perfectly healthy, fully paid account was reported as
+#: a billing failure, which sent its reader to check their card when the only thing wrong was
+#: that they had gone too fast for a few seconds. A wrong diagnosis is worse than a vague one:
+#: it costs the reader a trip somewhere there is nothing to find.
+_BILLING_HINTS = (
+    "billing account",
+    "billing is not enabled",
+    "billing has not been enabled",
+    "credit balance",
+    "payment",
+    "suspended",
+    "consumer_suspended",
+    "account has been disabled",
+    "project has been disabled",
+)
+
+#: Phrases that mean *slow down*. Checked first, because 429 is the rate-limit status code and
+#: a rate limit is overwhelmingly the likelier reading of one.
+_RATE_HINTS = ("per minute", "per-minute", "per day", "per-day", "rate limit", "requests per")
 
 
 def _classify(exc: Exception) -> ProviderError:
     """Map an SDK error to a cause we can be honest about in the UI.
 
-    Google returns 429 for *both* a genuine rate limit and billing/quota exhaustion, so
-    the message text is what actually distinguishes them.
+    Google returns 429 for *both* a genuine rate limit and a billing problem, so the message
+    text is what distinguishes them — and it has to be read carefully, because the two share
+    most of their vocabulary.
     """
     code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
     text = str(exc).lower()
     if code == 429 or "resource_exhausted" in text:
+        # ⚠ Rate first. Billing only when the text names the ACCOUNT, and a 429 that names
+        # neither is a rate limit, because that is what 429 means.
+        if any(h in text for h in _RATE_HINTS):
+            return RateLimitError(str(exc))
         if any(h in text for h in _BILLING_HINTS):
             return BillingError(str(exc))
         return RateLimitError(str(exc))
     if code in (500, 502, 503, 504) or "unavailable" in text or "timeout" in text:
         return TransientError(str(exc))
-    if any(h in text for h in ("billing", "credit balance", "payment")):
+    if any(h in text for h in _BILLING_HINTS):
         return BillingError(str(exc))
     return ProviderError(str(exc))
 
