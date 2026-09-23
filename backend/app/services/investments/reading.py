@@ -55,7 +55,7 @@ from app.db.models import (
     Transaction,
 )
 from app.services.errors import NotFound
-from app.services.investments import frameworks, history, pricing, scoring, watching
+from app.services.investments import frameworks, history, pricing, scoring, themes, watching
 from app.services.investments import portfolio as pf
 from app.services.marketdata import feeds, http, universe, webpage
 from app.services.marketdata.http import ProviderError
@@ -272,6 +272,8 @@ class PollResult:
     names: list[str] = field(default_factory=list)
     #: Companies newly added to the research queue by this poll.
     discovered: list[str] = field(default_factory=list)
+    #: Bottlenecks this round's reading was about, whether or not a company was named.
+    themes: list[str] = field(default_factory=list)
 
 
 # --- the register --------------------------------------------------------------------------
@@ -1192,6 +1194,12 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
 
     vocab = vocabulary(db)
     now = dt.datetime.now(dt.UTC)
+    # ⚠ The framework, if there is an approved one. A theme reading against an unapproved
+    # framework would route attention using bottlenecks nobody has agreed to yet.
+    try:
+        spec = frameworks.current(db).spec
+    except NotFound:
+        spec = None
 
     # Whether this source is making a claim about a company or filing its own paperwork.
     claims = source.kind in CLAIMING_KINDS
@@ -1211,6 +1219,12 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
         else:
             stances = {target.symbol: "MENTION_ONLY" for target, _ in found}
 
+        # ⚠ Read BEFORE the row is written. `source_items` is append-only, and a first
+        # version set this afterwards — the guard refused the update, which is it working on
+        # its author again. A theme is part of what was read, not something discovered about
+        # it later, so it belongs in the row from the start.
+        item_themes = themes.read_themes(item.title, item.body, spec)
+
         row = SourceItem(
             id=uuid.uuid4(),
             kind=source.kind,
@@ -1226,11 +1240,22 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
             fetched_at=now,
             content_hash=hashlib.sha256(text.encode()).hexdigest(),
             excerpt=text[:2000],
-            extraction={"feed": item.feed, "named": [t.symbol for t, _ in found]},
+            extraction={
+                "feed": item.feed,
+                "named": [t.symbol for t, _ in found],
+                # ⚠ Recorded on every item, including ones that named a company. An article
+                # can be about a theme AND a company, and treating the two as alternatives
+                # would lose the sector read on exactly the pieces most worth having it for.
+                "themes": item_themes,
+            },
         )
         db.add(row)
         db.flush()
         result.stored += 1
+
+        for theme in item_themes:
+            if theme not in result.themes:
+                result.themes.append(theme)
 
         for target, excerpt in found:
             mention = Mention(

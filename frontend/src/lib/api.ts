@@ -2083,3 +2083,27 @@ export async function getVerdict(): Promise<Verdict> {
   if (!r.ok) throw new Error("could not load the criteria");
   return r.json();
 }
+
+// --- themes -----------------------------------------------------------------------------
+
+/** One theme that got attention, and what the book has sitting on it.
+ *
+ *  ⚠ A theme is never evidence. It raises no proposal and changes no score — it answers one
+ *  question, *what am I exposed to that just got attention*. */
+export type Exposure = {
+  bottleneck_id: string;
+  name: string;
+  /** ⚠ Approved mappings only. An unapproved mapping is a claim nobody has agreed with yet. */
+  held: string[];
+  queued: string[];
+  mentions: number;
+};
+
+export type Themes = { themes: Exposure[]; days: number };
+
+/** Themes the reading has been about, where the book is exposed to them. */
+export async function getThemes(days = 14): Promise<Themes> {
+  const r = await req(`/api/investments/themes?days=${days}`);
+  if (!r.ok) throw new Error("could not load the themes");
+  return r.json();
+}

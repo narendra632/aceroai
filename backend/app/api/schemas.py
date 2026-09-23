@@ -1514,3 +1514,29 @@ class VerdictOut(BaseModel):
     all_met: bool
     headline: str
     generated_at: dt.datetime | None
+
+
+class ExposureOut(BaseModel):
+    """One theme that got attention, and what the book has sitting on it.
+
+    ⚠ A theme is never evidence. It raises no proposal and changes no score — it answers one
+    question, *what am I exposed to that just got attention*, and the answer is a list to read
+    rather than a reason to act.
+    """
+
+    bottleneck_id: str
+    name: str
+    #: ⚠ Approved mappings only. An unapproved mapping is a claim nobody has agreed with yet,
+    #: and counting it as exposure would let a suggestion create the exposure it then explains.
+    held: list[str]
+    queued: list[str]
+    mentions: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ThemesOut(BaseModel):
+    """What the last fortnight of reading was about, where the book is exposed to it."""
+
+    themes: list[ExposureOut]
+    days: int

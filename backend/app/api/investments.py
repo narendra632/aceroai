@@ -45,6 +45,7 @@ from app.api.schemas import (
     DraftOut,
     DropIn,
     DropOut,
+    ExposureOut,
     FiredTriggerOut,
     FlagOut,
     FrameworkOut,
@@ -69,6 +70,7 @@ from app.api.schemas import (
     ScheduleFaOut,
     SourceOut,
     SummaryOut,
+    ThemesOut,
     TotalsOut,
     TransactionOut,
     TriggerOut,
@@ -107,6 +109,7 @@ from app.services.investments import (
     reviews,
     schedulefa,
     scoring,
+    themes,
     verdict,
     watching,
 )
@@ -1136,4 +1139,33 @@ def get_verdict(
         all_met=result.all_met,
         headline=result.headline,
         generated_at=result.generated_at,
+    )
+
+
+@router.get("/themes")
+def get_themes(
+    days: int = 14,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ThemesOut:
+    """Themes the reading has been about, and what the book holds on each.
+
+    ⚠ This is the framework working as a routing table rather than a filing cabinet. An
+    article about a sector names no company, so the mention matcher sees nothing — but the
+    framework already knows which chokepoints matter and who sits on each, so attention paid
+    to a theme becomes attention paid to a specific set of companies, including ones already
+    held. That is the half that matters most and the half nobody goes looking for.
+
+    ⚠ Only themes the book is exposed to are returned. A theme nobody holds anything on is
+    news about the world and no news about this portfolio.
+    """
+    try:
+        spec = frameworks.current(db).spec
+    except NotFound:
+        return ThemesOut(themes=[], days=days)
+    return ThemesOut(
+        themes=[
+            ExposureOut.model_validate(row) for row in themes.recent_themes(db, spec, days=days)
+        ],
+        days=days,
     )
