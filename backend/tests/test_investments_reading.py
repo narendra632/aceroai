@@ -768,3 +768,28 @@ def test_a_document_already_stored_under_this_source_is_not_stored_again(
     db.commit()
 
     assert result.stored == 0
+
+
+def test_the_inbox_is_never_polled(db, tracked):
+    """⚠ Event-driven, not fetched. Registered and approved like any other source, it was
+    picked up by every polling round and reported "no adapter for this kind of source" five
+    times a day — which is how a run report stops being worth reading."""
+    reading.inbox_source(db, official=False)
+    db.commit()
+
+    pollable = {s.kind for s in reading.registered(db, only_readable=True, only_pollable=True)}
+    everything = {s.kind for s in reading.registered(db, only_readable=True)}
+
+    assert "USER_DROP" in everything
+    assert "USER_DROP" not in pollable
+
+
+def test_a_round_of_polling_reports_no_phantom_failures(db, tracked, channel, monkeypatch):
+    reading.inbox_source(db, official=False)
+    db.commit()
+    monkeypatch.setattr(reading, "_fetch", lambda source, c: [])
+
+    results = reading.poll_all(db)
+    db.commit()
+
+    assert [r for r in results if r.error] == []

@@ -87,6 +87,12 @@ STANCE_READ_FROM_TIER = PRESS
 #: recorded in full — that is news about your own book.
 CLAIMING_KINDS = frozenset({"RSS_NEWS", "YOUTUBE", "USER_DROP", "MACRO"})
 
+#: Source kinds that have a feed to poll. ⚠ `USER_DROP` is deliberately absent: the inbox is
+#: event-driven — it is read when you drop something in — and it has no feed to fetch. Without
+#: this it was picked up by every polling round and reported "no adapter for this kind of
+#: source" five times a day, which is how a run report stops being worth reading.
+POLLABLE_KINDS = frozenset({"RSS_EXCHANGE", "RSS_NEWS", "YOUTUBE", "EDGAR", "MACRO"})
+
 #: Below this many characters a symbol is too short to match safely. "ON", "IT" and "GO" are
 #: all real tickers somewhere and all appear constantly in ordinary prose. This floor applies
 #: to companies already held or watched — symbols you confirmed by following them.
@@ -330,10 +336,16 @@ def set_active(db: Session, source: Source, *, active: bool) -> Source:
     return source
 
 
-def registered(db: Session, *, only_readable: bool = False) -> list[Source]:
+def registered(
+    db: Session, *, only_readable: bool = False, only_pollable: bool = False
+) -> list[Source]:
+    """Every registered source. `only_readable` drops the unapproved and switched-off;
+    `only_pollable` also drops the ones with no feed to fetch."""
     q = sa.select(Source).where(Source.deleted_at.is_(None))
     if only_readable:
         q = q.where(Source.is_active.is_(True), Source.approved_at.is_not(None))
+    if only_pollable:
+        q = q.where(Source.kind.in_(POLLABLE_KINDS))
     return list(db.execute(q.order_by(Source.trust_tier, Source.name)).scalars())
 
 
@@ -1287,7 +1299,7 @@ def poll_all(db: Session) -> list[PollResult]:
     out: list[PollResult] = []
     c = http.client()
     try:
-        for source in registered(db, only_readable=True):
+        for source in registered(db, only_readable=True, only_pollable=True):
             try:
                 out.append(poll(db, source, c))
             except Unapproved:
