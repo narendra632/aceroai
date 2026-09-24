@@ -1342,6 +1342,20 @@ class ActiveIn(BaseModel):
     is_active: bool
 
 
+class ChannelIn(BaseModel):
+    """Add a YouTube channel to read from.
+
+    ⚠ Whatever the address bar had. A handle, a full URL, a legacy `/c/` path or the raw
+    `UC…` id all resolve — because requiring the id would make adding a channel a research
+    task, and a channel list that is awkward to change never gets changed.
+    """
+
+    pasted: str
+    #: Why it is worth reading, in your own words. Kept because in six months "which of these
+    #: did I add and why" is the only question anyone asks of this list.
+    notes: str | None = None
+
+
 class QueueLineOut(BaseModel):
     """One company waiting to be looked at.
 

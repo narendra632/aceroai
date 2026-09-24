@@ -19,6 +19,13 @@ import { InfoTip } from "@/components/InfoTip";
 import { Button } from "@/components/ui/button";
 import { Legend, Lines, StackedBar, type Series } from "@/components/ui/chart";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  useRememberedTab,
+} from "@/components/ui/tabs";
+import {
   EmptyState,
   ErrorState,
   ListSkeleton,
@@ -174,6 +181,9 @@ export default function InvestmentsView() {
   // Bumped when the inbox files something, so the research queue below refreshes without a
   // page reload — dropping a link and not seeing it land reads as a failure.
   const [researchNonce, setResearchNonce] = useState(0);
+  /* ⚠ Remembered across reloads. Someone who came for the research queue should not be
+   * returned to "Holdings" every time the page refreshes. */
+  const [tab, setTab] = useRememberedTab("aceroai.investments.tab", "holdings");
   const [failed, setFailed] = useState(false);
   const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("all");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
@@ -398,540 +408,571 @@ export default function InvestmentsView() {
           ideas that would have gone into it go nowhere instead. */}
           <InboxDrop onFiled={() => setResearchNonce((n) => n + 1)} />
 
-          {/* --- what it is worth ------------------------------------------------------- */}
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {/* ⚠ `cost_basis_inr`, not `invested_inr`. The latter counts only priced,
-            non-ring-fenced holdings so it stays comparable with market value — which
-            makes it ZERO on a book with no prices. Running the page for the first time
-            is what caught it. */}
-            <Stat
-              label="Invested"
-              value={formatRupees(totals.cost_basis_inr)}
-            />
-            {/* ⚠ `*_all_*`: the whole book, crypto included. The other fields exclude
-            ring-fenced holdings so they stay comparable with each other — and pairing one of
-            those with "Invested", which counts everything, reported a GAIN on a book that was
-            down. */}
-            <Stat
-              label="Current value"
-              value={
-                totals.is_complete
-                  ? formatRupees(totals.market_value_all_inr)
-                  : "—"
-              }
-              hint={
-                totals.is_complete
-                  ? undefined
-                  : `waiting on ${totals.unpriced.length} price${totals.unpriced.length === 1 ? "" : "s"}`
-              }
-            />
-            <Stat
-              label="Unrealised"
-              value={
-                totals.is_complete
-                  ? `${directionGlyph(totals.unrealised_all_inr)} ${formatRupees(totals.unrealised_all_inr)}`
-                  : "—"
-              }
-              className={
-                totals.is_complete
-                  ? directionClass(totals.unrealised_all_inr)
-                  : undefined
-              }
-              hint={
-                totals.is_complete
-                  ? formatSignedPct(totals.unrealised_all_pct)
-                  : undefined
-              }
-            />
-            <Stat
-              label="Realised"
-              value={formatRupees(totals.realised_inr)}
-              className={directionClass(totals.realised_inr)}
-            />
-          </section>
+          {/* ⚠ Five tabs, not thirteen stacked panels.
+          Each answers a question asked at a different frequency: what is it worth (daily),
+          what should I do (when something arrives), what does the framework say (when a
+          company is being assessed), is any of this working (monthly), what is on record
+          (at tax time). Stacked in one column they were ordered by nothing but the order
+          they were written in, and the only thing they shared was the scrollbar. */}
+          <Tabs value={tab} onValueChange={setTab} className="space-y-6">
+            <TabsList>
+              <TabsTrigger value="holdings">Holdings</TabsTrigger>
+              <TabsTrigger value="decisions">Decisions</TabsTrigger>
+              <TabsTrigger value="framework">Framework</TabsTrigger>
+              <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
+              <TabsTrigger value="records">Records</TabsTrigger>
+            </TabsList>
 
-          {/* ⚠ Above the chart and the holdings on purpose. An announced split the ledger
-          does not know about makes every figure below this point wrong for that holding —
-          by half, in the worst case — so the explanation has to be read first. */}
-          <CorporateActions
-            actions={summary.corporate_actions}
-            onChange={() => void load()}
-          />
+            {/* --- what it is worth ------------------------------------------------- */}
+            <TabsContent value="holdings" className="space-y-8">
 
-          {unpriced.length > 0 && (
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-sm font-medium">
-                {unpriced.length} of {holdings.length} holdings have no price
-                yet
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                They are excluded from the totals above rather than counted as
-                zero, so those figures cover only part of the book. Prices
-                arrive with the market feed.
-              </p>
-              <ul className="mt-2 flex flex-wrap gap-1.5">
-                {unpriced.map((h) => (
-                  <li
-                    key={h.symbol}
-                    className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                  >
-                    {h.symbol}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {num(totals.ring_fenced_inr) !== 0 && (
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-sm">
-                <span className="font-medium">Crypto, separately:</span>{" "}
-                {crypto && (
-                  <>
-                    {formatRupees(crypto.invested_inr)} invested, now{" "}
-                    {crypto.market_value_inr
-                      ? formatRupees(crypto.market_value_inr)
-                      : "unpriced"}{" "}
-                    ·{" "}
-                  </>
-                )}
-                <span className={directionClass(totals.ring_fenced_inr)}>
-                  {formatRupees(totals.ring_fenced_inr)}
-                </span>{" "}
-                unrealised.
-              </p>
-              <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                Counted in the totals above; kept out of tax netting.
-                <InfoTip label="Why crypto is separate">
-                  Under s.115BBH a crypto loss cannot be set against any other
-                  gain — not even a different crypto gain, not in a later year —
-                  so a single netted number would show a position the tax code
-                  does not allow.
-                </InfoTip>
-              </p>
-            </div>
-          )}
-
-          {/* --- return ---------------------------------------------------------------- */}
-          <section className="grid gap-3 sm:grid-cols-2">
-            {summary.returns.map((r) => (
-              <div
-                key={r.kind}
-                className="rounded-xl border border-border bg-card p-4"
-              >
-                {/* ⚠ What the number IS stays on the card: one of these is per year and the
-                    other a total over a window, and two bare percentages invite being read as
-                    the same kind of number. Only the elaboration hides behind the "i". */}
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium">
-                      {r.kind === "money_weighted"
-                        ? "How your money has done"
-                        : "How your picks have done"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {r.kind === "money_weighted"
-                        ? "per year"
-                        : r.covers_from
-                          ? `12 months to ${formatDateFull(r.covers_to ?? r.covers_from)}`
-                          : "over the period"}{" "}
-                      · {r.label}
-                    </p>
-                  </div>
-                  {r.explanation && (
-                    <InfoTip label={`What ${r.label} means`}>{r.explanation}</InfoTip>
-                  )}
-                </div>
-                {r.value != null ? (
-                  <>
-                    <p
-                      className={`mt-2 text-xl font-semibold ${directionClass(r.value)}`}
-                      style={{ fontVariantNumeric: "tabular-nums" }}
-                    >
-                      {formatSignedPct(r.value)}
-                    </p>
-                    {r.headline && (
-                      <p className="mt-1 text-xs text-muted-foreground">{r.headline}</p>
-                    )}
-                  </>
-                ) : (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Not available — {r.unavailable_because}.
-                  </p>
-                )}
-              </div>
-            ))}
-          </section>
-
-          {/* --- allocation ------------------------------------------------------------ */}
-          {allocation.length > 0 && (
-            <section className="space-y-3">
-              <h2 className="text-sm font-semibold">Where the money is</h2>
-              <StackedBar
-                segments={allocation}
-                format={(n) => formatRupees(String(n))}
+            {/* --- what it is worth ------------------------------------------------------- */}
+            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {/* ⚠ `cost_basis_inr`, not `invested_inr`. The latter counts only priced,
+              non-ring-fenced holdings so it stays comparable with market value — which
+              makes it ZERO on a book with no prices. Running the page for the first time
+              is what caught it. */}
+              <Stat
+                label="Invested"
+                value={formatRupees(totals.cost_basis_inr)}
               />
-              <Legend
-                series={allocation.map((s) => ({
-                  key: s.key,
-                  label: s.label,
-                  color: s.color,
-                }))}
+              {/* ⚠ `*_all_*`: the whole book, crypto included. The other fields exclude
+              ring-fenced holdings so they stay comparable with each other — and pairing one of
+              those with "Invested", which counts everything, reported a GAIN on a book that was
+              down. */}
+              <Stat
+                label="Current value"
+                value={
+                  totals.is_complete
+                    ? formatRupees(totals.market_value_all_inr)
+                    : "—"
+                }
+                hint={
+                  totals.is_complete
+                    ? undefined
+                    : `waiting on ${totals.unpriced.length} price${totals.unpriced.length === 1 ? "" : "s"}`
+                }
               />
-              {allocation.some((a) => a.key === "CRYPTO") && (
-                <p className="text-xs text-muted-foreground">
-                  ⚠ This includes crypto, which the totals above keep separate.
-                  Both are right: you are exposed to it, so it belongs in a
-                  picture of where the money is — but its gains and losses
-                  cannot be netted against anything else, so it stays out of a
-                  single portfolio figure. Adding these segments up will not
-                  give you the number at the top of the page.
+              <Stat
+                label="Unrealised"
+                value={
+                  totals.is_complete
+                    ? `${directionGlyph(totals.unrealised_all_inr)} ${formatRupees(totals.unrealised_all_inr)}`
+                    : "—"
+                }
+                className={
+                  totals.is_complete
+                    ? directionClass(totals.unrealised_all_inr)
+                    : undefined
+                }
+                hint={
+                  totals.is_complete
+                    ? formatSignedPct(totals.unrealised_all_pct)
+                    : undefined
+                }
+              />
+              <Stat
+                label="Realised"
+                value={formatRupees(totals.realised_inr)}
+                className={directionClass(totals.realised_inr)}
+              />
+            </section>
+
+            {/* ⚠ Above the chart and the holdings on purpose. An announced split the ledger
+            does not know about makes every figure below this point wrong for that holding —
+            by half, in the worst case — so the explanation has to be read first. */}
+            <CorporateActions
+              actions={summary.corporate_actions}
+              onChange={() => void load()}
+            />
+
+            {unpriced.length > 0 && (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-sm font-medium">
+                  {unpriced.length} of {holdings.length} holdings have no price
+                  yet
                 </p>
-              )}
-              <ul className="space-y-1.5">
-                {[...priced]
-                  .sort(
-                    (a, b) => num(b.market_value_inr) - num(a.market_value_inr),
-                  )
-                  .map((h) => (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  They are excluded from the totals above rather than counted as
+                  zero, so those figures cover only part of the book. Prices
+                  arrive with the market feed.
+                </p>
+                <ul className="mt-2 flex flex-wrap gap-1.5">
+                  {unpriced.map((h) => (
                     <li
                       key={h.symbol}
-                      className="flex items-center gap-3 text-sm"
+                      className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                     >
-                      <span className="w-24 shrink-0 font-medium">
-                        {h.symbol}
-                      </span>
-                      <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                        <span
-                          className="block h-full rounded-full"
-                          style={{
-                            width: `${(num(h.market_value_inr) / allocationTotal) * 100}%`,
-                            background: ASSET_COLORS[h.asset_class],
-                          }}
-                        />
-                      </span>
-                      <span className="w-24 shrink-0 text-right tabular-nums text-muted-foreground">
-                        {formatRupees(h.market_value_inr)}
-                      </span>
-                    </li>
-                  ))}
-              </ul>
-              {unpriced.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Not shown, because they cannot be valued:{" "}
-                  {unpriced.map((h) => h.symbol).join(", ")} — together{" "}
-                  {formatRupees(summary.unpriced_cost_inr)} at cost.
-                </p>
-              )}
-            </section>
-          )}
-
-          {/* --- over time ------------------------------------------------------------- */}
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">Over time</h2>
-              <div className="flex gap-1" role="group" aria-label="Time range">
-                {RANGES.map((r) => (
-                  <Button
-                    key={r.key}
-                    size="sm"
-                    variant={range === r.key ? "secondary" : "ghost"}
-                    onClick={() => setRange(r.key)}
-                    aria-pressed={range === r.key}
-                  >
-                    {r.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              {curvePoints.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">
-                  Nothing to plot yet — the lines start at your first
-                  transaction.
-                </p>
-              ) : (
-                <>
-                  <Lines
-                    data={curvePoints}
-                    series={CURVE_SERIES}
-                    format={(n) => formatRupees(String(n))}
-                    note={curveNote(curve)}
-                  />
-                  <Legend series={CURVE_SERIES} className="mt-3" />
-                </>
-              )}
-            </div>
-          </section>
-
-          {/* --- holdings -------------------------------------------------------------- */}
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold">Holdings</h2>
-            {holdings.length === 0 ? (
-              <EmptyState
-                icon={Wallet}
-                title="Nothing in this book yet"
-                hint="Record a transaction below, or tell Acero in chat — both write to the same ledger."
-              />
-            ) : (
-              <>
-                {/* Table on a real screen. */}
-                <div className="hidden overflow-hidden rounded-xl border border-border md:block">
-                  <table className="w-full text-sm">
-                    <caption className="sr-only">
-                      Holdings, grouped by asset class, with cost, value and
-                      unrealised gain
-                    </caption>
-                    <thead className="bg-muted/50 text-xs text-muted-foreground">
-                      <tr>
-                        <SortHeader
-                          label="Holding"
-                          sortKey="symbol"
-                          sort={sort}
-                          onSort={setSort}
-                          align="left"
-                        />
-                        <th
-                          scope="col"
-                          className="px-3 py-2 text-right font-medium"
-                        >
-                          Qty
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-3 py-2 text-right font-medium"
-                        >
-                          Last price
-                        </th>
-                        <SortHeader
-                          label="Invested"
-                          sortKey="cost"
-                          sort={sort}
-                          onSort={setSort}
-                        />
-                        <SortHeader
-                          label="Value"
-                          sortKey="value"
-                          sort={sort}
-                          onSort={setSort}
-                        />
-                        <SortHeader
-                          label="Unrealised"
-                          sortKey="gain"
-                          sort={sort}
-                          onSort={setSort}
-                        />
-                      </tr>
-                    </thead>
-                    {groupByAssetClass(holdings).map(([cls, rows]) => (
-                      <tbody key={cls} className="border-t border-border">
-                        <tr>
-                          <th
-                            scope="colgroup"
-                            colSpan={6}
-                            className="bg-muted/30 px-3 py-1.5 text-left text-xs font-semibold"
-                          >
-                            {ASSET_LABELS[cls]}
-                            <span className="ml-2 font-normal text-muted-foreground">
-                              {formatRupees(byClass.get(cls)?.invested_inr)}{" "}
-                              invested
-                            </span>
-                          </th>
-                        </tr>
-                        {sortRows(rows).map((h) => (
-                          <tr
-                            key={h.symbol}
-                            className="cursor-pointer border-t border-border hover:bg-accent/40"
-                            onClick={() => setOpenSymbol(h.symbol)}
-                          >
-                            <th
-                              scope="row"
-                              className="px-3 py-2.5 text-left font-medium"
-                            >
-                              <button
-                                type="button"
-                                className="text-left hover:underline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenSymbol(h.symbol);
-                                }}
-                              >
-                                {h.symbol}
-                              </button>
-                              <span className="block text-xs font-normal text-muted-foreground">
-                                {longTermText(h) ?? "no long-term boundary"}
-                              </span>
-                              {/* An ANNOUNCED action outranks a guessed one: it says
-                              the same thing with a source behind it. */}
-                              {h.open_action ? (
-                                <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                                  <AlertTriangle className="size-3" />
-                                  {h.open_action.ratio_text ?? "action"} pending
-                                </span>
-                              ) : (
-                                h.suspicious_move && (
-                                  <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                                    <AlertTriangle className="size-3" />
-                                    possible unrecorded split
-                                  </span>
-                                )
-                              )}
-                            </th>
-                            <td className="px-3 py-2.5 text-right tabular-nums">
-                              {formatQuantity(h.quantity)}
-                            </td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">
-                              {h.mark ? (
-                                <>
-                                  {formatPrice(h.mark.price, h.currency)}
-                                  <span
-                                    className="block text-xs text-muted-foreground"
-                                    title={`Price from ${sourceLabel(h.mark.source)}`}
-                                  >
-                                    {h.mark.age_text}
-                                    {h.mark.is_stale ? " · stale" : ""}
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  no price yet
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">
-                              {formatRupees(h.cost_basis_inr)}
-                            </td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">
-                              {h.market_value_inr
-                                ? formatRupees(h.market_value_inr)
-                                : "—"}
-                            </td>
-                            <td
-                              className={`px-3 py-2.5 text-right tabular-nums ${directionClass(h.unrealised_inr)}`}
-                            >
-                              {h.unrealised_inr ? (
-                                <>
-                                  {directionGlyph(h.unrealised_inr)}{" "}
-                                  {formatRupees(h.unrealised_inr)}
-                                  <span className="block text-xs">
-                                    {formatSignedPct(h.unrealised_pct)}
-                                  </span>
-                                </>
-                              ) : (
-                                "—"
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    ))}
-                  </table>
-                </div>
-
-                {/* Cards on a phone. ⚠ Not a horizontally scrolling table — that hides the
-                columns that matter behind a gesture nobody performs, on the device this
-                app is installed on. */}
-                <ul className="space-y-2 md:hidden">
-                  {sortRows(holdings).map((h) => (
-                    <li key={h.symbol}>
-                      <button
-                        type="button"
-                        onClick={() => setOpenSymbol(h.symbol)}
-                        className="w-full rounded-xl border border-border bg-card p-3 text-left"
-                      >
-                        <div className="flex items-baseline justify-between gap-3">
-                          <span className="font-medium">{h.symbol}</span>
-                          <span className="tabular-nums">
-                            {h.market_value_inr
-                              ? formatRupees(h.market_value_inr)
-                              : formatRupees(h.cost_basis_inr)}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-baseline justify-between gap-3 text-xs">
-                          <span className="text-muted-foreground">
-                            {formatQuantity(h.quantity)} ·{" "}
-                            {ASSET_LABELS[h.asset_class]}
-                          </span>
-                          <span className={directionClass(h.unrealised_inr)}>
-                            {h.unrealised_inr
-                              ? `${directionGlyph(h.unrealised_inr)} ${formatSignedPct(h.unrealised_pct)}`
-                              : "at cost — no price yet"}
-                          </span>
-                        </div>
-                        {h.open_action ? (
-                          <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                            <AlertTriangle className="size-3" />{" "}
-                            {h.open_action.ratio_text ?? "action"} pending
-                          </p>
-                        ) : (
-                          h.suspicious_move && (
-                            <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                              <AlertTriangle className="size-3" /> possible
-                              unrecorded split
-                            </p>
-                          )
-                        )}
-                      </button>
+                      {h.symbol}
                     </li>
                   ))}
                 </ul>
-              </>
+              </div>
             )}
-          </section>
 
-          {/* ⚠ Above the framework, because a live decision outranks the reference material
-          behind it. Below the holdings, because a suggestion is only readable once you can
-          see what you already own. */}
-          <ProposalsPanel />
+            {num(totals.ring_fenced_inr) !== 0 && (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-sm">
+                  <span className="font-medium">Crypto, separately:</span>{" "}
+                  {crypto && (
+                    <>
+                      {formatRupees(crypto.invested_inr)} invested, now{" "}
+                      {crypto.market_value_inr
+                        ? formatRupees(crypto.market_value_inr)
+                        : "unpriced"}{" "}
+                      ·{" "}
+                    </>
+                  )}
+                  <span className={directionClass(totals.ring_fenced_inr)}>
+                    {formatRupees(totals.ring_fenced_inr)}
+                  </span>{" "}
+                  unrealised.
+                </p>
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  Counted in the totals above; kept out of tax netting.
+                  <InfoTip label="Why crypto is separate">
+                    Under s.115BBH a crypto loss cannot be set against any other
+                    gain — not even a different crypto gain, not in a later year —
+                    so a single netted number would show a position the tax code
+                    does not allow.
+                  </InfoTip>
+                </p>
+              </div>
+            )}
 
-          {/* ⚠ Above the framework, and open by default. New ideas are the most actionable
-          thing on this page after a live decision — and the framework below is the reference
-          material that a candidate gets judged against, so it reads in that order. */}
-          {/* ⚠ Directly above the queue. A sector getting attention and a company landing
-          in the queue are the same signal at two resolutions, and reading them together is
-          what stops a theme feeling like trivia. */}
-          <ThemesStrip />
+            {/* --- return ---------------------------------------------------------------- */}
+            <section className="grid gap-3 sm:grid-cols-2">
+              {summary.returns.map((r) => (
+                <div
+                  key={r.kind}
+                  className="rounded-xl border border-border bg-card p-4"
+                >
+                  {/* ⚠ What the number IS stays on the card: one of these is per year and the
+                      other a total over a window, and two bare percentages invite being read as
+                      the same kind of number. Only the elaboration hides behind the "i". */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {r.kind === "money_weighted"
+                          ? "How your money has done"
+                          : "How your picks have done"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {r.kind === "money_weighted"
+                          ? "per year"
+                          : r.covers_from
+                            ? `12 months to ${formatDateFull(r.covers_to ?? r.covers_from)}`
+                            : "over the period"}{" "}
+                        · {r.label}
+                      </p>
+                    </div>
+                    {r.explanation && (
+                      <InfoTip label={`What ${r.label} means`}>{r.explanation}</InfoTip>
+                    )}
+                  </div>
+                  {r.value != null ? (
+                    <>
+                      <p
+                        className={`mt-2 text-xl font-semibold ${directionClass(r.value)}`}
+                        style={{ fontVariantNumeric: "tabular-nums" }}
+                      >
+                        {formatSignedPct(r.value)}
+                      </p>
+                      {r.headline && (
+                        <p className="mt-1 text-xs text-muted-foreground">{r.headline}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Not available — {r.unavailable_because}.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </section>
 
-          <ResearchPanel reloadKey={researchNonce} />
+            {/* --- allocation ------------------------------------------------------------ */}
+            {allocation.length > 0 && (
+              <section className="space-y-3">
+                <h2 className="text-sm font-semibold">Where the money is</h2>
+                <StackedBar
+                  segments={allocation}
+                  format={(n) => formatRupees(String(n))}
+                />
+                <Legend
+                  series={allocation.map((s) => ({
+                    key: s.key,
+                    label: s.label,
+                    color: s.color,
+                  }))}
+                />
+                {allocation.some((a) => a.key === "CRYPTO") && (
+                  <p className="text-xs text-muted-foreground">
+                    ⚠ This includes crypto, which the totals above keep separate.
+                    Both are right: you are exposed to it, so it belongs in a
+                    picture of where the money is — but its gains and losses
+                    cannot be netted against anything else, so it stays out of a
+                    single portfolio figure. Adding these segments up will not
+                    give you the number at the top of the page.
+                  </p>
+                )}
+                <ul className="space-y-1.5">
+                  {[...priced]
+                    .sort(
+                      (a, b) => num(b.market_value_inr) - num(a.market_value_inr),
+                    )
+                    .map((h) => (
+                      <li
+                        key={h.symbol}
+                        className="flex items-center gap-3 text-sm"
+                      >
+                        <span className="w-24 shrink-0 font-medium">
+                          {h.symbol}
+                        </span>
+                        <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                          <span
+                            className="block h-full rounded-full"
+                            style={{
+                              width: `${(num(h.market_value_inr) / allocationTotal) * 100}%`,
+                              background: ASSET_COLORS[h.asset_class],
+                            }}
+                          />
+                        </span>
+                        <span className="w-24 shrink-0 text-right tabular-nums text-muted-foreground">
+                          {formatRupees(h.market_value_inr)}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+                {unpriced.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Not shown, because they cannot be valued:{" "}
+                    {unpriced.map((h) => h.symbol).join(", ")} — together{" "}
+                    {formatRupees(summary.unpriced_cost_inr)} at cost.
+                  </p>
+                )}
+              </section>
+            )}
 
-          {/* Below the holdings: this is where a company stops being a line in a ledger
-          and becomes a position in a thesis. */}
-          <FrameworkPanel />
+            {/* --- over time ------------------------------------------------------------- */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold">Over time</h2>
+                <div className="flex gap-1" role="group" aria-label="Time range">
+                  {RANGES.map((r) => (
+                    <Button
+                      key={r.key}
+                      size="sm"
+                      variant={range === r.key ? "secondary" : "ghost"}
+                      onClick={() => setRange(r.key)}
+                      aria-pressed={range === r.key}
+                    >
+                      {r.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border bg-card p-4">
+                {curvePoints.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    Nothing to plot yet — the lines start at your first
+                    transaction.
+                  </p>
+                ) : (
+                  <>
+                    <Lines
+                      data={curvePoints}
+                      series={CURVE_SERIES}
+                      format={(n) => formatRupees(String(n))}
+                      note={curveNote(curve)}
+                    />
+                    <Legend series={CURVE_SERIES} className="mt-3" />
+                  </>
+                )}
+              </div>
+            </section>
 
-          {/* ⚠ Below the framework, because what a source said is evidence for a judgement
-          rather than a judgement, and reading it first is how commentary ends up setting the
-          agenda. Collapsed by default for the same reason. */}
-          <ReadingPanel />
+            {/* --- holdings -------------------------------------------------------------- */}
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold">Holdings</h2>
+              {holdings.length === 0 ? (
+                <EmptyState
+                  icon={Wallet}
+                  title="Nothing in this book yet"
+                  hint="Record a transaction below, or tell Acero in chat — both write to the same ledger."
+                />
+              ) : (
+                <>
+                  {/* Table on a real screen. */}
+                  <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+                    <table className="w-full text-sm">
+                      <caption className="sr-only">
+                        Holdings, grouped by asset class, with cost, value and
+                        unrealised gain
+                      </caption>
+                      <thead className="bg-muted/50 text-xs text-muted-foreground">
+                        <tr>
+                          <SortHeader
+                            label="Holding"
+                            sortKey="symbol"
+                            sort={sort}
+                            onSort={setSort}
+                            align="left"
+                          />
+                          <th
+                            scope="col"
+                            className="px-3 py-2 text-right font-medium"
+                          >
+                            Qty
+                          </th>
+                          <th
+                            scope="col"
+                            className="px-3 py-2 text-right font-medium"
+                          >
+                            Last price
+                          </th>
+                          <SortHeader
+                            label="Invested"
+                            sortKey="cost"
+                            sort={sort}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="Value"
+                            sortKey="value"
+                            sort={sort}
+                            onSort={setSort}
+                          />
+                          <SortHeader
+                            label="Unrealised"
+                            sortKey="gain"
+                            sort={sort}
+                            onSort={setSort}
+                          />
+                        </tr>
+                      </thead>
+                      {groupByAssetClass(holdings).map(([cls, rows]) => (
+                        <tbody key={cls} className="border-t border-border">
+                          <tr>
+                            <th
+                              scope="colgroup"
+                              colSpan={6}
+                              className="bg-muted/30 px-3 py-1.5 text-left text-xs font-semibold"
+                            >
+                              {ASSET_LABELS[cls]}
+                              <span className="ml-2 font-normal text-muted-foreground">
+                                {formatRupees(byClass.get(cls)?.invested_inr)}{" "}
+                                invested
+                              </span>
+                            </th>
+                          </tr>
+                          {sortRows(rows).map((h) => (
+                            <tr
+                              key={h.symbol}
+                              className="cursor-pointer border-t border-border hover:bg-accent/40"
+                              onClick={() => setOpenSymbol(h.symbol)}
+                            >
+                              <th
+                                scope="row"
+                                className="px-3 py-2.5 text-left font-medium"
+                              >
+                                <button
+                                  type="button"
+                                  className="text-left hover:underline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenSymbol(h.symbol);
+                                  }}
+                                >
+                                  {h.symbol}
+                                </button>
+                                <span className="block text-xs font-normal text-muted-foreground">
+                                  {longTermText(h) ?? "no long-term boundary"}
+                                </span>
+                                {/* An ANNOUNCED action outranks a guessed one: it says
+                                the same thing with a source behind it. */}
+                                {h.open_action ? (
+                                  <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                                    <AlertTriangle className="size-3" />
+                                    {h.open_action.ratio_text ?? "action"} pending
+                                  </span>
+                                ) : (
+                                  h.suspicious_move && (
+                                    <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                                      <AlertTriangle className="size-3" />
+                                      possible unrecorded split
+                                    </span>
+                                  )
+                                )}
+                              </th>
+                              <td className="px-3 py-2.5 text-right tabular-nums">
+                                {formatQuantity(h.quantity)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums">
+                                {h.mark ? (
+                                  <>
+                                    {formatPrice(h.mark.price, h.currency)}
+                                    <span
+                                      className="block text-xs text-muted-foreground"
+                                      title={`Price from ${sourceLabel(h.mark.source)}`}
+                                    >
+                                      {h.mark.age_text}
+                                      {h.mark.is_stale ? " · stale" : ""}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">
+                                    no price yet
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums">
+                                {formatRupees(h.cost_basis_inr)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums">
+                                {h.market_value_inr
+                                  ? formatRupees(h.market_value_inr)
+                                  : "—"}
+                              </td>
+                              <td
+                                className={`px-3 py-2.5 text-right tabular-nums ${directionClass(h.unrealised_inr)}`}
+                              >
+                                {h.unrealised_inr ? (
+                                  <>
+                                    {directionGlyph(h.unrealised_inr)}{" "}
+                                    {formatRupees(h.unrealised_inr)}
+                                    <span className="block text-xs">
+                                      {formatSignedPct(h.unrealised_pct)}
+                                    </span>
+                                  </>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      ))}
+                    </table>
+                  </div>
 
-          {/* ⚠ Below the framework and collapsed by default. It is for reading in aggregate
-          on a schedule, and putting it higher would invite exactly the casual dipping-in that
-          trains worse judgement. */}
-          {/* ⚠ Immediately above the books, because the books answer "which of my ledgers did
-          best" and this answers "did any of them beat simply buying the index" — which is the
-          prior question, and the one it is easiest to avoid asking. */}
-          <BenchmarksPanel />
+                  {/* Cards on a phone. ⚠ Not a horizontally scrolling table — that hides the
+                  columns that matter behind a gesture nobody performs, on the device this
+                  app is installed on. */}
+                  <ul className="space-y-2 md:hidden">
+                    {sortRows(holdings).map((h) => (
+                      <li key={h.symbol}>
+                        <button
+                          type="button"
+                          onClick={() => setOpenSymbol(h.symbol)}
+                          className="w-full rounded-xl border border-border bg-card p-3 text-left"
+                        >
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="font-medium">{h.symbol}</span>
+                            <span className="tabular-nums">
+                              {h.market_value_inr
+                                ? formatRupees(h.market_value_inr)
+                                : formatRupees(h.cost_basis_inr)}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex items-baseline justify-between gap-3 text-xs">
+                            <span className="text-muted-foreground">
+                              {formatQuantity(h.quantity)} ·{" "}
+                              {ASSET_LABELS[h.asset_class]}
+                            </span>
+                            <span className={directionClass(h.unrealised_inr)}>
+                              {h.unrealised_inr
+                                ? `${directionGlyph(h.unrealised_inr)} ${formatSignedPct(h.unrealised_pct)}`
+                                : "at cost — no price yet"}
+                            </span>
+                          </div>
+                          {h.open_action ? (
+                            <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                              <AlertTriangle className="size-3" />{" "}
+                              {h.open_action.ratio_text ?? "action"} pending
+                            </p>
+                          ) : (
+                            h.suspicious_move && (
+                              <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                                <AlertTriangle className="size-3" /> possible
+                                unrecorded split
+                              </p>
+                            )
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </section>
 
-          <BooksPanel />
+            </TabsContent>
 
-          {/* ⚠ Beside the books and collapsed for the same reason. Both are for reading in
-          aggregate on a schedule, and a what-if ledger or a past review browsed after a name
-          that got away trains worse judgement rather than better. */}
-          <ReviewsPanel />
+            {/* --- what to do about it ---------------------------------------------- */}
+            {/* ⚠ Everything here is waiting on a person. A live proposal, a theme the book
+            is exposed to, a company in the queue — three resolutions of the same signal, and
+            the reason they share a tab is that they share an answer: yes, no, or not yet. */}
+            <TabsContent value="decisions" className="space-y-8">
+              <ProposalsPanel />
 
-          {/* ⚠ Last on the page, and collapsed. These six move on a scale of months; putting
-          them anywhere higher would invite watching them the way one watches a price, which is
-          exactly the habit writing them down in advance exists to prevent. */}
-          <VerdictPanel />
+              {/* ⚠ Directly above the queue. A sector getting attention and a company
+              landing in the queue are the same signal at two resolutions, and reading them
+              together is what stops a theme feeling like trivia. */}
+              <ThemesStrip />
 
-          {/* Below the holdings and above the ledger: it is a yearly obligation rather
-          than something to check on open, but it belongs with the record it reads. */}
-          <ForeignHoldings />
+              <ResearchPanel reloadKey={researchNonce} />
+            </TabsContent>
 
-          <TransactionEntry
-            transactions={transactions}
-            loading={loading}
-            onChanged={() => void load()}
-          />
+            {/* --- what it is judged against ---------------------------------------- */}
+            {/* ⚠ The framework and the reading sit together because one is the standard and
+            the other is the evidence. They are reference material: consulted when a company
+            is being assessed, not glanced at daily — which is precisely why they no longer
+            occupy the middle of the page someone opens to check a price. */}
+            <TabsContent value="framework" className="space-y-8">
+              <FrameworkPanel />
+
+              {/* ⚠ Below the framework, because what a source said is evidence for a
+              judgement rather than a judgement, and reading it first is how commentary ends
+              up setting the agenda. Collapsed by default for the same reason. */}
+              <ReadingPanel />
+            </TabsContent>
+
+            {/* --- is any of this working ------------------------------------------- */}
+            {/* ⚠ A tab you have to choose, on purpose. All four answer "is this experiment
+            worth continuing", which is a question for a scheduled sit-down and not for a
+            spare minute — and a benchmark comparison browsed after a name that got away
+            trains worse judgement rather than better. */}
+            <TabsContent value="scorecard" className="space-y-8">
+              {/* ⚠ First, because the books answer "which of my ledgers did best" and this
+              answers "did any of them beat simply buying the index" — which is the prior
+              question, and the one it is easiest to avoid asking. */}
+              <BenchmarksPanel />
+
+              <BooksPanel />
+
+              <ReviewsPanel />
+
+              {/* ⚠ Last, and collapsed. These six move on a scale of months; anywhere more
+              prominent would invite watching them the way one watches a price, which is
+              exactly the habit writing them down in advance exists to prevent. */}
+              <VerdictPanel />
+            </TabsContent>
+
+            {/* --- what is on the record -------------------------------------------- */}
+            {/* ⚠ The ledger and the yearly schedule that reads it. Transactions are the only
+            facts in this whole page — everything else is a fold over them — so they are kept
+            where they can be checked, not where they can be casually edited. */}
+            <TabsContent value="records" className="space-y-8">
+              <ForeignHoldings />
+
+              <TransactionEntry
+                transactions={transactions}
+                loading={loading}
+                onChanged={() => void load()}
+              />
+            </TabsContent>
+          </Tabs>
 
           <PositionSheet
             symbol={openSymbol}

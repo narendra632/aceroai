@@ -55,9 +55,17 @@ from app.db.models import (
     Transaction,
 )
 from app.services.errors import NotFound
-from app.services.investments import frameworks, history, pricing, scoring, themes, watching
+from app.services.investments import (
+    frameworks,
+    history,
+    pricing,
+    scoring,
+    spoken,
+    themes,
+    watching,
+)
 from app.services.investments import portfolio as pf
-from app.services.marketdata import feeds, http, universe, webpage
+from app.services.marketdata import feeds, http, transcript, universe, webpage
 from app.services.marketdata.http import ProviderError
 
 log = logging.getLogger(__name__)
@@ -428,6 +436,28 @@ class Vocabulary:
         if target.is_known:
             return target
         return self.known_symbols.get(target.symbol.upper(), target)
+
+    def starting_with(self, words: tuple[str, ...]) -> Target | None:
+        """The one listed name beginning with these words — where there is exactly one.
+
+        ⚠ **Only ever applied to a name handed back by a model, never to free prose.** Nobody
+        writes a company's registered name: the exchange says *Kaynes Technology India
+        Limited* and every person and every model says *Kaynes Technology*. Exact matching is
+        right for prose, where a partial name is usually a coincidence; it is wrong for a
+        string that was produced as an answer to "which company is this".
+
+        ⚠ Ambiguity is refused rather than resolved. Two listed names beginning *Tata Motors*
+        means the question has two answers and guessing one would put a company nobody named
+        into the register the attribution measure divides by.
+        """
+        if len(words) < 2:
+            return None
+        hits = {
+            target.symbol: target
+            for key, target in self.by_name.items()
+            if key[: len(words)] == words
+        }
+        return next(iter(hits.values())) if len(hits) == 1 else None
 
     def add(self, target: Target, *, min_symbol: int) -> None:
         symbol = target.symbol.strip()
@@ -1121,6 +1151,81 @@ def _fetch(source: Source, c: httpx.Client | None) -> list[feeds.Item]:
     raise ProviderError(source.kind, "no adapter for this kind of source")
 
 
+def _spoken_words(source: Source, item: feeds.Item, c: httpx.Client | None):
+    """The transcript of a video, where the source is a channel and the captions are readable.
+
+    ⚠ Never raises. An unreachable transcript is a thinner reading of one item, not a failed
+    poll of a whole channel — and the item is stored either way, because a video that could
+    not be read must stay countable as a video that was published.
+    """
+    if source.kind != "YOUTUBE":
+        return None
+    # ⚠ From the link only. The uploads feed always writes a watch URL, so anything that is
+    # not one is not a video — and deriving an id from the external id instead would send a
+    # request for every item of every YouTube-kinded source, including ones that never were.
+    video_id = webpage.video_id(item.url or "")
+    if not video_id:
+        return None
+    try:
+        return transcript.fetch(video_id, c)
+    except Exception:  # noqa: BLE001 — an unsupported endpoint may fail in unforeseen ways
+        log.info("transcript unavailable for %s", item.external_id)
+        return None
+
+
+def _heard_in(captions, vocab: Vocabulary, *, already: set[str]) -> list[tuple[Target, str]]:
+    """Companies named in a transcript the matcher cannot read, via transliteration.
+
+    ⚠ **The model's output is never a company.** It is a Latin-script string, and it becomes a
+    company only if `named_in` — the same deterministic matcher, the same floors, the same
+    ambiguous-word list, the same exchange register — recognises it. A name the model invented
+    is matched against 2,595 real ones and found in none of them. That is why this can exist
+    at all without handing a language model the power to write rows into the very table the
+    source-attribution measure counts.
+
+    ⚠ The excerpt kept is the model's verbatim quote from the ORIGINAL transcript, not the
+    transliteration. An excerpt is there so a person can check what was said; a translated one
+    would show them what a machine decided it meant.
+    """
+    out: list[tuple[Target, str]] = []
+    taken = set(already)
+    for heard in spoken.names_in(captions.text):
+        hits = [target for target, _ in named_in(heard.name, vocab)]
+        if not hits:
+            # Nobody writes a registered name. The exchange says "Kaynes Technology India
+            # Limited"; every person and every model says "Kaynes Technology".
+            prefixed = vocab.starting_with(_name_key(heard.name))
+            hits = [prefixed] if prefixed else []
+        for target in hits:
+            target = vocab.resolve(target)
+            if target.symbol in taken:
+                continue
+            taken.add(target.symbol)
+            out.append((target, heard.said[:EXCERPT_CHARS]))
+    if out:
+        log.info("transcript in %s named %s", captions.language, [t.symbol for t, _ in out])
+    return out
+
+
+def _transcript_note(source: Source, captions) -> dict:
+    """What was read of the spoken words, in a shape the diagnostics can count.
+
+    ⚠ `matchable` is the field that stops a false finding. Most Indian finance commentary is
+    in Hindi, the matcher reads Latin-script names, and without this an hour of Devanagari
+    would be filed as a video that named no company — which is a claim about the video rather
+    than about the reader, and the wrong one.
+    """
+    if captions is None:
+        return {"read": False}
+    return {
+        "read": True,
+        "language": captions.language,
+        "auto": captions.is_auto,
+        "matchable": captions.is_matchable,
+        "words": captions.words,
+    }
+
+
 def _already_seen(db: Session, source: Source, external_ids: list[str]) -> set[str]:
     """Which of these has already been stored.
 
@@ -1217,8 +1322,18 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
     claims = source.kind in CLAIMING_KINDS
 
     for item in fresh:
-        text = f"{item.title}\n{item.body}".strip()
+        # ⚠ The spoken words, where there are any. A title advertises; a transcript reports.
+        # Everything below — the matcher, the stance read, the theme read, the excerpt — then
+        # works on what was actually said without knowing anything changed.
+        captions = _spoken_words(source, item, c)
+        body = item.body if captions is None else f"{item.body}\n\n{captions.text}"
+        text = f"{item.title}\n{body}".strip()
         found = named_in(text, vocab)
+        # ⚠ A transcript in another script matches nothing deterministically, and "in Hindi"
+        # and "named nobody" must not be the same row. The model transliterates; the exchange's
+        # register still decides what counts as a company — see `_heard_in`.
+        if captions is not None and not captions.is_matchable:
+            found += _heard_in(captions, vocab, already={t.symbol for t, _ in found})
         # ⚠ An exchange feed is read for news about what you already follow. It names a couple
         # of hundred other companies a day as a matter of routine, and none of that is a lead.
         if not claims:
@@ -1235,7 +1350,7 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
         # version set this afterwards — the guard refused the update, which is it working on
         # its author again. A theme is part of what was read, not something discovered about
         # it later, so it belongs in the row from the start.
-        item_themes = themes.read_themes(item.title, item.body, spec)
+        item_themes = themes.read_themes(item.title, body, spec)
 
         row = SourceItem(
             id=uuid.uuid4(),
@@ -1259,6 +1374,15 @@ def poll(db: Session, source: Source, c: httpx.Client | None = None) -> PollResu
                 # can be about a theme AND a company, and treating the two as alternatives
                 # would lose the sector read on exactly the pieces most worth having it for.
                 "themes": item_themes,
+                # ⚠ Present on every video, including ones with no captions, and that row
+                # reads `{"read": false}`. Absent metadata and "there was nothing to read"
+                # are the same shape in JSON, and the whole point of recording this is to
+                # tell a video nobody could read from a video that named nobody.
+                **(
+                    {"transcript": _transcript_note(source, captions)}
+                    if source.kind == "YOUTUBE"
+                    else {}
+                ),
             },
         )
         db.add(row)

@@ -47,7 +47,7 @@ def company(db):
     return make
 
 
-def _file(db, instrument, period: str, **metrics):
+def _file(db, instrument, period: str, taxonomy="INDAS", **metrics):
     """Store one year's figures as though a filing had been read."""
     end = dt.date(int(period[2:4]) + 2000, 3, 31)
     source = SourceItem(
@@ -76,7 +76,7 @@ def _file(db, instrument, period: str, **metrics):
                 unit="inr",
                 period_end=end,
                 consolidated=True,
-                taxonomy="INDAS",
+                taxonomy=taxonomy,
             )
         )
     db.commit()
@@ -180,7 +180,7 @@ def test_the_score_names_what_it_could_not_measure(db, company, spec):
 # --- a bank is a different animal -----------------------------------------------------------
 
 
-def _bank_year(db, bank, period, **overrides):
+def _bank_year(db, bank, period, taxonomy="INDAS", **overrides):
     figures = dict(
         interest_earned=D(300000),
         interest_expended=D(170000),
@@ -192,7 +192,7 @@ def _bank_year(db, bank, period, **overrides):
         other_equity=D(400000),
     )
     figures.update(overrides)
-    return _file(db, bank, period, **figures)
+    return _file(db, bank, period, taxonomy=taxonomy, **figures)
 
 
 def test_a_bank_is_not_failed_on_arithmetic_about_things_it_does_not_have(db, company, spec):
@@ -572,3 +572,21 @@ def test_a_company_with_no_listing_date_is_not_assumed_to_be_old(db, company, sp
     history = scoring.quality_score(db, inst, spec).history
     assert history.years_listed is None
     assert history.obtainable == scoring.HISTORY_YEARS
+
+
+def test_a_lender_is_recognised_from_its_own_filing_not_from_a_sector_list(db, company, spec):
+    """⚠ A sector list said PRIVATE_BANK and nothing else, so the first NBFC or insurer added
+    would have been measured on capital expenditure and cash conversion and failed on
+    arithmetic about machinery it does not own — silently. The exchange makes a lender file
+    under the banking taxonomy, which is the company telling a regulator what it is."""
+    lender = company(symbol="NBFCCO", sector="EMS_ELECTRONICS")
+    for period in ("FY26", "FY25"):
+        # ⚠ Written as a banking filing, not updated into one — the ledger is append-only and
+        # the trigger refuses a correction. It has now caught its author six times.
+        _bank_year(db, lender, period, taxonomy=nse_xbrl.BANKING)
+
+    score = scoring.quality_score(db, lender, spec)
+    assert "cost_to_income" in {p.name for p in score.parts}, (
+        "it filed as a lender, so it is measured as one whatever its sector says"
+    )
+    assert set(score.not_applicable) == {"roce", "cash_conversion", "balance_sheet"}

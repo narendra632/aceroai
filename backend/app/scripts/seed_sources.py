@@ -24,10 +24,20 @@ fifteen uploads each were fetched and run through the matcher on 20 Sep 2026:
     is not the investing firm; their work is a newsletter, which this reads no better than a
     browser does. Registered as a link rather than a feed.
 
-So the honest position is that the reading machinery is correct and the commentary yield is
-near zero for *these eleven companies*. That is a finding about the sources, not a fault in
-the design — and it is exactly what a mention register is for, since without one the claim
-"the channels aren't naming my stocks" would have been a feeling rather than a count.
+⚠ **That first measurement was of TITLES, and a title is advertising copy.** Re-measured on
+24 Sep 2026 with the spoken words — 819 to 10,535 transcribed words per video:
+
+  * *Yadnya* and *Zerodha* both publish **Hindi** captions, in Devanagari, even where the
+    title is written in Latin. The deterministic matcher reads Latin-script names, so it sees
+    nothing in them; `investments/spoken.py` transliterates and the exchange's register still
+    decides what counts.
+  * *Damodaran* publishes English, 6,000–8,600 words a video, and names no NSE-listed company
+    across four recent uploads. His subject is method and his examples are American.
+
+So the finding survives the better measurement, and now rests on what was actually said rather
+than on what the thumbnails claimed. Which makes it a finding about the CHANNELS — and a
+finding is only useful if the thing it is about can be changed, which is why channels are now
+added, switched off and swapped from the Investments page rather than from this file.
 """
 
 from __future__ import annotations

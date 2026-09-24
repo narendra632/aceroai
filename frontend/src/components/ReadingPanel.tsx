@@ -105,6 +105,75 @@ function SourceRow({
   );
 }
 
+/* Adding a channel.
+ *
+ * ⚠ **This exists because the current channels are measurably the wrong ones.** Read on
+ * 24 Sep 2026: Yadnya and Zerodha publish in Hindi, Damodaran teaches valuation with American
+ * examples, and across twelve recent uploads they named zero NSE-listed companies between
+ * them. That is a finding about the sources, and a finding is only useful if the thing it is
+ * about can be changed — so changing it lives here, next to the evidence, rather than in a
+ * seed script only one person can run.
+ *
+ * ⚠ Paste anything. The channel id the uploads feed needs is not something anyone has to
+ * hand; what people have is the address bar. */
+function AddChannel({
+  onAdd,
+  busy,
+}: {
+  onAdd: (pasted: string, notes: string) => Promise<void>;
+  busy: boolean;
+}) {
+  const [pasted, setPasted] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pasted.trim()) return;
+    setError(null);
+    try {
+      await onAdd(pasted.trim(), notes.trim());
+      setPasted("");
+      setNotes("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "that channel could not be added");
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="border-t border-border px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+          placeholder="youtube.com/@channel — or a handle, or a channel id"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+        />
+        <input
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="why it is worth reading (optional)"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+        />
+        <button
+          type="submit"
+          disabled={busy || !pasted.trim()}
+          className="rounded-lg border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+        >
+          Add channel
+        </button>
+      </div>
+      {error && (
+        <p className="mt-1.5 text-xs text-rose-700 dark:text-rose-400">{error}</p>
+      )}
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        It is added switched off and waits for you below. Pasting a link is not
+        the same as deciding to be influenced by it.
+      </p>
+    </form>
+  );
+}
+
 function HeardRow({ item }: { item: Heard }) {
   return (
     <li className="border-t border-border px-3 py-2.5 first:border-t-0">
@@ -223,6 +292,13 @@ export default function ReadingPanel() {
                 />
               ))}
             </ul>
+            <AddChannel
+              busy={busy}
+              onAdd={async (pasted, notes) => {
+                await api.addYoutubeChannel(pasted, notes);
+                load();
+              }}
+            />
           </div>
 
           <div className="rounded-xl border border-border bg-card">

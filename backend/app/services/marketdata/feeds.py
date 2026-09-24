@@ -157,6 +157,75 @@ def nse_feed(name: str, c: httpx.Client | None = None) -> list[Item]:
     return out
 
 
+@dataclass(frozen=True)
+class Channel:
+    """A YouTube channel, resolved from whatever form a person pasted."""
+
+    channel_id: str
+    title: str
+    url: str
+
+
+#: What a channel page calls itself. ⚠ `externalId` and `channelId` both appear and both are
+#: the same value; either is accepted because which one the page carries has changed before.
+_CHANNEL_ID = re.compile(r'"(?:externalId|channelId)":"(UC[\w-]{20,})"')
+_CHANNEL_TITLE = re.compile(r'<meta property="og:title" content="([^"]+)"')
+
+
+def resolve_channel(pasted: str, c: httpx.Client | None = None) -> Channel:
+    """Turn whatever a person pasted into the channel id the uploads feed needs.
+
+    ⚠ **The uploads feed takes a `UC…` id and nothing else**, and nobody has one to hand. What
+    people have is the address bar: `youtube.com/@zerodhaonline`, an old `/c/` vanity path, a
+    video they liked. Requiring the id would make adding a channel a research task, and a
+    channel list that is hard to change is a channel list that never gets changed — which is
+    the whole reason the current three are measurably the wrong three.
+
+    Verified 24 Sep 2026 against `@handle`, a full `@` URL, a bare `UC…` id and a legacy `/c/`
+    path: all four resolve.
+    """
+    raw = (pasted or "").strip()
+    if not raw:
+        raise ProviderError(YOUTUBE_PROVIDER, "nothing was pasted")
+
+    if raw.startswith("http://") or raw.startswith("https://"):
+        url = raw
+    elif raw.startswith("@"):
+        url = f"https://www.youtube.com/{raw}"
+    elif re.fullmatch(r"UC[\w-]{20,}", raw):
+        url = f"https://www.youtube.com/channel/{raw}"
+    else:
+        url = f"https://www.youtube.com/@{raw}"
+
+    own = c is None
+    c = c or http.client()
+
+    def attempt() -> httpx.Response:
+        r = c.get(url, headers=_HEADERS)
+        r.raise_for_status()
+        return r
+
+    try:
+        r = http.with_retries(YOUTUBE_PROVIDER, attempt)
+    finally:
+        if own:
+            c.close()
+
+    found = _CHANNEL_ID.search(r.text)
+    if not found:
+        # ⚠ A video URL, a playlist, a search page or a typo all land here. Named as what it
+        # is rather than as a network failure, because the two need different fixes.
+        raise ProviderError(YOUTUBE_PROVIDER, "that page is not a channel")
+
+    title = _CHANNEL_TITLE.search(r.text)
+    channel_id = found.group(1)
+    return Channel(
+        channel_id=channel_id,
+        title=_clean(title.group(1)) if title else channel_id,
+        url=f"https://www.youtube.com/channel/{channel_id}",
+    )
+
+
 def youtube_uploads(channel_id: str, c: httpx.Client | None = None) -> list[Item]:
     """A channel's recent uploads, without a key or a quota.
 

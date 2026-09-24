@@ -44,6 +44,12 @@ const PART_LABEL: Record<string, string> = {
   balance_sheet: "debt",
   retained_earnings: "retained earnings",
   margin_of_safety: "margin of safety",
+  // ⚠ What a bank is measured on instead. Depreciation, capex and net debt describe a
+  // factory; these describe a lender, and all three come out of the exchange's own banking
+  // taxonomy rather than from anywhere new.
+  cost_to_income: "cost to income",
+  credit_cost: "provisions",
+  funding_spread: "funding spread",
 };
 
 const ATTENTION_LABEL: Record<api.FrameworkAttention["kind"], string> = {
@@ -309,12 +315,34 @@ function Row({
               <span className="ml-2 font-normal tabular-nums">
                 {m.quality.earned} of {m.quality.available} measurable
               </span>
+              {/* ⚠ How much of THIS company's own test was answered. A bank is measured on a
+                  different set of ten from an industrial, so "7 measurable" is a different
+                  depth of reading for each while looking like the same number. */}
+              {m.quality.available !== m.quality.possible && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  (of {m.quality.possible} its test offers)
+                </span>
+              )}
             </p>
             <span className="text-xs text-muted-foreground">
-              {m.years_read} year{m.years_read === 1 ? "" : "s"} of filings ·{" "}
-              <span className="font-medium">{QUADRANT[m.quadrant ?? ""] ?? m.quadrant}</span>
+              {m.years_read} year{m.years_read === 1 ? "" : "s"} of filings
+              {/* ⚠ "1 of 5 read" and "1 of 1 possible" are opposite facts, and without the
+                  second number they look identical. */}
+              {m.quality.years_possible != null &&
+                m.quality.years_possible !== m.years_read &&
+                ` of ${m.quality.years_possible} possible`}{" "}
+              · <span className="font-medium">{QUADRANT[m.quadrant ?? ""] ?? m.quadrant}</span>
             </span>
           </div>
+
+          {/* ⚠ Says WHICH limit is binding. "Too young to have more" resolves with time and
+              nothing can hurry it; "the exchange has not published it" may resolve with a
+              fetch. A reader shown only a year count cannot tell them apart. */}
+          {m.quality.history_note && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {m.quality.history_note}
+            </p>
+          )}
 
           <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
             {m.quality.parts.map((p) => (
@@ -322,10 +350,22 @@ function Row({
                 <dt className="w-32 shrink-0 text-muted-foreground">
                   {PART_LABEL[p.name] ?? p.name}
                 </dt>
-                {/* ⚠ "—" for an input that was absent, never "0". A company marked poor
-                    because its filings were not read looks identical to one that is poor. */}
-                <dd className="w-12 shrink-0 font-medium tabular-nums">
-                  {p.points == null ? "—" : `${p.points}/${p.available}`}
+                {/* ⚠ Three renderings for three different facts. A number: it was measured.
+                    "—": the filings were not read, and a company marked poor for that looks
+                    identical to one that is poor. "n/a": the test does not describe this
+                    kind of company at all — and that is not a gap anyone can fill, so it must
+                    not read as one. Treating the last two alike is what made the largest
+                    holding in the book permanently unjudgeable. */}
+                <dd
+                  className={`w-12 shrink-0 font-medium tabular-nums ${
+                    p.applicable === false ? "text-muted-foreground/60" : ""
+                  }`}
+                >
+                  {p.applicable === false
+                    ? "n/a"
+                    : p.points == null
+                      ? "—"
+                      : `${p.points}/${p.available}`}
                 </dd>
                 <dd className="truncate text-muted-foreground" title={p.detail}>
                   {p.detail}

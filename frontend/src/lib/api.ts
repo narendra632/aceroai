@@ -1090,6 +1090,11 @@ export type ScorePart = {
   points: string | null;
   available: string;
   detail: string;
+  /** ⚠ False where the test does not describe this KIND of company — return on capital for
+   *  a bank. THREE different renderings for three different facts: a number (did badly or
+   *  well), "—" (not read), "n/a" (does not apply). Collapsing the last two is what made a
+   *  fully-read bank look half-read and left it permanently unjudgeable. */
+  applicable: boolean;
 };
 
 /** ⚠ `earned` and `available` belong together. Six on its own means nothing: six of ten is
@@ -1101,6 +1106,19 @@ export type Quality = {
   parts: ScorePart[];
   unknown: string[];
   is_complete: boolean;
+  /** Tests that do not apply to this kind of company. */
+  not_applicable: string[];
+  /** What this company's own test could offer if every filing had been read. ⚠ Ten for an
+   *  industrial and ten for a bank out of an entirely different set, so `available` alone is
+   *  not comparable between them — `available / possible` is. */
+  possible: string;
+  /** ⚠ Shown together. "1 of 5 read" and "1 of 1 possible" are opposite facts that look
+   *  identical without the second number. */
+  years_read: number;
+  years_possible: number | null;
+  /** Why the reading is as deep as it is — whether the company is too young to have more, or
+   *  the exchange has not published it. Null when the reading is not thin. */
+  history_note: string | null;
 };
 
 /** One checklist answer. ⚠ Every flag is a RED flag: YES is bad. */
@@ -1810,6 +1828,26 @@ export async function approveSource(id: string): Promise<Source> {
     method: "POST",
   });
   if (!r.ok) return investmentError(r, "that source could not be approved");
+  return r.json();
+}
+
+/** Add a YouTube channel to read from.
+ *
+ *  ⚠ Takes whatever the address bar had — a `@handle`, a full URL, a legacy `/c/` path or a
+ *  raw `UC…` id — because requiring the channel id would make adding a channel a research
+ *  task, and a list that is awkward to change never gets changed.
+ *
+ *  ⚠ It arrives OFF and waiting for approval, like every other commentary source. Pasting a
+ *  link is not the same act as deciding to be influenced by it. */
+export async function addYoutubeChannel(
+  pasted: string,
+  notes?: string,
+): Promise<Source> {
+  const r = await req("/api/investments/reading/sources/youtube", {
+    method: "POST",
+    body: JSON.stringify({ pasted, notes: notes || null }),
+  });
+  if (!r.ok) return investmentError(r, "that channel could not be added");
   return r.json();
 }
 

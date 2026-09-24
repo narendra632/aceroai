@@ -18,7 +18,7 @@ import uuid
 from decimal import Decimal
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -34,6 +34,7 @@ from app.api.schemas import (
     BookLineOut,
     BooksOut,
     BottleneckOut,
+    ChannelIn,
     ClaimOut,
     CorporateActionOut,
     CriterionOut,
@@ -114,7 +115,8 @@ from app.services.investments import (
     watching,
 )
 from app.services.investments import portfolio as pf
-from app.services.marketdata import feed
+from app.services.marketdata import feed, feeds
+from app.services.marketdata.http import ProviderError
 
 router = APIRouter(prefix="/api/investments", tags=["investments"])
 
@@ -915,6 +917,39 @@ def approve_source(
     if source is None or source.deleted_at is not None:
         raise NotFound("source")
     reading.approve(db, source)
+    db.commit()
+    return SourceOut.model_validate(source)
+
+
+@router.post("/reading/sources/youtube", status_code=201)
+def add_youtube_channel(
+    body: ChannelIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SourceOut:
+    """Register a YouTube channel to read from.
+
+    ⚠ **Registered, not approved.** It arrives switched off and waits for you, exactly as the
+    seeded channels did. Adding a commentator changes what the system can be talked into, and
+    that stays a decision rather than a side effect of pasting a link.
+
+    ⚠ Tier 3, always, and not negotiable from here. A channel is commentary whatever it is
+    called and however good it is, so a proposal resting on it alone still fails the sourcing
+    gate. The tier is a statement about the KIND of source, not about its quality.
+    """
+    try:
+        channel = feeds.resolve_channel(body.pasted)
+    except ProviderError as exc:
+        raise HTTPException(status_code=422, detail=exc.reason) from None
+
+    source = reading.register(
+        db,
+        kind="YOUTUBE",
+        name=channel.title,
+        handle=channel.channel_id,
+        trust_tier=reading.COMMENTARY,
+        notes=(body.notes or "").strip() or None,
+    )
     db.commit()
     return SourceOut.model_validate(source)
 

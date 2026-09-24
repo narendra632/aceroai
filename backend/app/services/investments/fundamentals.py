@@ -494,5 +494,10 @@ def by_period(db: Session, instrument_id: uuid.UUID, *, limit: int = 6) -> dict[
         period.setdefault("_period_end", row.period_end)
         period.setdefault("_consolidated", row.consolidated)
         period.setdefault("_source_item_id", row.source_item_id)
+        # ⚠ Which rulebook the COMPANY filed under, carried through so the scorer does not
+        # have to be told what kind of business it is looking at. A sector list has to be
+        # maintained by hand and is wrong the first time an NBFC or an insurer is added; this
+        # is the company's own declaration to the exchange and is never out of date.
+        period.setdefault("_taxonomy", row.taxonomy)
     ordered = sorted(out, key=lambda p: out[p]["_period_end"], reverse=True)[:limit]
     return {p: out[p] for p in ordered}

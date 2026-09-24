@@ -49,6 +49,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ListedCompany, PriceObservation
 from app.services.investments import frameworks, fundamentals
+from app.services.marketdata import nse_xbrl
 
 ZERO = Decimal(0)
 HUNDRED = Decimal(100)
@@ -488,6 +489,24 @@ def _bank_parts(periods: dict[str, dict], years: list[str]) -> list[Part]:
     return out
 
 
+def _lends(periods: dict[str, dict]) -> bool:
+    """Whether this company filed as a lender, by its own declaration to the exchange.
+
+    ⚠ **A sector list is the wrong instrument for this question, and was.** It said
+    `PRIVATE_BANK` and nothing else, so the first NBFC or insurer added to the book would have
+    been measured on capital expenditure and cash conversion and would have failed on
+    arithmetic about machinery it does not own — silently, and in exactly the way that took
+    four attempts to notice on the one bank already held.
+
+    The exchange makes companies file under a taxonomy, and a lender files under the banking
+    one. That is the company saying what kind of business it is, to a regulator, in a
+    document. It cannot go stale, it needs no maintenance, and it is right for a company
+    nobody has classified yet. The sector list is still honoured on top of it, for anything
+    whose filings have not been read.
+    """
+    return any(row.get("_taxonomy") == nse_xbrl.BANKING for row in periods.values())
+
+
 def _cites(periods: dict[str, dict], used: list[str]) -> list[uuid.UUID]:
     out = []
     for period in used:
@@ -512,7 +531,7 @@ def quality_score(
     """
     periods = fundamentals.by_period(db, instrument.id, limit=6)
     years = _annual(periods)
-    is_bank = frameworks.values_on_earnings(spec, instrument.sector)
+    is_bank = _lends(periods) or frameworks.values_on_earnings(spec, instrument.sector)
     parts: list[Part] = []
 
     # --- return on equity ---------------------------------------------------------------
