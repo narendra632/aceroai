@@ -179,11 +179,17 @@ def score(db: Session, instrument: Instrument, spec: dict, result: Analysis) -> 
     quality = scoring.quality_score(db, instrument, spec)
     result.quality_earned = quality.earned
     result.quality_available = quality.available
-    if quality.available < scoring.MIN_AVAILABLE_FOR_VERDICT:
-        result.notes.append(
-            f"only {quality.available} of 10 points could be computed — too little filed "
-            f"data to judge this company yet"
+    # ⚠ Against what this company's own test offers, not against ten. A bank is measured over
+    # its own set of components, so a bank counted against an industrial's ten looked half-read
+    # when it was complete, and went back to the queue for filings that could never arrive.
+    if quality.coverage is not None and quality.coverage < scoring.MIN_COVERAGE_FOR_VERDICT:
+        note = (
+            f"only {quality.earned} of {quality.available} points could be computed, out of "
+            f"{quality.possible} this company's test offers — too little filed data to judge yet"
         )
+        if quality.history and (why := quality.history.why()):
+            note += f" ({why})"
+        result.notes.append(note)
     return result
 
 

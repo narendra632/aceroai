@@ -540,11 +540,22 @@ def _mapping_out(
             available=quality.available,
             ratio=quality.ratio,
             parts=[
-                {"name": p.name, "points": p.points, "available": p.available, "detail": p.detail}
+                {
+                    "name": p.name,
+                    "points": p.points,
+                    "available": p.available,
+                    "detail": p.detail,
+                    "applicable": p.applicable,
+                }
                 for p in quality.parts
             ],
             unknown=quality.unknown,
             is_complete=quality.is_complete,
+            not_applicable=quality.not_applicable,
+            possible=quality.possible,
+            years_read=quality.years_read,
+            years_possible=quality.history.obtainable if quality.history else None,
+            history_note=(quality.history.why() or None) if quality.history else None,
         ),
         flags=[FlagOut.model_validate(f) for f in flags],
         quadrant=scoring.quadrant(quality, reflexive),

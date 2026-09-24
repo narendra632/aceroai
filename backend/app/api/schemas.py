@@ -803,6 +803,10 @@ class ScorePartOut(BaseModel):
     points: Decimal | None
     available: Decimal
     detail: str
+    #: False where the test does not describe this kind of company — return on capital for a
+    #: bank. ⚠ Render as "—", never as a gap and never as zero. Three different renderings for
+    #: three different facts: did badly, was not read, does not apply.
+    applicable: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -821,6 +825,18 @@ class QualityOut(BaseModel):
     parts: list[ScorePartOut]
     unknown: list[str]
     is_complete: bool
+    #: Tests that do not apply to this kind of company, named so the interface can say so.
+    not_applicable: list[str] = []
+    #: What this company's own test could offer if every filing had been read — ten for an
+    #: industrial, and ten for a bank out of a different set. `available / possible` is the
+    #: depth of the reading; `available` alone is not comparable between the two.
+    possible: Decimal = Decimal(0)
+    #: Annual periods read, and how many could even exist. ⚠ Shown together: "1 of 5 read"
+    #: and "1 of 1 possible" are opposite facts that look identical without the second number.
+    years_read: int = 0
+    years_possible: int | None = None
+    #: One clause on why the reading is as deep as it is. Empty when it is not thin.
+    history_note: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

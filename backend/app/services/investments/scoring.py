@@ -11,12 +11,24 @@ available" with the unavailable parts named. A company rejected because a filing
 read yet is a pipeline failure dressed as a judgement about the business, and it is
 indistinguishable from the real thing unless the two are kept apart in the arithmetic itself.
 
-⚠ **A bank is measured differently, because most of this does not apply to one.** Depreciation
-and capital expenditure are immaterial to a bank, borrowings are its raw material rather than
-its leverage, and operating cash flow swings with deposit flows rather than with trading
-performance. So those components report `None` for a bank rather than failing it on arithmetic
-about something it does not have — which would classify the portfolio's anchor holding as a
-value trap and permanently block adding to it.
+⚠ **A bank is measured differently, because most of this does not apply to one** — and it is
+measured, not merely excused. Depreciation and capital expenditure are immaterial to a bank,
+borrowings are its raw material rather than its leverage, and operating cash flow swings with
+deposit flows rather than with trading performance, so those three components do not apply.
+An earlier version stopped there, reporting them unknown; the effect was that the portfolio's
+largest holding had four *gaps* in its reading and was therefore permanently unjudgeable —
+the same outcome as failing it, arrived at politely. A component that cannot apply is not a
+gap, and a bank now gets the three tests that DO describe one: cost-to-income, the share of
+pre-provision profit consumed by provisions, and how much of the interest it earns it keeps.
+All three come out of the banking taxonomy the exchange already publishes.
+
+⚠ **Nothing here demands a history a company could not have.** A multi-year rule used to
+refuse to answer below two years, which is strict against an old company and unsatisfiable
+against a young one — and the two are indistinguishable from the outside. A company listed
+eighteen months ago was not judged harshly, it was placed beyond judgement for ever. So the
+rules now scale: "three of the last five years" is held as a *share*, one year is scored at
+half weight and says so, and the verdict — not the score — is withheld until a second year
+exists. See `MIN_YEARS_FOR_TREND` and `History`.
 
 **Four of the ten reflexivity flags are computed here.** The checklist asks ten questions;
 six need a model reading news and filings and arrive with the reading layer. These four are
@@ -35,41 +47,67 @@ from decimal import Decimal, InvalidOperation
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.db.models import PriceObservation
+from app.db.models import ListedCompany, PriceObservation
 from app.services.investments import frameworks, fundamentals
 
 ZERO = Decimal(0)
 HUNDRED = Decimal(100)
 
-#: How many years a multi-year test needs before it will answer at all.
+#: How many years a multi-year test needs before it answers at FULL weight.
 #:
-#: ⚠ The return-on-equity rule is "at or above 15% in three of the last five years". Read ONE
-#: year and that rule cannot be satisfied at all, so scoring it zero is arithmetically correct
-#: and epistemically wrong — the result is indistinguishable from a company that genuinely
-#: failed for five years.
+#: ⚠ This was a gate and is now a cap, and the difference matters more than it looks. As a
+#: gate it read "fewer than two years and the component is unknown", which is not strictness —
+#: it is unsatisfiability. A company listed eighteen months ago cannot have two years. Neither
+#: can one whose exchange filings only became machine-readable with FY25. Such a company was
+#: not scored badly; it was placed permanently beyond scoring, and no further reading would
+#: ever have moved it. That is the single defect that made three of eleven holdings unjudgeable.
 #:
-#: Two, not three, and the reason is a measured property of the source rather than a
-#: preference. The exchange publishes a full-year profit and loss only from the Integrated
-#: Filing framework onward, which begins with FY25; every March filing before that tags its
-#: year as a fourth quarter and carries a balance sheet with no revenue beside it, and the
-#: prior-year comparative in a later filing turns out to be balance-sheet only. So two years
-#: is what exists in machine-readable form today, and a threshold of three would report every
-#: company in the book as unknown for ever.
+#: So one year is now scored, at half weight, and the detail says which. A single year can
+#: show promise and cannot show consistency, and the arithmetic now states exactly that
+#: instead of pretending the question was unanswerable.
 #:
-#: Two years of a 25% return is genuine evidence where one year is a snapshot. The year count
-#: is stated in every component's detail so nobody mistakes it for five, and the quadrant
-#: refuses a hard verdict regardless — see `MIN_AVAILABLE_FOR_VERDICT`.
-#:
-#: The remedy, when it is worth the fetches: sum four quarterly filings per missing year.
+#: Two, not three, remains the full-weight threshold, and the reason is a property of the
+#: source rather than a preference. The exchange publishes a full-year profit and loss only
+#: from the Integrated Filing framework onward, which begins with FY25; every March filing
+#: before that tags its year as a fourth quarter and carries a balance sheet with no revenue
+#: beside it. Two years is what exists in machine-readable form today.
 MIN_YEARS_FOR_TREND = 2
 MIN_YEARS_FOR_CASH = 2
 
-#: Below this many available points, the reading is too thin to call a company anything.
+#: Below this many annual periods the BOX is withheld — the score is not.
 #:
-#: ⚠ Two of the four quadrants HARD-BLOCK a purchase. Blocking on a half-read set of filings is
-#: a pipeline failure wearing the clothes of a judgement about the business — and from the
-#: outside the two look identical.
-MIN_AVAILABLE_FOR_VERDICT = Decimal(6)
+#: ⚠ The distinction is the entire repair. `quadrant` returning BORDERLINE on one year means
+#: "neither blessed nor blocked". It does NOT mean the company could not be read: every
+#: component, every ratio, every citation is computed and shown, and the verdict arrives by
+#: itself on the day a second annual filing lands. What used to happen instead was an UNKNOWN
+#: with two points behind it and nothing on screen to look at.
+MIN_YEARS_FOR_VERDICT = 2
+
+#: The share of read years that must clear a bar for full marks on a trend component.
+#:
+#: ⚠ "At or above 15% in three of the last five years" IS 0.6, and holding it as a share is
+#: what lets one rule survive a company that has not existed for five years. Three of five and
+#: two of three are the same standard; three of five and three of three are not.
+STRONG_SHARE_FULL = Decimal("0.6")
+STRONG_SHARE_HALF = Decimal("0.4")
+
+#: What share of the points THIS COMPANY'S OWN test offers must be computed before a box is
+#: called.
+#:
+#: ⚠ Relative, not absolute, because the test itself differs by company — half a bank's
+#: components are not an industrial's. The two happen to sum to the same ten points, which
+#: keeps the scores comparable, but that is a property of the weights and not something to
+#: rely on: a future taxonomy with a different component set must still be measured against
+#: its own denominator. The absolute rule is what left a fully-read bank permanently short of
+#: the bar, because three of the ten points it was counted against described machinery it
+#: does not own.
+MIN_COVERAGE_FOR_VERDICT = Decimal("0.6")
+
+#: …and never on fewer points than this, whatever the coverage says. A backstop, not the rule.
+MIN_AVAILABLE_FOR_VERDICT = Decimal(4)
+
+#: The window every multi-year rule is written against.
+HISTORY_YEARS = fundamentals.HISTORY_YEARS
 
 
 @dataclass(frozen=True)
@@ -82,10 +120,74 @@ class Part:
     detail: str
     #: The figures this rested on, so every number can be traced back to a filing.
     cites: list[uuid.UUID] = field(default_factory=list)
+    #: False where this component does not describe this KIND of company at all — return on
+    #: capital employed for a bank, say.
+    #:
+    #: ⚠ Not the same thing as unmeasured, and treating them alike is what made the largest
+    #: holding in the book permanently unjudgeable. Four tests that could never apply to a
+    #: lender were counted as four holes in the reading, and it was the hole count that
+    #: withheld the verdict. A hole can be filled by fetching another filing; this cannot,
+    #: because there is nothing missing.
+    applicable: bool = True
 
     @property
     def is_known(self) -> bool:
         return self.points is not None
+
+
+@dataclass(frozen=True)
+class History:
+    """How much of a company's life is readable at all, and which limit is the binding one.
+
+    ⚠ Two entirely different facts produce the same thin reading, and telling them apart is the
+    difference between *this company is too young to have a record* and *the exchange has not
+    published one*. The first resolves with time and nothing can hurry it; the second may
+    resolve with a fetch. A reader shown only "1 year read" cannot tell which they are looking
+    at, and will draw the wrong conclusion about half the time.
+    """
+
+    #: Annual periods actually ingested.
+    years_read: int
+    #: Full financial years completed since the company listed. None when the listing date is
+    #: not known — the exchange's equity list is the source, and it does not cover funds.
+    years_listed: int | None
+    listed_on: dt.date | None
+
+    @property
+    def obtainable(self) -> int:
+        """Full financial years that could exist for this company, capped at the window."""
+        if self.years_listed is None:
+            return HISTORY_YEARS
+        return max(0, min(HISTORY_YEARS, self.years_listed))
+
+    @property
+    def is_young(self) -> bool:
+        """Listed too recently to have the full window, whatever anyone fetches."""
+        return self.years_listed is not None and self.years_listed < HISTORY_YEARS
+
+    @property
+    def limit(self) -> str:
+        """Which constraint is binding: the company's age, the source, or neither."""
+        if self.years_read >= HISTORY_YEARS:
+            return "NONE"
+        if self.years_read >= self.obtainable and self.is_young:
+            return "AGE"
+        return "SOURCE"
+
+    def why(self) -> str:
+        """One clause a person can read, or empty where the reading is not thin."""
+        if self.limit == "NONE":
+            return ""
+        if self.limit == "AGE":
+            when = f" ({self.listed_on:%b %Y})" if self.listed_on else ""
+            return (
+                f"listed too recently{when} for more than {self.obtainable} full year(s) to "
+                "exist — everything it could have filed has been read"
+            )
+        return (
+            f"{self.years_read} of {self.obtainable} possible year(s) read; the exchange's "
+            "machine-readable filings do not reach further back"
+        )
 
 
 @dataclass(frozen=True)
@@ -100,13 +202,30 @@ class QualityScore:
     earned: Decimal
     available: Decimal
     parts: list[Part]
-    #: Components whose inputs were missing, named so the interface can say which.
+    #: Components whose inputs were missing, named so the interface can say which. ⚠ Gaps in
+    #: the reading only. A test that does not apply to this kind of company is not a gap.
     unknown: list[str]
+    #: Components that do not describe this kind of company. Rendered "—", never "0", and
+    #: never counted against the reading.
+    not_applicable: list[str] = field(default_factory=list)
+    #: The points this company's own test would offer if every filing had been read. ⚠ Ten for
+    #: an industrial, and ten for a bank from an entirely different set of components — which
+    #: is why `coverage` against this, and not `available` against a constant, decides.
+    possible: Decimal = ZERO
+    #: Annual periods actually read, so thinness is visible rather than inferred from a ratio.
+    years_read: int = 0
+    #: Why the reading is as deep as it is.
+    history: History | None = None
 
     @property
     def ratio(self) -> Decimal | None:
         """Earned over available — what the quadrant is decided on. None when nothing is known."""
         return (self.earned / self.available) if self.available else None
+
+    @property
+    def coverage(self) -> Decimal | None:
+        """How much of this company's own test was answered. None when it offers nothing."""
+        return (self.available / self.possible) if self.possible else None
 
     @property
     def is_complete(self) -> bool:
@@ -165,6 +284,210 @@ def _roce(periods: dict[str, dict], period: str) -> Decimal | None:
     return (pbt + (finance or ZERO)) / capital * HUNDRED
 
 
+def _full_years_since(listed_on: dt.date, today: dt.date) -> int:
+    """Financial years (to 31 March) that both began after listing and have since ended.
+
+    ⚠ Begun after listing, not merely ended after it. A company that listed in December 2024
+    has a March 2025 filing, but it covers eight months during which it was private and three
+    during which it was not — the filing exists, the year as a public company does not.
+    """
+    count, year = 0, listed_on.year
+    while True:
+        year_end = dt.date(year, 3, 31)
+        if year_end > today:
+            return count
+        if dt.date(year - 1, 4, 1) >= listed_on:
+            count += 1
+        year += 1
+
+
+def history_for(
+    db: Session, instrument, *, years_read: int, today: dt.date | None = None
+) -> History:
+    """How deep a reading of this company is even possible.
+
+    The listing date comes from the exchange's own equity list, which the reading layer keeps
+    in `listed_companies`. ⚠ Absent for anything not on that list — a fund, a coin, a company
+    listed only on BSE — and absent is reported as absent rather than as "listed long ago".
+    """
+    today = today or dt.date.today()
+    listed_on = db.execute(
+        sa.select(ListedCompany.listed_on)
+        .where(
+            ListedCompany.symbol == instrument.symbol,
+            ListedCompany.exchange == instrument.exchange,
+            ListedCompany.listed_on.is_not(None),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    return History(
+        years_read=years_read,
+        years_listed=_full_years_since(listed_on, today) if listed_on else None,
+        listed_on=listed_on,
+    )
+
+
+def _consistency(strong: int, read: int, cap: Decimal) -> tuple[Decimal, str]:
+    """Points for how often a test was passed, over however many years there are to test.
+
+    ⚠ One year is scored, never refused — at half weight, because a single year can show
+    promise and cannot show consistency. This is what replaced a hard floor of two years that
+    no recently-listed company could ever clear, and under which such a company stayed
+    unjudgeable no matter how good it was or how long anyone waited.
+    """
+    if read <= 0:
+        return ZERO, ""
+    if read < MIN_YEARS_FOR_TREND:
+        return (
+            (cap / 2 if strong else ZERO),
+            "; one year is a snapshot, so this earns half at most",
+        )
+    share = Decimal(strong) / Decimal(read)
+    if share >= STRONG_SHARE_FULL:
+        return cap, ""
+    if share >= STRONG_SHARE_HALF:
+        return cap / 2, ""
+    return ZERO, ""
+
+
+def _thin(points: Decimal, read: int, cap: Decimal) -> tuple[Decimal, str]:
+    """The same half-weight cap, for a component scored off an average rather than a count."""
+    if read >= MIN_YEARS_FOR_TREND:
+        return points, ""
+    return min(points, cap / 2), "; one year is a snapshot, so this earns half at most"
+
+
+# --- what a bank is measured on instead ------------------------------------------------------
+
+
+def _cost_to_income(periods: dict[str, dict], period: str) -> Decimal | None:
+    """Operating expenses as a share of net total income — the cleanest measure of a bank.
+
+    ⚠ Operating expenses are not filed under a tag of their own. The banking taxonomy carries
+    operating profit BEFORE provisions, which is total income less interest expended less
+    operating expenses, so the expenses fall out by subtraction exactly. Nothing is estimated.
+    """
+    income = _get(periods, period, "revenue")
+    interest = _get(periods, period, "interest_expended")
+    operating = _get(periods, period, "operating_profit")
+    if income is None or interest is None or operating is None:
+        return None
+    net_income = income - interest
+    if net_income <= 0:
+        return None
+    return (net_income - operating) / net_income * HUNDRED
+
+
+def _credit_cost(periods: dict[str, dict], period: str) -> Decimal | None:
+    """What share of a year's pre-provision profit was consumed by provisions.
+
+    ⚠ The nearest asset-quality reading the filed tags allow, and it is a stand-in rather than
+    the thing itself. Gross non-performing assets are disclosed in the results but not under a
+    tag this reader collects. Provisioning is the number the profit actually bears: a bank
+    whose lending goes bad provisions for it, and provisions are what shareholders lose.
+    """
+    operating = _get(periods, period, "operating_profit")
+    pbt = _get(periods, period, "pbt")
+    if operating is None or pbt is None or operating <= 0:
+        return None
+    return (operating - pbt) / operating * HUNDRED
+
+
+def _funding_spread(periods: dict[str, dict], period: str) -> Decimal | None:
+    """How much of the interest it earned a bank keeps after paying for its deposits.
+
+    ⚠ **Not the net interest margin.** That divides by average earning assets, which the
+    banking taxonomy does not carry, and calling this by that name would invite comparison
+    against published margins it is not comparable to. It is a stand-in for the low-cost
+    deposit share — disclosed in a presentation, never in a filing — and it moves with the
+    same thing: a bank funded by current and savings accounts keeps more of what it earns.
+    """
+    earned = _get(periods, period, "interest_earned")
+    expended = _get(periods, period, "interest_expended")
+    if earned is None or expended is None or earned <= 0:
+        return None
+    return (earned - expended) / earned * HUNDRED
+
+
+#: Bands for the three bank tests, calibrated against large Indian lenders. ⚠ Crude on
+#: purpose, and identical every month — a rough number computed the same way is comparable
+#: across months, and a sophisticated one computed differently each time is not.
+COST_TO_INCOME_GOOD = Decimal(45)
+CREDIT_COST_GOOD = Decimal(25)
+FUNDING_SPREAD_GOOD = Decimal(40)
+
+
+def _bank_parts(periods: dict[str, dict], years: list[str]) -> list[Part]:
+    """The three tests that describe a lender, in place of the three that describe a factory."""
+    usable = years[:5]
+    out = []
+
+    ratios = [(p, v) for p in usable if (v := _cost_to_income(periods, p)) is not None]
+    if not ratios:
+        out.append(
+            Part("cost_to_income", None, Decimal(2), "total income or operating profit not filed")
+        )
+    else:
+        strong = [p for p, v in ratios if v <= COST_TO_INCOME_GOOD]
+        points, caveat = _consistency(len(strong), len(ratios), Decimal(2))
+        mean = _mean([v for _, v in ratios])
+        out.append(
+            Part(
+                "cost_to_income",
+                points,
+                Decimal(2),
+                f"costs are {mean:.0f}% of net income, at or under "
+                f"{COST_TO_INCOME_GOOD:.0f}% in {len(strong)} of {len(ratios)} year(s) read"
+                + caveat,
+                _cites(periods, [p for p, _ in ratios]),
+            )
+        )
+
+    costs = [(p, v) for p in usable if (v := _credit_cost(periods, p)) is not None]
+    if not costs:
+        out.append(
+            Part(
+                "credit_cost", None, Decimal(2), "pre-provision profit or pre-tax profit not filed"
+            )
+        )
+    else:
+        strong = [p for p, v in costs if v <= CREDIT_COST_GOOD]
+        points, caveat = _consistency(len(strong), len(costs), Decimal(2))
+        mean = _mean([v for _, v in costs])
+        out.append(
+            Part(
+                "credit_cost",
+                points,
+                Decimal(2),
+                f"provisions took {mean:.0f}% of pre-provision profit, at or under "
+                f"{CREDIT_COST_GOOD:.0f}% in {len(strong)} of {len(costs)} year(s) read" + caveat,
+                _cites(periods, [p for p, _ in costs]),
+            )
+        )
+
+    spreads = [(p, v) for p in usable if (v := _funding_spread(periods, p)) is not None]
+    if not spreads:
+        out.append(
+            Part("funding_spread", None, Decimal(1), "interest earned or expended not filed")
+        )
+    else:
+        strong = [p for p, v in spreads if v >= FUNDING_SPREAD_GOOD]
+        points, caveat = _consistency(len(strong), len(spreads), Decimal(1))
+        mean = _mean([v for _, v in spreads])
+        out.append(
+            Part(
+                "funding_spread",
+                points,
+                Decimal(1),
+                f"keeps {mean:.0f}% of the interest it earns (a stand-in for low-cost deposits), "
+                f"at or above {FUNDING_SPREAD_GOOD:.0f}% in {len(strong)} of "
+                f"{len(spreads)} year(s) read" + caveat,
+                _cites(periods, [p for p, _ in spreads]),
+            )
+        )
+    return out
+
+
 def _cites(periods: dict[str, dict], used: list[str]) -> list[uuid.UUID]:
     out = []
     for period in used:
@@ -195,26 +518,19 @@ def quality_score(
     # --- return on equity ---------------------------------------------------------------
     roes = [(p, _roe(periods, p)) for p in years[:5]]
     known_roe = [(p, v) for p, v in roes if v is not None]
-    if len(known_roe) < MIN_YEARS_FOR_TREND:
-        parts.append(
-            Part(
-                "roe",
-                None,
-                Decimal(2),
-                f"{len(known_roe)} year(s) of return on equity read; the rule asks about three "
-                "of five, and fewer cannot answer it either way",
-            )
-        )
+    if not known_roe:
+        parts.append(Part("roe", None, Decimal(2), "no year's return on equity could be computed"))
     else:
         strong = [p for p, v in known_roe if v >= 15]
-        points = Decimal(2) if len(strong) >= 3 else Decimal(1) if len(strong) == 2 else ZERO
+        points, caveat = _consistency(len(strong), len(known_roe), Decimal(2))
         parts.append(
             Part(
                 "roe",
                 points,
                 Decimal(2),
                 f"at or above 15% in {len(strong)} of {len(known_roe)} year(s) read"
-                + ("; fewer than five years are on file" if len(known_roe) < 5 else ""),
+                + ("; fewer than five years are on file" if len(known_roe) < 5 else "")
+                + caveat,
                 _cites(periods, [p for p, _ in known_roe]),
             )
         )
@@ -222,29 +538,34 @@ def quality_score(
     # --- return on capital ---------------------------------------------------------------
     if is_bank:
         # ⚠ A bank's borrowings ARE its business. Return on capital employed treats debt as
-        # funding for operations, which describes an industrial and not a lender.
-        parts.append(Part("roce", None, Decimal(2), "return on capital does not describe a bank"))
+        # funding for operations, which describes an industrial and not a lender. Marked
+        # inapplicable rather than unknown, so it leaves the denominator instead of counting
+        # as a hole in the reading — see `Part.applicable`.
+        parts.append(
+            Part(
+                "roce",
+                None,
+                Decimal(2),
+                "return on capital does not describe a bank",
+                applicable=False,
+            )
+        )
     else:
         roces = [v for p in years[:5] if (v := _roce(periods, p)) is not None]
         average = _mean(roces)
-        if average is None or len(roces) < MIN_YEARS_FOR_TREND:
+        if average is None:
             parts.append(
-                Part(
-                    "roce",
-                    None,
-                    Decimal(2),
-                    f"{len(roces)} year(s) of return on capital read; an average over fewer "
-                    "describes a moment rather than a business",
-                )
+                Part("roce", None, Decimal(2), "no year's return on capital could be computed")
             )
         else:
-            points = Decimal(2) if average >= 15 else Decimal(1) if average >= 12 else ZERO
+            raw = Decimal(2) if average >= 15 else Decimal(1) if average >= 12 else ZERO
+            points, caveat = _thin(raw, len(roces), Decimal(2))
             parts.append(
                 Part(
                     "roce",
                     points,
                     Decimal(2),
-                    f"{average:.1f}% average over {len(roces)} year(s) read",
+                    f"{average:.1f}% average over {len(roces)} year(s) read" + caveat,
                     _cites(periods, years[: len(roces)]),
                 )
             )
@@ -257,6 +578,7 @@ def quality_score(
                 None,
                 Decimal(2),
                 "a bank's operating cash flow follows deposit flows, not trading performance",
+                applicable=False,
             )
         )
     else:
@@ -266,30 +588,33 @@ def quality_score(
             if ocf is not None and pat:
                 ratios.append(ocf / pat)
         mean = _mean(ratios)
-        if mean is None or len(ratios) < MIN_YEARS_FOR_CASH:
+        if mean is None:
             parts.append(
                 Part(
                     "cash_conversion",
                     None,
                     Decimal(2),
-                    f"{len(ratios)} year(s) with both cash flow and profit; one year of working "
-                    "capital is a swing, not a habit",
+                    "no year carries both operating cash flow and profit",
                 )
             )
         else:
-            points = (
+            raw = (
                 Decimal(2)
                 if mean >= Decimal("0.8")
                 else Decimal(1)
                 if mean >= Decimal("0.6")
                 else ZERO
             )
+            # ⚠ One year of working capital is a swing rather than a habit, so it earns half.
+            # It used to earn nothing at all, which read identically to cash never arriving.
+            points, caveat = _thin(raw, len(ratios), Decimal(2))
             parts.append(
                 Part(
                     "cash_conversion",
                     points,
                     Decimal(2),
-                    f"{mean:.2f} of profit arrived as cash, averaged over {len(ratios)} year(s)",
+                    f"{mean:.2f} of profit arrived as cash, averaged over {len(ratios)} year(s)"
+                    + caveat,
                     _cites(periods, years[: len(ratios)]),
                 )
             )
@@ -297,8 +622,16 @@ def quality_score(
     # --- balance sheet ------------------------------------------------------------------------
     if is_bank:
         parts.append(
-            Part("balance_sheet", None, Decimal(1), "borrowings are a bank's raw material")
+            Part(
+                "balance_sheet",
+                None,
+                Decimal(1),
+                "borrowings are a bank's raw material",
+                applicable=False,
+            )
         )
+        # …and in their place, the three tests that DO describe a lender.
+        parts.extend(_bank_parts(periods, years))
     else:
         newest = years[0] if years else None
         pbt = _get(periods, newest, "pbt") if newest else None
@@ -347,11 +680,19 @@ def quality_score(
 
     earned = sum((p.points for p in parts if p.points is not None), ZERO)
     available = sum((p.available for p in parts if p.points is not None), ZERO)
+    # ⚠ What this company's OWN test could offer, over its own components.
+    # `coverage` divides by this rather than by a constant, which is what stops a fully-read
+    # bank from looking like a half-read factory.
+    possible = sum((p.available for p in parts if p.applicable), ZERO)
     return QualityScore(
         earned=earned,
         available=available,
         parts=parts,
-        unknown=[p.name for p in parts if p.points is None],
+        unknown=[p.name for p in parts if p.points is None and p.applicable],
+        not_applicable=[p.name for p in parts if not p.applicable],
+        possible=possible,
+        years_read=len(years),
+        history=history_for(db, instrument, years_read=len(years)),
     )
 
 
@@ -634,11 +975,24 @@ def quadrant(quality: QualityScore, reflexivity_high: bool) -> str:
     # blocked because its filings have not been read yet is indistinguishable from one blocked
     # because it deserves to be. Price is half the question, so a missing margin of safety
     # alone is enough to withhold the verdict.
+    #
+    # ⚠ The depth test is a SHARE of what this company's own test offers, not a count of
+    # points. Under the old absolute rule a bank could be read completely and still fall one
+    # point short of the bar for ever, because three of its ten points describe machinery it
+    # does not own. What is withheld here is the box alone — every component and every figure
+    # behind it is computed and returned regardless.
+    coverage = quality.coverage
     if (
-        quality.available < MIN_AVAILABLE_FOR_VERDICT
+        coverage is None
+        or coverage < MIN_COVERAGE_FOR_VERDICT
+        or quality.available < MIN_AVAILABLE_FOR_VERDICT
         or "margin_of_safety" in quality.unknown
-        or len(quality.unknown) > 2
     ):
+        return "BORDERLINE"
+    # A single year can show promise and cannot show consistency. The half-weight cap already
+    # keeps such a company away from a strong ratio; this keeps it away from a hard block too,
+    # in both directions, rather than only the flattering one.
+    if quality.years_read < MIN_YEARS_FOR_VERDICT:
         return "BORDERLINE"
     if abs(ratio - Decimal("0.60")) <= Decimal("0.05"):
         return "BORDERLINE"

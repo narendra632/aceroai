@@ -192,8 +192,18 @@ def _thesis(inst: Instrument, ab, quality, flags, mapping) -> str:
             "Not measured: "
             + ", ".join(quality.unknown)
             + " — so this rests on "
-            + f"{quality.earned} of {quality.available} available points, not on ten."
+            + f"{quality.earned} of {quality.available} available points, "
+            + f"not on {quality.possible}."
         )
+    # ⚠ Said separately from the gaps, because they are a different fact. "Return on capital
+    # was not measured" invites someone to go and measure it; "return on capital does not
+    # describe a bank" does not.
+    if getattr(quality, "not_applicable", None):
+        lines.append(
+            "Does not apply to this kind of company: " + ", ".join(quality.not_applicable) + "."
+        )
+    if (history := getattr(quality, "history", None)) and (why := history.why()):
+        lines.append(f"Depth of reading: {why}.")
     raised = [f for f in flags if f.verdict == "YES"]
     if raised:
         lines.append(
