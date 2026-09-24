@@ -156,10 +156,18 @@ class History:
 
     @property
     def obtainable(self) -> int:
-        """Full financial years that could exist for this company, capped at the window."""
+        """Full financial years that could exist for this company, capped at the window.
+
+        ⚠ **Never fewer than were actually read**, and the reason is that a listing date is a
+        lower bound on a company's history rather than an upper one. Premier Energies listed
+        in September 2024 — one full financial year ago — and files two, because it existed
+        and kept accounts before it was listed and the exchange carries them from the offer
+        onward. Without this the page read "2 of 1 possible years", which is not a caveat but
+        a contradiction, and a reader who noticed it would rightly stop trusting the rest.
+        """
         if self.years_listed is None:
             return HISTORY_YEARS
-        return max(0, min(HISTORY_YEARS, self.years_listed))
+        return max(self.years_read, min(HISTORY_YEARS, self.years_listed))
 
     @property
     def is_young(self) -> bool:
@@ -410,83 +418,127 @@ def _funding_spread(periods: dict[str, dict], period: str) -> Decimal | None:
     return (earned - expended) / earned * HUNDRED
 
 
-#: Bands for the three bank tests, calibrated against large Indian lenders. ⚠ Crude on
-#: purpose, and identical every month — a rough number computed the same way is comparable
-#: across months, and a sophisticated one computed differently each time is not.
-COST_TO_INCOME_GOOD = Decimal(45)
+#: Bands for the three bank tests. ⚠ Crude on purpose, and identical every month — a rough
+#: number computed the same way is comparable across months, and a sophisticated one computed
+#: differently each time is not.
+#:
+#: ⚠ **Calibrated for CONSOLIDATED figures, which is the only basis the exchange's feed
+#: supplies**, and that matters most here. Everybody quotes HDFC Bank's cost-to-income at
+#: around 40%; that is the standalone bank. Computed from its actual consolidated filing it is
+#: 58%, because the group contains a life insurer whose premiums are income and whose claims
+#: and commissions are operating expense. Banding a consolidated group at a standalone bar
+#: scores one of the best-run lenders in India zero for inefficiency — a false negative
+#: produced by how the figures were assembled rather than by the business, which is the exact
+#: failure this module exists to prevent.
+#:
+#: ⚠ The weak part of this, stated rather than buried: the good bar is anchored on one
+#: computed group (58%, top quartile) plus the shape of the peer set, not on a measured
+#: distribution. It should be revisited the first time a second lender enters the book, and
+#: `FAIR` exists so a middling one lands on half marks rather than on zero.
+COST_TO_INCOME_GOOD = Decimal(60)
+COST_TO_INCOME_FAIR = Decimal(70)
 CREDIT_COST_GOOD = Decimal(25)
+CREDIT_COST_FAIR = Decimal(40)
 FUNDING_SPREAD_GOOD = Decimal(40)
+FUNDING_SPREAD_FAIR = Decimal(32)
+
+
+def _bank_part(
+    name: str,
+    *,
+    ratios: list[tuple[str, Decimal]],
+    good: Decimal,
+    fair: Decimal,
+    lower_is_better: bool,
+    cap: Decimal,
+    phrase: str,
+    absent: str,
+    periods: dict[str, dict],
+    basis: str,
+) -> Part:
+    """One bank component, scored over however many years there are to score.
+
+    ⚠ Two bars, not one. Under a single bar a lender that misses it every year by two points
+    scores identically to one that misses it by thirty, and those are not the same bank. The
+    second bar is also where the calibration weakness lands most softly — a band anchored on
+    one computed peer is far likelier to be wrong at its edge than in its middle.
+    """
+    if not ratios:
+        return Part(name, None, cap, absent)
+
+    clears = (lambda v: v <= good) if lower_is_better else (lambda v: v >= good)
+    nearly = (lambda v: v <= fair) if lower_is_better else (lambda v: v >= fair)
+
+    strong = [p for p, v in ratios if clears(v)]
+    points, caveat = _consistency(len(strong), len(ratios), cap)
+    if points == ZERO:
+        acceptable = [p for p, v in ratios if nearly(v)]
+        half, caveat = _consistency(len(acceptable), len(ratios), cap)
+        points = half / 2 if half else ZERO
+
+    mean = _mean([v for _, v in ratios])
+    return Part(
+        name,
+        points,
+        cap,
+        f"{phrase.format(mean=mean)} — clearing {good:.0f}% in {len(strong)} of "
+        f"{len(ratios)} year(s) read, on {basis} figures" + caveat,
+        _cites(periods, [p for p, _ in ratios]),
+    )
+
+
+def _is_consolidated(periods: dict[str, dict], used: list[str]) -> bool:
+    return any(periods.get(p, {}).get("_consolidated") for p in used)
 
 
 def _bank_parts(periods: dict[str, dict], years: list[str]) -> list[Part]:
-    """The three tests that describe a lender, in place of the three that describe a factory."""
+    """The three tests that describe a lender, in place of the three that describe a factory.
+
+    ⚠ **The basis is named in every one of them.** Published bank ratios are standalone and
+    these are consolidated — the only basis the exchange's feed supplies — so they will not
+    match the figure anybody looks up, and a reader who cannot see which they have in front of
+    them will conclude the arithmetic is broken rather than that the scope is different.
+    """
     usable = years[:5]
-    out = []
-
-    ratios = [(p, v) for p in usable if (v := _cost_to_income(periods, p)) is not None]
-    if not ratios:
-        out.append(
-            Part("cost_to_income", None, Decimal(2), "total income or operating profit not filed")
-        )
-    else:
-        strong = [p for p, v in ratios if v <= COST_TO_INCOME_GOOD]
-        points, caveat = _consistency(len(strong), len(ratios), Decimal(2))
-        mean = _mean([v for _, v in ratios])
-        out.append(
-            Part(
-                "cost_to_income",
-                points,
-                Decimal(2),
-                f"costs are {mean:.0f}% of net income, at or under "
-                f"{COST_TO_INCOME_GOOD:.0f}% in {len(strong)} of {len(ratios)} year(s) read"
-                + caveat,
-                _cites(periods, [p for p, _ in ratios]),
-            )
-        )
-
-    costs = [(p, v) for p in usable if (v := _credit_cost(periods, p)) is not None]
-    if not costs:
-        out.append(
-            Part(
-                "credit_cost", None, Decimal(2), "pre-provision profit or pre-tax profit not filed"
-            )
-        )
-    else:
-        strong = [p for p, v in costs if v <= CREDIT_COST_GOOD]
-        points, caveat = _consistency(len(strong), len(costs), Decimal(2))
-        mean = _mean([v for _, v in costs])
-        out.append(
-            Part(
-                "credit_cost",
-                points,
-                Decimal(2),
-                f"provisions took {mean:.0f}% of pre-provision profit, at or under "
-                f"{CREDIT_COST_GOOD:.0f}% in {len(strong)} of {len(costs)} year(s) read" + caveat,
-                _cites(periods, [p for p, _ in costs]),
-            )
-        )
-
-    spreads = [(p, v) for p in usable if (v := _funding_spread(periods, p)) is not None]
-    if not spreads:
-        out.append(
-            Part("funding_spread", None, Decimal(1), "interest earned or expended not filed")
-        )
-    else:
-        strong = [p for p, v in spreads if v >= FUNDING_SPREAD_GOOD]
-        points, caveat = _consistency(len(strong), len(spreads), Decimal(1))
-        mean = _mean([v for _, v in spreads])
-        out.append(
-            Part(
-                "funding_spread",
-                points,
-                Decimal(1),
-                f"keeps {mean:.0f}% of the interest it earns (a stand-in for low-cost deposits), "
-                f"at or above {FUNDING_SPREAD_GOOD:.0f}% in {len(strong)} of "
-                f"{len(spreads)} year(s) read" + caveat,
-                _cites(periods, [p for p, _ in spreads]),
-            )
-        )
-    return out
+    basis = "consolidated" if _is_consolidated(periods, usable) else "standalone"
+    return [
+        _bank_part(
+            "cost_to_income",
+            ratios=[(p, v) for p in usable if (v := _cost_to_income(periods, p)) is not None],
+            good=COST_TO_INCOME_GOOD,
+            fair=COST_TO_INCOME_FAIR,
+            lower_is_better=True,
+            cap=Decimal(2),
+            phrase="costs are {mean:.0f}% of net income",
+            absent="total income or operating profit not filed",
+            periods=periods,
+            basis=basis,
+        ),
+        _bank_part(
+            "credit_cost",
+            ratios=[(p, v) for p in usable if (v := _credit_cost(periods, p)) is not None],
+            good=CREDIT_COST_GOOD,
+            fair=CREDIT_COST_FAIR,
+            lower_is_better=True,
+            cap=Decimal(2),
+            phrase="provisions took {mean:.0f}% of pre-provision profit",
+            absent="pre-provision profit or pre-tax profit not filed",
+            periods=periods,
+            basis=basis,
+        ),
+        _bank_part(
+            "funding_spread",
+            ratios=[(p, v) for p in usable if (v := _funding_spread(periods, p)) is not None],
+            good=FUNDING_SPREAD_GOOD,
+            fair=FUNDING_SPREAD_FAIR,
+            lower_is_better=False,
+            cap=Decimal(1),
+            phrase="keeps {mean:.0f}% of the interest it earns (a stand-in for cheap deposits)",
+            absent="interest earned or expended not filed",
+            periods=periods,
+            basis=basis,
+        ),
+    ]
 
 
 def _lends(periods: dict[str, dict]) -> bool:

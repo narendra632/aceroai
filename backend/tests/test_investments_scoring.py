@@ -251,8 +251,14 @@ def test_a_bank_is_measured_on_what_a_bank_actually_does(db, company, spec):
     assert _part(score, "credit_cost").points == D(2)
     # (300000 − 170000) ÷ 300000 = 43%, over the 40% bar.
     assert _part(score, "funding_spread").points == D(1)
-    assert "low-cost deposits" in _part(score, "funding_spread").detail, (
-        "it is a stand-in for the deposit mix and must never be called the net interest margin"
+    detail = _part(score, "funding_spread").detail
+    assert "deposits" in detail and "margin" not in detail, (
+        "it is a stand-in for the deposit mix and must never be called the net interest "
+        "margin, which divides by average earning assets the taxonomy does not carry"
+    )
+    assert "consolidated figures" in _part(score, "cost_to_income").detail, (
+        "published bank ratios are standalone and these are not, so a reader who cannot see "
+        "which they have will conclude the arithmetic is broken rather than differently scoped"
     )
 
     assert scoring.quadrant(score, reflexivity_high=False) != "UNKNOWN", (
@@ -590,3 +596,31 @@ def test_a_lender_is_recognised_from_its_own_filing_not_from_a_sector_list(db, c
         "it filed as a lender, so it is measured as one whatever its sector says"
     )
     assert set(score.not_applicable) == {"roce", "cash_conversion", "balance_sheet"}
+
+
+def test_a_middling_bank_lands_on_half_marks_rather_than_on_zero(db, company, spec):
+    """⚠ Under one bar a lender missing it by two points every year scores identically to one
+    missing it by thirty, and those are not the same bank. It is also where a band anchored on
+    a single computed peer is most likely to be wrong, so it is where the softness belongs."""
+    bank = company(symbol="SCOREBANK5", sector="PRIVATE_BANK")
+    for period in ("FY26", "FY25"):
+        # Costs at 66% of net income: past the 60% bar, inside the 70% one.
+        _bank_year(db, bank, period, operating_profit=D(65000), pbt=D(55000))
+
+    part = _part(scoring.quality_score(db, bank, spec), "cost_to_income")
+    assert part.points == D(1), "over the good bar, under the fair one"
+
+
+def test_a_listing_date_is_a_floor_on_history_and_never_a_ceiling(db, company, spec):
+    """⚠ Premier Energies listed one full financial year ago and files two, because it kept
+    accounts before it was listed. Without this the page read "2 of 1 possible years", which
+    is not a caveat but a contradiction — and a reader who spotted it would rightly stop
+    trusting everything around it."""
+    inst = company(symbol="RECENTCO")
+    _listed(db, "RECENTCO", dt.date(2024, 9, 1))
+    for period in ("FY26", "FY25"):
+        _file(db, inst, period, pat=D(300), equity=D(1000))
+
+    history = scoring.quality_score(db, inst, spec).history
+    assert history.years_listed == 1
+    assert history.obtainable == 2, "two years were read, so at least two could exist"
