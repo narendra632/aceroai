@@ -63,7 +63,7 @@
 - [x] 5.2 ⚠ UNKNOWN where nothing was read. A checklist that answers NO by default reports a
       clean bill of health it never checked
 - [x] 5.3 Flags 6 and 10 are marked computed, so no later model verdict may overrule them
-- [ ] 5.4 Flags 1, 3, 4, 5, 7, 9 — need a model reading news and filings; with source ingestion
+- [x] 5.4 Flags 1, 3, 4, 5, 7, 9 — need a model reading news and filings; with source ingestion — judgement.py — the six judged flags behind four gates (cite, echo, agree, no arithmetic)
 
 ## 6. Over the wire, and on the page
 
@@ -83,8 +83,8 @@
 
 ## 8. Deployment
 
-- [ ] 8.1 Pushed; migration 019 run; `fundamentals_sync` run on the server
-- [ ] 8.2 Verified in production
+- [x] 8.1 Pushed; migration 019 run; `fundamentals_sync` run on the server — migration 019 applied; fundamentals_sync runs Sundays 08:00
+- [x] 8.2 Verified in production — verified live
 
 ## 9. Known limits, recorded rather than implied
 
@@ -92,5 +92,5 @@
       fourth quarter. The remedy, when worth the fetches, is summing four quarterly filings
 - [x] 9.2 `retained_earnings` reports unknown: it needs five years of market value and the
       price record does not reach back that far
-- [ ] 9.3 Watchlist companies have no margin of safety until the price backfill completes,
+- [x] 9.3 Watchlist companies have no margin of safety until the price backfill completes, — still true and now stated on the company itself, with which limit is binding
       which it does over several runs of `prices_india_close`

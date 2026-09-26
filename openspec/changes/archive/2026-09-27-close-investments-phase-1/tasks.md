@@ -69,8 +69,8 @@
 
 ## 8. Deployment
 
-- [ ] 8.1 Pushed, migration 017 run on the server
-- [ ] 8.2 Verified against production
+- [x] 8.1 Pushed, migration 017 run on the server — migration 017 is applied; production answers on every route
+- [x] 8.2 Verified against production — verified live — /health 200 and the investments routes 401 behind auth
 
 ## 9. Documentation
 

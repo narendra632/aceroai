@@ -294,12 +294,19 @@ def claim_accuracy(db: Session) -> Measure:
     reaches a usable sample first.
     """
     rows = db.execute(
-        sa.select(Claim.status, sa.func.count())
+        sa.select(
+            Claim.status,
+            Proposal.blocked_by.is_(None).label("offered"),
+            sa.func.count(),
+        )
+        .join(Proposal, Claim.proposal_id == Proposal.id)
         .where(Claim.status.in_(("TRUE", "FALSE")))
-        .group_by(Claim.status)
+        .group_by(Claim.status, "offered")
     ).all()
-    counts = dict(rows)
-    true, false = counts.get("TRUE", 0), counts.get("FALSE", 0)
+
+    true = sum(n for status, _, n in rows if status == "TRUE")
+    false = sum(n for status, _, n in rows if status == "FALSE")
+    blocked = sum(n for _, offered, n in rows if not offered)
     n = true + false
     if n < MIN_OBSERVATIONS:
         return Measure(
@@ -308,11 +315,17 @@ def claim_accuracy(db: Session) -> Measure:
             n,
             f"{n} of {MIN_OBSERVATIONS} resolved claims needed before this means anything",
         )
+    # ⚠ The share from ideas the gates refused is stated, never hidden. Most claims will come
+    # from blocked ideas for as long as the market is expensive, and a reader who thought this
+    # measured the things actually bought would read it as far more than it is. It measures
+    # the JUDGEMENT — which is the thing worth measuring, and is why the claims are kept — but
+    # only while everyone can see which population it was computed over.
+    share = f"; {blocked} of them from ideas the gates refused" if blocked else ""
     return Measure(
         "claim_accuracy",
         (Decimal(true) / Decimal(n)).quantize(Decimal("0.001")),
         n,
-        f"{true} of {n} specific assertions came true",
+        f"{true} of {n} specific assertions came true{share}",
     )
 
 

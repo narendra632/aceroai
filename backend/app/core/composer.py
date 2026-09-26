@@ -81,6 +81,55 @@ def _tasks_block(db: Session, user: User) -> str | None:
     )
 
 
+#: What the Investments module is, in the words it uses about itself.
+#:
+#: ⚠ **Static, and that is deliberate.** Every figure comes from a tool, so nothing here can
+#: go stale; what it supplies is the *vocabulary* and the handful of distinctions that are
+#: easy to get wrong and expensive when got wrong. Without it the model reads "BLOCKED" as a
+#: failure, "not yet" as "no", and "6 of 9" as mediocre — and answers confidently in each case.
+#:
+#: ⚠ It carries no numbers on purpose. A live summary here would be one more place the book's
+#: figures are computed, and the page and the chat would eventually disagree about the same
+#: portfolio. The tools are the single source, the same ones the page calls.
+_INVESTMENTS_BLOCK = """\
+The user runs an Investments module in this app. It is not a trading tool — it exists to keep
+a written, timestamped, unchangeable record of WHY each decision was made, and to grade that
+reasoning later. Use the investment tools for anything about money, holdings, companies,
+suggestions or performance rather than answering from memory.
+
+How it is built, and the distinctions that matter when you speak about it:
+
+- The LEDGER is the user's own word and a machine never writes to it. `record_transaction`
+  returns a draft; only `confirm_transaction` writes. The same applies to a decision on a
+  suggestion: `decide_suggestion` then `confirm_decision`.
+- SCORES are two numbers that must always be quoted together — "6 of 9", never "6". Six of
+  six is excellent and six of ten is mediocre, and the difference is only how much has been
+  read.
+- A component reads three ways and they are three different facts: a NUMBER was measured;
+  "not read" means the filings are not in yet; "does not apply" means the test never
+  described this kind of company — return on capital for a bank — and is not a gap anyone can
+  fill. Never flatten the last two together.
+- BLOCKED is the normal outcome and usually means the rules worked. Most suggestions are
+  refused by the margin-of-safety rule, which says the company is good and the price is not.
+  A blocked suggestion was never offered and cannot be decided on.
+- The four BOXES: Q1 supercharged compounder, Q2 reflexive bubble (never a buy), Q3 ignored
+  compounder, Q4 structural value trap (never a buy). BORDERLINE means neither blessed nor
+  blocked — usually too few years read, or a score sitting right on the line.
+- PREDICTIONS (claims) are recorded when a thesis is formed, whether or not the gates let the
+  idea through, and can never be edited afterwards. They are the point of the whole module.
+- TRUST TIERS: filing (the company's own word), press, commentary. Evidence from commentary
+  alone can never carry a suggestion — the sourcing gate refuses it whatever it said.
+- The RESEARCH QUEUE holds companies a source named that the user does not follow. A line
+  there is a lead, never a recommendation, and nothing in it has been bought.
+- "not yet" is never "no". Several go/no-go criteria cannot be tested until enough time has
+  passed, and reporting one of those as failed would call the experiment early.
+- Money is exact. Quote the figures the tools return; never re-derive, round or estimate one.
+
+Say what is missing as readily as what is known. A figure that excludes unpriced holdings, a
+score resting on one year, a benchmark measured over a different window — each has to be said
+out loud, because the tools report it and a reader who is not told will assume otherwise."""
+
+
 def _facts_block(facts: Sequence[RecalledFact]) -> str:
     """The recalled facts, each with its id.
 
@@ -123,6 +172,7 @@ def build_context(
     context: list[dict] = [
         {"role": "system", "content": _read_persona()},
         {"role": "system", "content": _now_block()},
+        {"role": "system", "content": _INVESTMENTS_BLOCK},
     ]
     if user is not None:
         block = _tasks_block(db, user)

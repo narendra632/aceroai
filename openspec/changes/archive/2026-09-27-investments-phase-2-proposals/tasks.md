@@ -91,8 +91,8 @@
 
 ## 9. Deployment
 
-- [ ] 9.1 Pushed; migrations 020 and 021 run on the server
-- [ ] 9.2 Verified in production
+- [x] 9.1 Pushed; migrations 020 and 021 run on the server — migrations 020 and 021 applied
+- [x] 9.2 Verified in production — verified live
 
 ## 10. Owed at the end of Phase 2
 
@@ -103,6 +103,6 @@
       263 days" for a share bought in June read as a hole in the record when the truth was
       that it was not owned yet — a figure that cannot tell "not owned" from "not recorded"
       reports a fault that does not exist
-- [ ] 10.3 The six model-judged flags, with source ingestion
+- [x] 10.3 The six model-judged flags, with source ingestion — judgement.py, reached from the reading layer
 - [x] 10.4 Trigger evaluation on a schedule — done in section 8
 - [x] 10.5 Claim resolution and the measures that rest on it — done in section 8

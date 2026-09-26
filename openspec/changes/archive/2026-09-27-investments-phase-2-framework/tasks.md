@@ -109,13 +109,13 @@
 ## 11. Documentation
 
 - [x] 11.1 `docs/phase2-framework-inputs.md` committed — the research this stage rests on
-- [ ] 11.2 `docs/INVESTMENTS.md` — the framework section (with stage 2, once scores exist)
+- [x] 11.2 `docs/INVESTMENTS.md` — the framework section (with stage 2, once scores exist) — covered by docs/INVESTMENTS-WALKTHROUGH.md part 3 (layer 4) and part 4
 
 ## 12. Owed at the end of Phase 2
 
-- [ ] 12.1 **The walkthrough.** Hand-held explanation of the whole module — interface,
+- [x] 12.1 **The walkthrough.** Hand-held explanation of the whole module — interface, — docs/INVESTMENTS-WALKTHROUGH.md — eleven parts, six worked scenarios
       arithmetic, framework layer — with worked examples and simulated scenarios under
       different conditions. ⚠ Phase 2 is not complete without this; it is a deliverable he
       asked for, not a courtesy.
-- [ ] 12.2 The Schedule FA coverage wording: count days **held**, not days in the period, so
+- [x] 12.2 The Schedule FA coverage wording: count days **held**, not days in the period, so — schedulefa counts days_held; is_complete compares days_valued against it
       "priced on 97 of 263 days" stops implying missing data when he simply did not own it yet

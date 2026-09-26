@@ -615,3 +615,154 @@ def test_the_same_evening_cannot_run_twice(db, real, user, spec, version):
         proposals.synthesise(db, user.id, occurrence_key="test-once")
         db.commit()
     db.rollback()
+
+
+# --- the record starts whether or not the gates open ------------------------------------------
+
+
+def test_a_blocked_suggestion_still_records_what_it_predicted(db, real, user, spec, version):
+    """⚠ The defect this fixes produced a system that ran every night for a month and wrote
+    ZERO falsifiable predictions: fifty-seven suggestions raised, fifty-seven blocked, and
+    claims were written only past the gates. The go/no-go asks for 150 resolved claims in a
+    year, so at zero a night it was an unanswerable question rather than a hard one — and
+    nobody would have found out until the year was over."""
+    inst = _company(db, symbol="PROPCLAIM")
+    _excellent(db, inst)
+    frameworks.propose_mapping(
+        db, inst, b_bottleneck="B1.1", spec=spec, framework_version_id=version.id
+    )
+    db.commit()
+
+    mirror = proposals.mirror(db, user.id)
+    draft = proposals.draft_for(db, mirror, inst, spec, set())
+    assert draft.claims, "this fixture is pointless unless the thesis asserts something"
+    verdict = gates.evaluate(db, mirror.id, _candidate(db, inst, spec, mapping=None))
+    row = proposals.write(
+        db,
+        book_row=mirror,
+        user_id=user.id,
+        draft=draft,
+        verdict=verdict,
+        batch_id=uuid.uuid4(),
+        framework_version_id=version.id,
+    )
+    db.commit()
+
+    assert row.status == "BLOCKED"
+    written = db.execute(sa.select(Claim).where(Claim.proposal_id == row.id)).scalars().all()
+    assert len(written) == len(draft.claims), "the reasoning is kept even where the money is not"
+    assert all(c.status == "OPEN" for c in written)
+
+
+def test_the_same_prediction_is_not_recorded_twice_while_it_is_still_open(
+    db, real, user, spec, version
+):
+    """⚠ Without this the fix is worse than the bug. The same company is reconsidered every
+    night and its claims are computed from filed figures, so they come out identical — roughly
+    forty near-identical rows a night, fifteen thousand a year. "150 resolved claims" would be
+    reached inside a week by a hundred and fifty copies of the same three predictions, and the
+    measure would read as a large sample while being a sample of one."""
+    inst = _company(db, symbol="PROPDEDUPE")
+    _excellent(db, inst)
+    frameworks.propose_mapping(
+        db, inst, b_bottleneck="B1.1", spec=spec, framework_version_id=version.id
+    )
+    db.commit()
+    mirror = proposals.mirror(db, user.id)
+
+    for _ in range(3):
+        draft = proposals.draft_for(db, mirror, inst, spec, set())
+        verdict = gates.evaluate(db, mirror.id, _candidate(db, inst, spec, mapping=None))
+        proposals.write(
+            db,
+            book_row=mirror,
+            user_id=user.id,
+            draft=draft,
+            verdict=verdict,
+            batch_id=uuid.uuid4(),
+            framework_version_id=version.id,
+        )
+        db.commit()
+
+    expected = len(proposals.draft_for(db, mirror, inst, spec, set()).claims)
+    total = db.execute(
+        sa.select(sa.func.count())
+        .select_from(Claim)
+        .join(Proposal, Claim.proposal_id == Proposal.id)
+        .where(Proposal.instrument_id == inst.id)
+    ).scalar_one()
+    assert total == expected, "three nights of the same thesis is one set of predictions"
+
+
+def test_a_prediction_can_be_made_again_once_the_last_one_has_settled(
+    db, real, user, spec, version
+):
+    """Deduplication is against what is still OUTSTANDING, not against history. A thesis
+    restated after its last assertion was graded is a new, separate prediction."""
+    inst = _company(db, symbol="PROPAGAIN")
+    _excellent(db, inst)
+    frameworks.propose_mapping(
+        db, inst, b_bottleneck="B1.1", spec=spec, framework_version_id=version.id
+    )
+    db.commit()
+    mirror = proposals.mirror(db, user.id)
+
+    def once():
+        draft = proposals.draft_for(db, mirror, inst, spec, set())
+        verdict = gates.evaluate(db, mirror.id, _candidate(db, inst, spec, mapping=None))
+        proposals.write(
+            db,
+            book_row=mirror,
+            user_id=user.id,
+            draft=draft,
+            verdict=verdict,
+            batch_id=uuid.uuid4(),
+            framework_version_id=version.id,
+        )
+        db.commit()
+
+    once()
+    first = db.execute(sa.select(Claim)).scalars().all()
+    for claim in first:
+        claim.status = "TRUE"
+        claim.resolved_at = dt.datetime.now(dt.UTC)
+    db.commit()
+
+    once()
+    total = db.execute(sa.select(sa.func.count()).select_from(Claim)).scalar_one()
+    assert total == len(first) * 2
+
+
+def test_a_blocked_suggestion_still_arms_nothing(db, real, user, spec, version):
+    """⚠ Triggers, unlike claims, belong to ideas that were offered. A trigger asks what would
+    make you SELL this, and there is nothing to sell — arming them would raise exit alerts
+    about holdings that do not exist and wreck the trigger-discipline measure."""
+    inst = _company(db, symbol="PROPNOTRIG")
+    _excellent(db, inst)
+    frameworks.propose_mapping(
+        db, inst, b_bottleneck="B1.1", spec=spec, framework_version_id=version.id
+    )
+    db.commit()
+    mirror = proposals.mirror(db, user.id)
+    draft = proposals.draft_for(db, mirror, inst, spec, set())
+    verdict = gates.evaluate(db, mirror.id, _candidate(db, inst, spec, mapping=None))
+    row = proposals.write(
+        db,
+        book_row=mirror,
+        user_id=user.id,
+        draft=draft,
+        verdict=verdict,
+        batch_id=uuid.uuid4(),
+        framework_version_id=version.id,
+    )
+    db.commit()
+
+    assert row.status == "BLOCKED"
+    assert (
+        db.execute(
+            sa.select(sa.func.count())
+            .select_from(InvalidationTrigger)
+            .where(InvalidationTrigger.proposal_id == row.id)
+        ).scalar_one()
+        == 0
+    )

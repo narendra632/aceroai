@@ -1,7 +1,16 @@
 # investments Specification
 
 ## Purpose
-TBD - created by archiving change add-investment-ledger. Update Purpose after archive.
+
+Keep an auditable record of what was held, what it cost, what it was worth, and — the
+part every other tool throws away — **why each decision was made**, frozen before the
+outcome is known so it can be graded later.
+
+The module is built in layers, and which layer a thing lives in decides how far it can be
+trusted: the ledger is the user's word, the market record is observation, the fold is
+arithmetic, the framework is the user's own theory, judgement is the one place a model
+belongs, the gates are code that can overrule it, and the record of judgement is
+append-only so that the grading on top of it measures something real.
 ## Requirements
 ### Requirement: What is held is recorded by the user and never inferred
 
@@ -477,3 +486,697 @@ and is therefore exact for every period from the first transaction onward.
 - **THEN** the invested line is shown alone and the interface states that value history begins
   when prices are recorded, rather than charting zero or an empty frame
 
+### Requirement: An announced change to a share count is recorded before it is applied
+
+The system SHALL record every announced corporate action that changes the number of units of
+a held instrument, as a durable row, at the moment it is first read from the exchange feed.
+The row SHALL survive re-reading the same announcement on later days without duplicating.
+
+The system SHALL derive the size of the change only from an announcement whose wording admits
+a single reading. Where the wording is ambiguous, the system SHALL record the action as
+needing review, SHALL store the reason, and SHALL NOT infer a size.
+
+⚠ A confidently wrong multiplier is a larger error than the one it corrects: reading a share
+split in the wrong direction changes a holding by a factor of a hundred, where leaving it
+unapplied changes the *presentation* of that holding by a factor of two.
+
+#### Scenario: The same announcement is read on several evenings
+
+- **WHEN** the feed carries an announcement already recorded
+- **THEN** no second row is created, and nothing is announced again
+
+#### Scenario: An announcement that could mean two things
+
+- **WHEN** an announcement states a ratio without saying which side it applies to
+- **THEN** the action is recorded as needing review with the reason stored, the holding is
+  flagged, and no quantity is changed
+
+#### Scenario: The feed cannot be reached
+
+- **WHEN** the exchange feed is unavailable
+- **THEN** actions already recorded are still applied on their date, and the failure is
+  recorded rather than raised
+
+### Requirement: Applying an action conserves what was paid, per lot
+
+When an action is applied, the system SHALL change only the number of units held. The total
+cost basis of the holding SHALL be unchanged, and each acquisition lot SHALL retain its own
+per-unit cost scaled by the same factor as its quantity.
+
+The change SHALL be recorded on the date the action took effect, not the date it was read,
+and SHALL be an ordinary entry in the append-only ledger that the existing correction path
+can retire.
+
+#### Scenario: A bonus on a holding bought in two lots at different prices
+
+- **WHEN** a 1:1 bonus is applied to lots acquired at two different prices
+- **THEN** the quantity doubles, the total cost basis is unchanged, and each lot's per-unit
+  cost is exactly half of what it was — not the average of the two
+
+#### Scenario: The action did not apply to this book
+
+- **WHEN** an action falls due for an instrument the book holds none of
+- **THEN** it is closed with that reason, and the holding is not left flagged
+
+### Requirement: An outstanding action makes the holding's profit and loss unreliable, and it says so
+
+While an action on an instrument is outstanding, the system SHALL state that the profit and
+loss for that holding is not reliable, wherever that figure is presented.
+
+⚠ This is why the action is a stored row rather than a message. A message can be dismissed
+while the number it was warning about stays on the screen.
+
+#### Scenario: A split is announced and not yet applied
+
+- **WHEN** an action on a holding is outstanding
+- **THEN** the holding is flagged in the interface, and what the change would do to its
+  quantity is shown before it is applied
+
+### Requirement: Foreign holdings can be read as the calendar-year disclosure requires
+
+For each instrument held in a currency other than the book's own, the system SHALL report,
+for a chosen calendar year: the acquisition date, what was paid, the highest value reached on
+any day of that year with the day it occurred, the value at the end of the period with its
+day, income received and disposal proceeds.
+
+The system SHALL report how many days of the period could be valued, and SHALL NOT present a
+peak taken over a subset of days as a peak over the period.
+
+The system SHALL state that the conversion rate used is the one recorded with each
+observation and not the rate the tax return requires, and SHALL name the day each figure
+comes from so the required rate can be obtained for it.
+
+#### Scenario: A year priced only in part
+
+- **WHEN** fewer days of the period carry a price than the period contains
+- **THEN** the report states the two counts, and the interface says the peak is the highest
+  of the observed days
+
+#### Scenario: A year in which nothing was bought or sold
+
+- **WHEN** a foreign holding was held through a year with no transaction in it
+- **THEN** that year is still offered and still reported, because the holding is declarable
+  in every year it is held
+
+### Requirement: The module reports what it is costing in storage
+
+The system SHALL measure the disk occupied by the investment record, including indexes, and
+SHALL report when it approaches its budget.
+
+#### Scenario: The record grows past its warning threshold
+
+- **WHEN** the module's tables exceed the warning threshold
+- **THEN** the user is told once per band, repeated daily while unresolved
+
+#### Scenario: The measurement cannot be taken
+
+- **WHEN** a table cannot be measured
+- **THEN** nothing is reported, because an unmeasurable table is not an empty one
+
+### Requirement: The investment framework is stored data, not logic in the code
+
+The system SHALL hold the framework — the imperatives, the bottlenecks, what each bottleneck
+blocks, and the fair multiple for each sector — as versioned records. A change to any of it
+SHALL create a new version rather than altering the existing one, and every score and every
+proposal SHALL record the version that produced it.
+
+⚠ This is what makes improving the framework safe. A score made in one month must remain
+explainable in another, which is impossible if the rules it used were re-derived each time
+from whatever the code says today.
+
+#### Scenario: The framework is changed
+
+- **WHEN** the framework's contents are edited
+- **THEN** a new version is created, the previous one remains readable, and anything already
+  scored still points at the version that produced it
+
+#### Scenario: The framework has not been installed
+
+- **WHEN** something asks for a score and no approved framework exists
+- **THEN** the request is refused with that reason, and no score is estimated
+
+### Requirement: A claim that a company serves a national bottleneck scores nothing until a person agrees
+
+The system MAY propose that a company clears a particular bottleneck, and SHALL record the
+reasoning for that proposal. The proposal SHALL contribute **zero** to any structural score
+until a human approves it.
+
+Replacing a company's mapping SHALL create a new proposal that supersedes the old one and is
+itself unapproved.
+
+⚠ Without this, a system that reads enough news will eventually narrate an unrelated company
+into national importance, and nothing in the score can tell that apart from the real thing.
+A re-mapping does not inherit the agreement given to the mapping it replaced, because it is a
+different claim.
+
+#### Scenario: The system proposes a mapping
+
+- **WHEN** a company is proposed as clearing a bottleneck
+- **THEN** its structural score is zero, the interface says the mapping is awaiting agreement,
+  and approving it is what allows the company to score
+
+#### Scenario: A company is moved to a different bottleneck
+
+- **WHEN** an approved mapping is replaced
+- **THEN** the replacement is unapproved, the company scores zero until it is confirmed, and
+  the superseded mapping can no longer be approved
+
+### Requirement: A framework judgement expires rather than standing for ever
+
+An approved mapping SHALL carry a date after which it is raised for re-confirmation.
+
+⚠ A mapping states what a company does *today*. A business that changes what it does — a
+contract manufacturer moving into semiconductor packaging — would otherwise continue to be
+scored against the business it used to be, with nothing anywhere reporting it.
+
+#### Scenario: A mapping passes its review date
+
+- **WHEN** an approved mapping is older than its review period
+- **THEN** it appears in the list of things needing a person, asking whether the company still
+  does what it did when the mapping was agreed
+
+### Requirement: A gap in the framework is reported as a gap, never scored as a finding
+
+Where the framework does not establish how many imperatives a bottleneck blocks, the system
+SHALL record what is known as a **floor** and SHALL mark it as such. It SHALL NOT substitute a
+default value that would be indistinguishable from an established one.
+
+Where a company's sector has no fair multiple, the system SHALL say so wherever a figure
+derived from that multiple is shown, rather than silently applying a default.
+
+⚠ Both are the same failure: a value that is missing, replaced by one that looks measured. A
+company would score narrow because a section of the source material is brief, or appear to
+have a computed margin of safety that was in fact guessed — and nothing would prompt anyone to
+correct either.
+
+#### Scenario: A bottleneck whose breadth was never established
+
+- **WHEN** a company is scored against such a bottleneck
+- **THEN** the score uses the known floor, and the interface states that the figure is a
+  floor and may be understated
+
+#### Scenario: A company in a sector with no fair multiple
+
+- **WHEN** that company is valued
+- **THEN** the default multiple is used and the interface says it was the default, so any
+  margin of safety derived from it is visibly a guess
+
+### Requirement: A company outside the framework is distinguished from one that scores badly
+
+Where the framework does not apply to a company, the system SHALL report the structural score
+as **unavailable with a reason**, and SHALL NOT report it as zero.
+
+⚠ These are different answers. Zero means "measured against this framework and found
+wanting". Unavailable means "this framework does not ask a question about this company" — the
+honest verdict on a foreign holding, since the framework asks what India must build.
+
+#### Scenario: A foreign holding
+
+- **WHEN** a company in another country's market is scored
+- **THEN** no structural score is produced, the reason is stated, and the holding is still
+  tracked, valued and reported
+
+#### Scenario: A holding the user has declared off-thesis
+
+- **WHEN** the user marks a company as outside the framework
+- **THEN** it is scored the same way as a foreign holding, and limits on off-framework
+  exposure govern what may be added rather than retrospectively blocking what is held
+
+### Requirement: Companies that are watched but not held are scored
+
+The system SHALL score any tracked company against the framework, whether or not it is held,
+and SHALL distinguish the two in the interface.
+
+⚠ Without this the system can only ever say "hold" or "sell". Identifying what deserves
+attention is the framework's purpose, and it has nothing to identify if it can only see what
+has already been bought.
+
+#### Scenario: A watchlist company
+
+- **WHEN** a company with no transactions is tracked
+- **THEN** it is scored, shown as watched rather than held, and never appears as a holding or
+  affects any return
+
+### Requirement: Company figures come from filings, stored with the text they were filed as
+
+The system SHALL obtain a company's reported figures from its own regulatory filings, and
+SHALL store, alongside each figure, the literal text it was extracted from.
+
+The system SHALL NOT store the filing document itself.
+
+⚠ The text is what makes the rule that a model never produces a number enforceable: a figure in
+a thesis can be checked back, character by character, against what the company submitted. A
+validator given only the parsed number would be comparing a number with itself.
+
+#### Scenario: A figure is used in an argument
+
+- **WHEN** any figure about a company is presented
+- **THEN** it can be traced to the filing it came from and to the words in that filing
+
+#### Scenario: A company restates a year
+
+- **WHEN** the same period is reported again in a later filing
+- **THEN** the later statement is the one readers receive, and the earlier one remains recorded
+
+### Requirement: A figure that describes one period is never read as another
+
+The system SHALL resolve each reported figure to the period it describes, using that period's
+dates, and SHALL NOT rely on labels or on ordering within the document.
+
+Figures qualified by a business segment or other breakdown SHALL NOT be read as the company's.
+
+⚠ An annual filing reports the same measure for the final quarter and for the whole year under
+an identical tag. Reading the wrong one is wrong by roughly four, silently, on every ratio
+derived from it — and nothing downstream could detect it.
+
+#### Scenario: An annual filing carrying both a quarter and a year
+
+- **WHEN** figures are extracted from it
+- **THEN** the yearly figure and the quarterly figure are stored as distinct periods
+
+#### Scenario: A filing reporting revenue by segment
+
+- **WHEN** figures are extracted
+- **THEN** no segment's figure is recorded as the company's own
+
+### Requirement: A company that reports on one basis only is still read
+
+Where a company reports both a consolidated and a standalone statement, the system SHALL use
+the consolidated one. Where only one basis exists, the system SHALL use it, and SHALL record
+which basis every figure came from. The system SHALL NOT mix bases within a series.
+
+⚠ A company with no subsidiaries files no consolidated statement. Requiring one leaves such a
+company with no financial history at all, and the failure reads as though the company does not
+report.
+
+#### Scenario: A company with no subsidiaries
+
+- **WHEN** its filings are read
+- **THEN** its standalone statements are used, and each figure records that basis
+
+### Requirement: Business quality is scored from filed figures alone, and says what it could not measure
+
+The system SHALL score a company's business quality and the reasonableness of its price using
+only figures from filings and observed prices, computing every ratio in ordinary code.
+
+A component whose inputs are absent SHALL be reported as **unmeasured**, never as zero. The
+score SHALL be reported as points earned against points **available**, and the unmeasured
+components SHALL be named.
+
+A component requiring several years SHALL decline to answer where too few years have been read.
+
+#### Scenario: A company whose filings have not been read
+
+- **WHEN** it is scored
+- **THEN** every component reports unmeasured, nothing is scored zero, and the interface can
+  name what is missing
+
+#### Scenario: A single year against a multi-year test
+
+- **WHEN** a test asks about several years and one has been read
+- **THEN** the component reports unmeasured and states how many years it had
+
+### Requirement: A company is not judged on arithmetic that does not describe it
+
+Where a measure does not apply to a company's kind of business, the system SHALL report that
+measure as unmeasured rather than scoring it.
+
+⚠ Borrowings are a lender's raw material rather than its leverage, and its cash flows follow
+deposits rather than trading. Scoring those as though they described an industrial classifies
+a sound lender as a failing business — and that classification blocks any further purchase.
+
+#### Scenario: A lender scored on leverage
+
+- **WHEN** a company whose business is lending is scored
+- **THEN** leverage, cash conversion and return on capital report unmeasured, and the measures
+  that do describe it are scored normally
+
+### Requirement: A verdict that blocks a purchase is refused on a partial reading
+
+Where the system classifies a company into a category that forbids buying it, it SHALL first
+require that enough of the score was measurable, including the company's price.
+
+⚠ A company blocked because its accounts have not been read is indistinguishable from one
+blocked because it deserves to be, and only one of those is a judgement.
+
+#### Scenario: Few components could be measured
+
+- **WHEN** a company is classified
+- **THEN** no category that blocks a purchase is assigned, and the classification states that
+  the reading was too thin to judge
+
+#### Scenario: The company's price is unknown
+
+- **WHEN** a company has no observed price
+- **THEN** no blocking category is assigned, because price is half of the question
+
+### Requirement: A checklist question with no evidence is answered unknown
+
+Where a checklist question can be computed from filings or prices, the system SHALL compute it
+and SHALL record that it was computed. Where the inputs are absent, the answer SHALL be
+**unknown** rather than a default. A computed answer SHALL NOT be overridden by a judgement.
+
+⚠ A checklist that answers "no" by default reports a clean bill of health it never checked.
+
+#### Scenario: No price history exists
+
+- **WHEN** a question about the price range is asked
+- **THEN** the answer is unknown, with the reason, rather than "no"
+
+### Requirement: The system proposes and never acts
+
+The system SHALL NOT place an order, connect to any brokerage, or alter the user's real
+holdings. An approved suggestion SHALL update only the system's own paper book.
+
+What the user does in the real world SHALL be recorded the same way every other transaction
+is — by the user — and the two books SHALL remain separate.
+
+⚠ This is not a limitation to engineer away later. It is what keeps the system outside the
+regulatory category governing automated trading, and the difference between the two books is
+one of the most interesting measurements the module produces.
+
+#### Scenario: A suggestion is approved
+
+- **WHEN** the user approves a suggestion
+- **THEN** the system's own paper book records it, the real book is untouched, and no order
+  exists anywhere
+
+### Requirement: A suggestion is recorded with everything that produced it, frozen
+
+Every suggestion SHALL record, at the moment it is made: the price the system saw, the scores
+it rested on, which rules were checked and what each decided, the version of the framework in
+force, and references to the records its figures came from.
+
+None of these SHALL be recomputed when the suggestion is later read.
+
+⚠ What the system SAW is a different fact from what the market DID. A review that recomputes
+the inputs is reconstructing a decision rather than examining one, and the difference is
+invisible from the outside.
+
+#### Scenario: A suggestion is reviewed months later
+
+- **WHEN** an old suggestion is read
+- **THEN** the price, the scores and the rule results are those recorded at the time, not
+  today's
+
+### Requirement: A suggestion cannot be made without stating what would prove it wrong
+
+Every suggestion to buy SHALL carry at least two invalidation conditions, each expressed as a
+metric, a comparison, a threshold and a deadline. Conditions expressed only in prose SHALL be
+refused.
+
+⚠ "If the story changes" cannot be checked, so a position carrying it can never be shown to
+have been wrong — which is the same as carrying no condition at all, dressed as caution.
+
+#### Scenario: A suggestion with only narrative conditions
+
+- **WHEN** its invalidation conditions cannot be evaluated mechanically
+- **THEN** the suggestion is refused and the refusal names that rule
+
+### Requirement: The rules that refuse a suggestion are applied by code, not by instruction
+
+The conditions under which a suggestion may not be made SHALL be evaluated in program code
+against stored records. The system SHALL NOT rely on a language model being instructed to
+respect them.
+
+The result of every rule SHALL be recorded, distinguishing a rule that passed from one that
+did not apply.
+
+⚠ A rule that a sufficiently persuasive argument can talk its way past is a preference. The
+reason for writing rules down before anything is at stake is that they bind on the day you
+would rather they did not — and "not asked" counted as "satisfied" would overstate how much
+was ever checked.
+
+#### Scenario: A company whose business is poor and whose story is loud
+
+- **WHEN** it is considered for purchase
+- **THEN** it is refused regardless of how strong the argument for it reads
+
+#### Scenario: A sale considered against rules about buying
+
+- **WHEN** the rules are applied
+- **THEN** the buying rules are recorded as not applicable rather than as passed
+
+### Requirement: A refused suggestion is recorded as carefully as an accepted one
+
+Where a rule refuses a suggestion, the system SHALL still record the suggestion, the rule that
+refused it, and an entry in a separate book tracking what did not happen.
+
+⚠ A rule whose cost is invisible is a rule nobody can evaluate. Only the record of what the
+rules refused can ever answer whether they are protecting or merely obstructing.
+
+#### Scenario: A rule blocks a purchase
+
+- **THEN** the suggestion is stored with the blocking rule named, it is never offered for a
+  decision, and it appears in the book of what the rules refused
+
+### Requirement: Every decision carries a reason in the user's own words
+
+The system SHALL require a reason with every approval, rejection or modification, and SHALL
+refuse a decision without one.
+
+⚠ The reason is the data that eventually reveals what kinds of suggestion keep being turned
+down. It is the only route by which the system learns anything about its own judgement; a
+decision without one records that something happened and nothing about why.
+
+#### Scenario: A decision is submitted with no reason
+
+- **THEN** it is refused, and nothing is recorded
+
+### Requirement: A suggestion lapses rather than standing indefinitely
+
+A suggestion not acted on within a defined period SHALL be treated as lapsed and SHALL NOT be
+actionable.
+
+⚠ A suggestion was made at a price. Weeks later that price is history, and acting on it is
+acting on a judgement about a world that has moved.
+
+#### Scenario: An old suggestion
+
+- **WHEN** the user tries to act on a suggestion past its validity
+- **THEN** the attempt is refused with that reason
+
+### Requirement: Every thinking run is recorded, including the ones that suggest nothing
+
+The system SHALL record each run of the deciding job with what it considered and what it
+produced, whether or not it produced anything.
+
+⚠ Suggesting nothing is a normal and frequently correct outcome. A system that only leaves a
+trace on the days it acted can never be measured against the days it should have acted and did
+not — the record becomes a highlight reel.
+
+#### Scenario: An evening with nothing worth suggesting
+
+- **THEN** a run is recorded showing what was considered and that nothing was produced, and
+  the user is not notified
+
+#### Scenario: The same run happens twice
+
+- **WHEN** a scheduled run repeats for an occurrence already recorded
+- **THEN** no second set of suggestions is written
+
+### Requirement: New companies arrive from what the system reads, not only from the user
+
+The system SHALL poll registered sources, record everything each published, and recognise the
+listed companies each item names. A company the user does not follow SHALL open a line in a
+research queue rather than being discarded.
+
+Recognition SHALL be deterministic, against the exchange's own list of listed companies. No
+model SHALL introduce a company name into the record.
+
+⚠ Without this the system can only ever say hold, trim or sell. A research assistant that can
+comment only on what is already owned is a bookkeeper with opinions.
+
+#### Scenario: A source names a company nobody follows
+
+- **WHEN** an item names a listed company that is neither held nor watched
+- **THEN** a research-queue line is opened recording which source named it and what was said,
+  and nothing is bought, scored or recommended by that fact alone
+
+#### Scenario: A model proposes a name that is not listed
+
+- **WHEN** a model returns a company name that no listed company matches
+- **THEN** nothing is recorded for it, exactly as if the name had been misheard
+
+### Requirement: Every company a source names is recorded, whether or not it was acted on
+
+The system SHALL record a mention for every instrument every claim-making source names,
+including companies never looked at, dismissed, or already held.
+
+⚠ Judging a source on the ideas that were acted on measures the reader's filter rather than
+the source: forty companies named, three looked at and one that worked reads as 33% instead of
+2.5%. The skipped ideas are the denominator and cannot be reconstructed afterwards.
+
+#### Scenario: A source's record is read
+
+- **WHEN** a source's performance is reported
+- **THEN** the count of everything it named is the denominator, and how many became
+  suggestions is reported separately
+
+### Requirement: What a video said is read, not what its title advertised
+
+Where a source publishes video, the system SHALL read the spoken words where they can be
+obtained, and SHALL record for every item whether they could be.
+
+An item whose words could not be read SHALL be distinguishable from an item that named no
+company.
+
+⚠ A title is advertising copy. A video titled for a theme routinely names a dozen companies in
+its first two minutes and none in its title.
+
+#### Scenario: The words are in a script the matcher cannot read
+
+- **WHEN** a transcript is not in the script the deterministic matcher recognises
+- **THEN** it is recorded as read-but-not-matchable, and reporting it as naming no company is
+  a claim about the reader rather than about the video
+
+### Requirement: Where the system reads from is the user's decision, changeable by the user
+
+A source SHALL be registered inactive and unapproved, and SHALL be read only after the user
+approves it. The user SHALL be able to add, approve and switch off a source from the
+interface.
+
+A source SHALL be switched off rather than deleted.
+
+⚠ Adding a commentator changes what the system can be talked into. Deleting one would orphan
+every mention that cited it and silently rewrite the record of where ideas came from.
+
+#### Scenario: A channel is added from a link
+
+- **WHEN** the user supplies a channel in any form the address bar produces
+- **THEN** it is registered, inactive and unapproved, and nothing is read from it until the
+  user approves it
+
+### Requirement: A rule is never written so that no company could satisfy it
+
+A rule that depends on history SHALL scale to the history that could exist for the subject it
+is applied to, and SHALL state which limit is binding when the available history is short.
+
+⚠ A five-year test applied to a company listed eighteen months ago is not strict, it is
+unsatisfiable — and from the outside a company that cannot be judged is indistinguishable from
+one that was judged badly. The same shape appears wherever a threshold is absolute.
+
+#### Scenario: A company is younger than the window a rule assumes
+
+- **WHEN** a rule spans more years than the company could have filed
+- **THEN** the rule is applied over what exists, at reduced weight, and the result states both
+  how much was read and how much could have been read
+
+#### Scenario: A target cannot be reached at the current size
+
+- **WHEN** a criterion's threshold cannot be reached at the rate the system can produce
+  observations
+- **THEN** the interface states that, so a permanently unmet criterion is never mistaken for a
+  pending one
+
+### Requirement: A test that does not describe a company is distinguished from one not yet run
+
+Where a component of a score cannot apply to a kind of company, the system SHALL mark it
+inapplicable, exclude it from that company's denominator, and render it differently from a
+component whose inputs are missing.
+
+The kind of company SHALL be determined from what it filed, not only from a maintained list.
+
+⚠ Treating "does not apply" as a gap in the reading made a completely-read bank carry four
+holes and left it permanently unjudgeable — the outcome of failing it, arrived at politely.
+
+#### Scenario: A lender is scored
+
+- **WHEN** a company filed under the banking taxonomy
+- **THEN** the components that describe machinery are marked inapplicable, the components that
+  describe a lender are computed in their place, and the score is reported against the set
+  that applies to it
+
+### Requirement: What was predicted is recorded whether or not the suggestion was offered
+
+Every thesis SHALL record its falsifiable assertions at the moment it is formed, including
+where a rule refused the suggestion. Each SHALL carry whether the idea was offered or blocked.
+
+An assertion already outstanding about the same company SHALL NOT be recorded again.
+
+⚠ Calibration is a property of the judgement, not of the purchases. Recording only what
+survived the gates produced a system that ran for a month and wrote no predictions at all,
+because in an expensive market nothing survives. Recording every night's without
+deduplication is the opposite failure: a measure that reads as a large sample while being a
+sample of one.
+
+#### Scenario: Every suggestion is blocked
+
+- **WHEN** a thinking run suggests nothing because every candidate was refused by a rule
+- **THEN** the predictions each thesis made are still recorded, each carrying the rule that
+  refused it
+
+#### Scenario: The same thesis is formed again the next night
+
+- **WHEN** a company is reconsidered and asserts what an outstanding prediction already
+  asserts
+- **THEN** no second copy is recorded
+
+### Requirement: Conditions to watch belong to suggestions that were offered
+
+Invalidation conditions SHALL be written only for suggestions that survived every rule.
+
+⚠ A condition asks what would make the user sell something. Arming one on an idea that was
+never bought would raise exit alerts about holdings that do not exist, and would corrupt the
+measure of whether fired conditions were acted on.
+
+#### Scenario: A suggestion is blocked
+
+- **WHEN** a rule refuses a suggestion
+- **THEN** no invalidation condition is armed for it
+
+### Requirement: The same figures are reachable in conversation as on the page
+
+Every figure available in the interface SHALL be reachable through the assistant, computed by
+the same service code.
+
+The assistant SHALL NOT write to the ledger or record a decision in a single step. Both SHALL
+be prepared and then confirmed by the user.
+
+⚠ A rule implemented for only one of the two is a rule the other one skips. And a decision is
+the row the system is eventually graded on — a model that could record one unaided would be
+writing its own report card.
+
+#### Scenario: The user asks why a company is scored as it is
+
+- **WHEN** the user asks about a company in conversation
+- **THEN** the answer comes from the same score the page shows, component by component, with
+  what could not be measured named
+
+#### Scenario: The user decides on a suggestion in conversation
+
+- **WHEN** the user asks to approve or reject a suggestion
+- **THEN** the assistant states what would be recorded and records nothing until the user
+  confirms it
+
+### Requirement: The user's own judgement is measured against alternatives that could have been bought
+
+The system SHALL maintain parallel books recording what would have happened under different
+rules, and SHALL compare the real book against index funds over the same window and the same
+grid.
+
+Where the two sides do not share a window, or where part of the book has no counterpart in the
+comparison, the system SHALL say so rather than report the comparison.
+
+⚠ The alternative is an index *fund*, not an index: an index cannot be bought, and a fund's
+value carries the fees a real alternative would have charged.
+
+#### Scenario: Part of the book has no index counterpart
+
+- **WHEN** the portfolio holds assets no benchmark stands in for
+- **THEN** the share they represent is stated beside the comparison
+
+### Requirement: Whether the experiment is working is judged against criteria written in advance
+
+The system SHALL record go/no-go criteria before any of them can be measured, and SHALL report
+each as met, not met, or not yet testable.
+
+"Not yet testable" SHALL NOT be reported as a failure.
+
+⚠ Criteria chosen after the results are known are criteria chosen to be satisfied. The design
+is only meaningful because the answer "no, this does not work" is easy to see.
+
+#### Scenario: A criterion has too small a sample
+
+- **WHEN** a criterion's measure rests on fewer observations than it needs
+- **THEN** it reports not-yet-testable with the count, and no figure is shown

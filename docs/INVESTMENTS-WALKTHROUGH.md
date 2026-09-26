@@ -1,8 +1,10 @@
 # The Investments module, walked through
 
 *Written for Narendra, to be read once slowly and then kept for reference.*
-*Covers everything shipped up to 20 September 2026 — the ledger, the prices, the framework,
-the accounts, the scores, the suggestions and the watching.*
+*Covers everything shipped up to 27 September 2026 — the ledger, the prices, the framework,
+the accounts, the scores, the suggestions, the watching, the reading layer that finds new
+companies, the parallel books, the reviews, the go/no-go criteria, and the record of
+predictions that grades the lot.*
 
 This is the document that explains the whole thing: what each part does, what the arithmetic
 actually computes, what you will see on the screen, and — most usefully — what happens in a
@@ -47,9 +49,18 @@ deterministic code that can overrule it. That single constraint is the whole saf
 the model can be wrong about judgement, which is recoverable, and cannot be wrong about
 arithmetic, which is not.
 
-Right now layer 5 contains **nothing**. Every score, thesis, condition and claim in the system
-today is assembled from filed figures by ordinary code. That is deliberate for a first
-version: a thesis built this way *cannot* contain a number that was never filed.
+Layer 5 now has four inhabitants, and what they have in common is more important than what
+they do: **not one of them may produce a number or introduce a name.**
+
+| What it does | What it is allowed to answer with |
+|---|---|
+| Answer the six reflexivity questions news can settle | one of four verdicts, with a quote that must really be in the evidence |
+| Place a company on a bottleneck | an id from a closed list of 31, or nothing |
+| Read a direction onto a company a matcher already found | bullish, bearish, or neither |
+| Transliterate names out of Hindi commentary | plain text, which the exchange's 2,595-name register then accepts or rejects |
+
+Every score, price, ratio and threshold is still assembled from filed figures by ordinary
+code. A thesis built this way *cannot* contain a number that was never filed.
 
 ---
 
@@ -118,11 +129,28 @@ clears a bottleneck; the claim is worth nothing until you click. Without that, a
 enough news will eventually talk itself into believing an unrelated small-cap is nationally
 essential, and the score has no way to tell that apart from the real thing.
 
-### Layer 5 — Judgement (currently empty)
+### Layer 5 — Judgement
 
-Where a model will eventually read news, filings and the channels you follow, and answer the
-six reflexivity questions that cannot be computed. It does not exist yet, and everything works
-without it.
+A model reads news, filings and the channels you follow, and answers the six reflexivity
+questions that cannot be computed. Four of the ten flags are arithmetic and are computed; two
+of those four **override** whatever the model later says, because a measurable thing should
+never be a matter of opinion.
+
+Four gates stand between a model's answer and the record, and a verdict that fails any of them
+becomes UNKNOWN rather than an answer:
+
+1. **It must cite.** No quote, no verdict.
+2. **The quote must be real.** The words are checked against the evidence it was given. A
+   model answering from what it expects an article to say writes fluent quotes that are not
+   there.
+3. **A second reader must agree.** Two independent passes; disagreement is UNKNOWN.
+4. **It must not calculate.** Any verdict that produces a figure is refused — arithmetic is
+   layer 3's job and a model's arithmetic is not checkable by looking at it.
+
+The same shape governs the reading layer. A model may *transliterate* a Hindi transcript into
+Latin-script names, but the exchange's own list of 2,595 companies decides whether any of them
+is a company — so a hallucinated name is rejected exactly as a misheard one is, and a language
+model can never write a row into the table that measures where your ideas come from.
 
 ### Layer 6 — The gates
 
@@ -142,7 +170,25 @@ same.
 
 ### Layer 8 — The grading
 
-Four measures, all currently blank, and that blankness is the feature. More in Part 7.
+Four measures over the predictions layer 7 froze. More in Part 7.
+
+**This layer was empty for a month, and the reason is worth keeping.** Predictions used to be
+written only for suggestions that survived every gate — and in a market where nothing is
+cheap, nothing survives. Fifty-seven suggestions were raised and fifty-seven were blocked, so
+the system produced exactly zero falsifiable predictions while appearing to run perfectly.
+The go/no-go asks for 150 resolved predictions inside a year; at zero a night it would have
+been at zero in a year, and nobody would have found out until the year was over.
+
+Predictions are now recorded **whether or not the gates open**, because calibration is a
+property of the judge rather than of the purchases — a forecaster is not graded only on the
+days someone carried an umbrella. Each carries the rule that refused the idea it came from,
+so a reader always knows which population a number was computed over.
+
+They are also deduplicated. The same company is reconsidered every night and its predictions
+come out identical, so recording each night's would have reached "150 resolved" inside a week
+with 150 copies of the same three sentences — a measure that reads as a large sample while
+being a sample of one. A prediction is recorded only where no open one already says the same
+thing about the same company.
 
 ---
 
@@ -318,13 +364,22 @@ than two components are missing.
 
 | Time | What runs | Cost |
 |---|---|---|
+| 06:30 Sunday | `universe_sync` — the exchange's full equity list, 2,595 names | free |
 | 07:30 | `prices_daily` — fills any missing close for funds, US, crypto | free |
-| 16:45 weekdays | **`position_watch`** — checks every invalidation condition, settles due claims | free |
+| 08:00 | `benchmarks_sync` — the index funds you are measured against | free |
+| **08:10, 12:10, 16:10, 20:10, 23:10** | **`sources_poll`** — the exchange's five feeds and your channels, including the spoken words of every new video | free |
+| 16:45 weekdays | **`position_watch`** — checks every invalidation condition, settles due predictions | free |
 | 19:00 weekdays | `prices_india_close` — NSE's bhavcopy | free |
 | 20:00 weekdays | `corporate_actions_watch` — records splits, applies them on the ex-date | free |
-| **21:00 daily** | **`evening_synthesis`** — the one run that thinks | free today |
+| 20:30 daily | `candidate_analysis` — takes up to four queued companies through the same four steps a holding goes through | a few model calls |
+| **21:00 daily** | **`evening_synthesis`** — the one run that decides | free today |
 | Sunday 08:00 | `fundamentals_sync` — reads every company's filings | free |
+| Saturday 09:00 | `investments_weekly_review` — the week in aggregate | free |
+| 1st of month | `investments_monthly_review`; quarterly on 1 Jan/Apr/Jul/Oct | free |
 | Monday 09:00 | `investments_disk_watch` — the module against its 250 MB budget | free |
+
+The 23:10 poll exists because NSE's announcement feed empties overnight: a day's filings are
+gone by morning, and a reader that only looked in daylight would miss them permanently.
 
 Two of these will interrupt you and the rest never will:
 
@@ -515,6 +570,26 @@ All four show **"—"** today, and will for months.
 > looking at. So the figure is withheld rather than shown with a caveat — a caveat next to a
 > number is read as a number.
 
+### But blank for the right reason, not the wrong one
+
+There is a failure that looks identical to healthy blankness and is not: a measure that can
+**never** fill. Both show "—" and neither complains.
+
+Two have been found and fixed, and they were the same mistake in different clothes — a
+threshold written as an absolute where it should have been relative to what could actually
+exist:
+
+| Looked like | Actually was |
+|---|---|
+| "Kaynes and Sai Life score unknown" | a five-year rule asked of a company listed eighteen months ago |
+| "no predictions yet" | predictions written only for suggestions the gates let through, and the gates let none through |
+
+So the criteria now say when their own target is out of reach. Most predictions settle on the
+next annual filing, which means a book of a dozen companies produces roughly thirty a year —
+and 150 of them needs about seven years at that size. The screen says so, in those words,
+because a permanently unmet criterion that looks pending is worse than one that is simply
+unmet. **Widening the watchlist is what shortens that, not waiting.**
+
 **Calibration** is scored with Brier: the mean squared gap between confidence stated and what
 happened. **Lower is better.** 0.25 is what a coin achieves by saying 50% to everything.
 Overconfidence is the most common and most correctable failure of a system like this, and it
@@ -560,20 +635,47 @@ Alongside the real book, three ledgers track what did **not** happen:
 
 ---
 
-## Part 9 — What is not built yet, stated plainly
+## Part 9 — The same module, in a conversation
 
-| | Why it matters |
-|---|---|
-| **Six of the ten flags** | Need a model reading news, filings and the channels you follow. The reflexivity picture is partial and labelled as such |
-| **Watchlist prices** | Filling over several evening runs. Until then six companies have no margin of safety |
-| **Annual accounts before FY25** | The exchange tags earlier years' profit as a fourth quarter. Two years is what exists in machine-readable form; more means summing quarterly filings |
-| **Retained-earnings test** | Needs five years of market value; the price record does not reach back that far |
-| **The government-commitment point** | Withheld until a budget document is ingested |
-| **Your original framework documents** | Everything reads your framework through your cowork agent's summary of it. With the originals, most of the 23 provisional crossing counts could be established properly |
+Everything above has a screen. It also has a chat interface, and the two read the same code —
+so a figure is never computed twice and the page and the assistant can never quote different
+numbers for the same portfolio.
+
+Ask in plain words: *what is my book worth*, *why is Kaynes scored like that*, *did it suggest
+anything*, *why is nothing being suggested*, *what did my channels say*, *what has it
+predicted*, *am I beating the index*, *is this working*. It answers from the tools, not from
+memory.
+
+**It can record a transaction and decide on a suggestion — both in two steps.** It tells you
+what it understood and waits for your confirmation before anything is written. That is not
+politeness: the ledger is your word, and a decision is the row the system is eventually graded
+on. A model that could write either in a single call could invent a holding, or quietly write
+its own report card.
+
+It cannot approve a framework mapping, approve a source, or promote a company out of the
+research queue. Those are structural claims about your theory, and they stay on the page where
+you can see what you are agreeing to.
 
 ---
 
-## Part 10 — The honest summary
+## Part 10 — What is not built yet, stated plainly
+
+| | Why it matters |
+|---|---|
+| **Annual accounts before FY25** | The exchange tags earlier years' profit as a fourth quarter. Two years is what exists in machine-readable form; more means summing quarterly filings. Every rule now scales to what a company *could* have, so this thins a reading rather than blocking one |
+| **Retained-earnings test** | Needs five years of market value; the price record does not reach back that far. Fills itself with time |
+| **Asset quality for a bank** | Gross NPAs and the deposit mix are disclosed in the results but not under tags this reader collects. Provisioning and funding spread stand in, and say that they are standing in |
+| **Bank bands rest on one peer** | Cost-to-income and credit-cost bars are anchored on HDFC's own filing plus the shape of the peer set, not a measured distribution. Revisit when a second lender enters the book |
+| **The government-commitment point** | Withheld until a budget document is ingested |
+| **Your original framework documents** | Everything reads your framework through your cowork agent's summary of it. With the originals, most of the 23 provisional crossing counts could be established properly |
+| **Channels that discuss Indian companies** | Measured 24 Sep 2026: of the three registered, two publish in Hindi and one teaches valuation with American examples. The machinery reads all three correctly; the sources are the wrong sources, and you change them from the page |
+
+Parked deliberately, not forgotten: US companies, screenshot ingestion, a regime model,
+framework self-tuning, the hyperactive parallel book, and reading PDFs.
+
+---
+
+## Part 11 — The honest summary
 
 This is a machine for producing an **auditable track record**, not a machine for making money.
 
@@ -600,5 +702,10 @@ design that makes the answer "yes" worth believing.**
 *Where the code is: `backend/app/services/investments/` — `portfolio` (the fold), `pricing`,
 `returns`, `taxrules`, `costmodel`, `entry`, `history`, `corpactions`, `schedulefa`,
 `frameworks`, `framework_data`, `fundamentals`, `scoring`, `gates`, `proposals`, `watching`,
-`overview`. Jobs in `backend/app/jobs/`. The screen in
-`frontend/src/components/InvestmentsView.tsx` and its panels.*
+`overview`, and the research half: `reading`, `candidates`, `deduce`, `judgement`, `themes`,
+`spoken`, `benchmarks`, `reviews`, `books`, `verdict`. Market adapters in
+`backend/app/services/marketdata/` — `feed`, `feeds`, `universe`, `webpage`, `transcript`,
+`nse_xbrl`. Jobs in `backend/app/jobs/`. The screen in
+`frontend/src/components/InvestmentsView.tsx` and its panels, in five tabs. The same figures
+reach a conversation through `backend/app/core/tools/investments.py` (the ledger) and
+`research.py` (everything above it).*

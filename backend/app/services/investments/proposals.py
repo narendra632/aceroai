@@ -502,12 +502,33 @@ def write(
     db.add(row)
     db.flush()
 
+    # ⚠ **Claims are written whether or not the gates let the idea through**, and this is the
+    # single most consequential line in the module. They used to be written only for
+    # proposals that survived every gate — and in a market where nothing is cheap, nothing
+    # survives. Fifty-seven suggestions were raised and fifty-seven were blocked, so the
+    # system produced exactly zero falsifiable predictions in its first month of running.
+    #
+    # That is the same defect as a scoring rule nobody can satisfy, one layer up: the
+    # go/no-go verdict asks for 150 resolved claims within a year, and at zero a night it
+    # would still be at zero in a year — an unanswerable question rather than a hard one, and
+    # nobody would find out until the year was over.
+    #
+    # Calibration is a property of the JUDGE, not of the purchases. A forecast is falsifiable
+    # whether or not anyone acted on it, and a weather forecaster is not graded only on the
+    # days someone carried an umbrella. The module already half-agreed: a blocked idea is
+    # entered in the shadow book and tracked at the price it would have happened at, so the
+    # money was followed while the reasoning was thrown away. That is half a measurement.
+    _record_claims(db, row, draft)
+
     if blocked:
         _shadow(db, user_id, row, draft, "GATE_BLOCKED")
         return row
 
-    # ⚠ The falsifiable half. Written with the proposal, never afterwards: a condition added
-    # once the outcome is visible is a condition chosen to be satisfied.
+    # ⚠ Triggers, unlike claims, stay with ideas that were actually offered. A trigger asks
+    # "what would make me sell this" — a question about a position, and there is no position.
+    # Arming them on blocked ideas would raise exit alerts about holdings that do not exist
+    # and quietly wreck the trigger-discipline measure, which counts whether fired triggers
+    # were acted on.
     for trigger in draft.triggers:
         db.add(
             InvalidationTrigger(
@@ -517,10 +538,53 @@ def write(
                 **trigger,
             )
         )
-    for claim in draft.claims:
-        db.add(Claim(id=uuid.uuid4(), proposal_id=row.id, **claim))
     db.flush()
     return row
+
+
+def _record_claims(db: Session, row: Proposal, draft: Draft) -> int:
+    """Write this thesis's falsifiable assertions, skipping ones already outstanding.
+
+    ⚠ **Deduplicated, and without that this change would be worse than the bug it fixes.**
+    The same company is reconsidered every single night and its claims are computed from filed
+    figures, so they come out identical each time. Written naively that is roughly forty
+    near-identical rows a night — fifteen thousand a year — and "150 resolved claims" would be
+    reached inside a week by a hundred and fifty copies of the same three predictions. The
+    measure would read as a large sample and be a sample of one.
+
+    So a claim is recorded only where no OPEN claim already asserts the same thing about the
+    same company: same metric, same comparator, same threshold. A genuinely new assertion —
+    a changed threshold, or the same one again after the last resolved — is written.
+
+    ⚠ Written with the proposal and never afterwards, for the same reason as always: an
+    assertion added once the outcome is visible is an assertion chosen to be satisfied.
+    """
+    if not draft.claims:
+        return 0
+
+    outstanding = {
+        (metric, comparator, threshold)
+        for metric, comparator, threshold in db.execute(
+            sa.select(Claim.metric_key, Claim.comparator, Claim.threshold)
+            .join(Proposal, Claim.proposal_id == Proposal.id)
+            .where(
+                Claim.status == "OPEN",
+                Proposal.instrument_id == draft.instrument.id,
+            )
+        ).all()
+    }
+
+    written = 0
+    for claim in draft.claims:
+        key = (claim.get("metric_key"), claim.get("comparator"), claim.get("threshold"))
+        if key in outstanding:
+            continue
+        outstanding.add(key)
+        db.add(Claim(id=uuid.uuid4(), proposal_id=row.id, **claim))
+        written += 1
+    if written:
+        db.flush()
+    return written
 
 
 def _shadow(

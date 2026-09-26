@@ -149,12 +149,16 @@ def test_build_context_injects_facts_after_persona(db, user):
 
     recalled = RecalledFact(uuid.uuid4(), "User likes tea", "preference", "both")
     ctx = composer.build_context(db, session.id, facts=[recalled])
-    assert ctx[0]["role"] == "system"  # persona
-    assert ctx[1]["role"] == "system"  # current date/time
-    assert ctx[2]["role"] == "system"  # facts block
-    assert "User likes tea" in ctx[2]["content"]
-    # The id travels with the fact, so correct_fact/forget_fact can act in one step.
-    assert str(recalled.id) in ctx[2]["content"]
+    assert ctx[0]["role"] == "system"  # persona comes first
+    assert all(m["role"] == "system" for m in ctx), "no messages in this session yet"
+
+    # ⚠ Found by CONTENT, not by position. This test asserted `ctx[2]` was the facts block
+    # and broke the day a standing block was added between the two — which is a test
+    # noticing a change in the order of system messages, something nothing depends on.
+    # What matters is that the facts arrive with their ids, so correct_fact and forget_fact
+    # can act in one step rather than searching first.
+    facts_block = next(m["content"] for m in ctx if "User likes tea" in m["content"])
+    assert str(recalled.id) in facts_block
 
 
 def test_build_context_omits_facts_when_none(db, user):
@@ -164,7 +168,10 @@ def test_build_context_omits_facts_when_none(db, user):
     db.refresh(session)
 
     ctx = composer.build_context(db, session.id, facts=None)
-    assert len(ctx) == 2  # persona + current date/time; no messages, no facts block
+    # Standing blocks only — persona, the date, the investments primer. No facts block, which
+    # is the point: an empty one would read to the model as "nothing is known about this user".
+    assert not any("preference" in m["content"] for m in ctx)
+    assert all(m["role"] == "system" for m in ctx)
 
 
 def test_the_exact_same_sentence_is_not_stored_twice(db, user):

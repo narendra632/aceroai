@@ -223,6 +223,9 @@ def _claims(db: Session) -> Criterion:
     resolved = db.execute(
         sa.select(sa.func.count()).select_from(Claim).where(Claim.status.in_(("TRUE", "FALSE")))
     ).scalar_one()
+    outstanding = db.execute(
+        sa.select(sa.func.count()).select_from(Claim).where(Claim.status == "OPEN")
+    ).scalar_one()
     measure = watching.claim_accuracy(db)
     accuracy = measure.value
     enough = resolved >= MIN_RESOLVED_CLAIMS
@@ -233,10 +236,38 @@ def _claims(db: Session) -> Criterion:
         value=str(accuracy) if accuracy is not None else "not yet",
         target=f">= {MIN_CLAIM_ACCURACY} over {MIN_RESOLVED_CLAIMS} claims",
         detail=(
-            f"{resolved} resolved so far. This is the closest thing to a direct measure of "
-            f"whether the reasoning works, and the one that reaches a usable sample first."
+            f"{resolved} resolved so far, {outstanding} outstanding. {_reachable(outstanding)} "
+            "This is the closest thing to a direct measure of whether the reasoning works, and "
+            "the one that reaches a usable sample first."
         ),
         n=resolved,
+    )
+
+
+def _reachable(outstanding: int) -> str:
+    """Whether the sample this criterion asks for can actually arrive, at the current rate.
+
+    ⚠ **A threshold nobody can reach is not a strict standard, it is an unanswerable
+    question** — and one was already found and fixed a layer down, where a five-year scoring
+    rule was applied to a company listed eighteen months ago. The same shape can hide here:
+    most claims are about the NEXT ANNUAL FILING, so they settle roughly once a year, and a
+    book of a dozen companies produces around two claims each. Thirty a year cannot become a
+    hundred and fifty inside twelve months however well the system reasons.
+
+    That is not a defect in the record — it is arithmetic about the size of the universe, and
+    the only honest thing to do is say it where the target is shown, so the gap reads as
+    "widen the watchlist or wait longer" rather than as "the system is failing". Saying
+    nothing would let a permanently unmet criterion look like a pending one.
+    """
+    if outstanding <= 0:
+        return "No predictions are outstanding yet."
+    years = MIN_RESOLVED_CLAIMS / max(outstanding, 1)
+    if years <= 1.2:
+        return ""
+    return (
+        f"⚠ At {outstanding} outstanding and most settling on the next annual filing, this "
+        f"target needs roughly {years:.0f} years at the current universe size — widening the "
+        "watchlist is what shortens it, not waiting."
     )
 
 
