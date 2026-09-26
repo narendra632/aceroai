@@ -755,6 +755,7 @@ def quality_score(
     # `coverage` divides by this rather than by a constant, which is what stops a fully-read
     # bank from looking like a half-read factory.
     possible = sum((p.available for p in parts if p.applicable), ZERO)
+    earning = _earning_years(periods, years)
     return QualityScore(
         earned=earned,
         available=available,
@@ -762,8 +763,25 @@ def quality_score(
         unknown=[p.name for p in parts if p.points is None and p.applicable],
         not_applicable=[p.name for p in parts if not p.applicable],
         possible=possible,
-        years_read=len(years),
-        history=history_for(db, instrument, years_read=len(years)),
+        years_read=earning,
+        history=history_for(db, instrument, years_read=earning),
+    )
+
+
+def _earning_years(periods: dict[str, dict], years: list[str]) -> int:
+    """Annual periods that carry a profit — the years a trend test can actually use.
+
+    ⚠ **Not every annual period that has any figure at all.** Before FY25 the exchange's March
+    filings carry a balance sheet and no profit and loss, so a company can have three annual
+    periods on file and one year of earnings. Counting the three did two wrong things at once,
+    both found on Kaynes: its reading said "everything it could have filed has been read" when
+    FY25 was missing outright, and a single year of earnings walked straight past the rule that
+    withholds a verdict until there are two — because the rule was counting balance sheets.
+    """
+    return sum(
+        1
+        for p in years
+        if _get(periods, p, "pat") is not None or _get(periods, p, "pat_owners") is not None
     )
 
 
@@ -986,7 +1004,7 @@ def _flag_six(db, instrument, periods, years, today, price) -> Flag:
     if price is None or len(years) < 2:
         return Flag(6, question, "UNKNOWN", "needs a price and two years of earnings")
 
-    shares = _shares(periods, years[0])
+    shares = shares_outstanding(db, instrument, periods, years)
     pat_new, pat_old = _get(periods, years[0], "pat"), _get(periods, years[1], "pat")
     if shares is None or not pat_new or not pat_old or pat_old <= 0:
         return Flag(6, question, "UNKNOWN", "share count or prior-year profit unknown")
@@ -1021,6 +1039,35 @@ def _flag_six(db, instrument, periods, years, today, price) -> Flag:
     )
 
 
+def shares_outstanding(db: Session, instrument, periods: dict[str, dict], years: list[str]):
+    """Paid-up capital over face value — from the filing, or the exchange's face value if the
+    filing's is impossible.
+
+    ⚠ A filed face value of zero is not a figure, it is a gap, and it cost Kaynes its entire
+    margin of safety: no face value, no share count, no market value, no price test. The
+    exchange states every listed company's face value and the weekly universe sync keeps it,
+    so that stands in — only where the filed one is missing or not positive. The paid-up
+    capital still comes from the filing, which is the half that actually moves.
+    """
+    if not years:
+        return None
+    newest = years[0]
+    shares = _shares(periods, newest)
+    if shares is not None:
+        return shares
+    paid_up = _get(periods, newest, "paid_up_capital")
+    if not paid_up:
+        return None
+    face = db.execute(
+        sa.select(ListedCompany.face_value).where(
+            ListedCompany.symbol == instrument.symbol,
+            ListedCompany.exchange == instrument.exchange,
+            ListedCompany.face_value.is_not(None),
+        )
+    ).scalar_one_or_none()
+    return (paid_up / face) if face else None
+
+
 def _shares(periods: dict[str, dict], period: str | None) -> Decimal | None:
     """Shares outstanding, from paid-up capital ÷ face value. Neither is filed directly."""
     if period is None:
@@ -1030,6 +1077,51 @@ def _shares(periods: dict[str, dict], period: str | None) -> Decimal | None:
     if paid_up is None or not face:
         return None
     return paid_up / face
+
+
+@dataclass(frozen=True)
+class Assessment:
+    """Everything the system concludes about one company at one price, computed once."""
+
+    quality: QualityScore
+    flags: list[Flag]
+    quadrant: str
+    market_cap: Decimal | None
+    #: Two or more measured red flags standing — what "the narrative is running" looks like
+    #: when only the measured half of the checklist has been answered.
+    reflexive: bool
+
+
+def assess(db: Session, instrument, spec: dict, *, price: Decimal | None) -> Assessment:
+    """Score, flags and box for one company — the single definition every surface uses.
+
+    ⚠ **This was written three times, and the third copy was wrong.** The page and the nightly
+    run each computed market value, the score, the flags and the box inline, identically; the
+    chat's `explain_company` computed the score with no market value and the box with
+    reflexivity hard-coded off. So the assistant reported every company as BORDERLINE with its
+    margin of safety unread, while the page beside it showed Q1 and Q3 for the same companies
+    at the same moment. Convention 2 exists for exactly this, and was followed twice out of
+    three.
+
+    ⚠ Market value is price × shares, and shares come from the filing (paid-up capital over face
+    value) rather than from anywhere convenient. Without both, the margin of safety reports
+    unknown rather than assuming anything about the price.
+    """
+    periods = fundamentals.by_period(db, instrument.id, limit=6)
+    years = _annual(periods)
+    shares = shares_outstanding(db, instrument, periods, years)
+    market_cap = (price * shares) if (price is not None and shares) else None
+
+    quality = quality_score(db, instrument, spec, market_cap=market_cap)
+    flags = computed_flags(db, instrument, price=price)
+    reflexive = sum(1 for f in flags if f.verdict == "YES") >= 2
+    return Assessment(
+        quality=quality,
+        flags=flags,
+        quadrant=quadrant(quality, reflexive),
+        market_cap=market_cap,
+        reflexive=reflexive,
+    )
 
 
 def quadrant(quality: QualityScore, reflexivity_high: bool) -> str:

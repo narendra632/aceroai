@@ -1109,6 +1109,10 @@ class ListedCompany(Base):
     series: Mapped[str | None] = mapped_column(sa.Text)
     isin: Mapped[str | None] = mapped_column(sa.Text)
     listed_on: Mapped[dt.date | None] = mapped_column(sa.Date)
+    #: The face value the exchange states (027). ⚠ A fallback only, for when a company's own
+    #: filing gives an impossible one — Kaynes filed 0, which left it with no share count and
+    #: so no market value. A sane filed figure always wins.
+    face_value: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 4))
     delisted_at: Mapped[dt.datetime | None] = mapped_column(sa.DateTime(timezone=True))
     refreshed_at: Mapped[dt.datetime] = mapped_column(sa.DateTime(timezone=True))
 

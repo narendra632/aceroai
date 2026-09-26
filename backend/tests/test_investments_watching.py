@@ -139,7 +139,22 @@ def _trigger(db, proposal, inst, *, metric="price", comparator="LT", threshold="
     return row
 
 
-def _claim(db, proposal, *, metric="roce", comparator="GTE", threshold="15", due_days=-1):
+#: When the fixture predictions were made: before the FY26 filing the tests grade them against
+#: existed. ⚠ It has to be. A prediction graded on the filing it was written from is not a
+#: prediction — see `test_a_claim_is_never_graded_on_the_filing_it_was_written_from`.
+MADE_BEFORE_FY26 = dt.datetime(2025, 6, 1, tzinfo=dt.UTC)
+
+
+def _claim(
+    db,
+    proposal,
+    *,
+    metric="roce",
+    comparator="GTE",
+    threshold="15",
+    due_days=-1,
+    made=MADE_BEFORE_FY26,
+):
     row = Claim(
         id=uuid.uuid4(),
         proposal_id=proposal.id,
@@ -149,6 +164,7 @@ def _claim(db, proposal, *, metric="roce", comparator="GTE", threshold="15", due
         threshold=D(threshold),
         due_by=TODAY + dt.timedelta(days=due_days),
         status="OPEN",
+        created_at=made,
     )
     db.add(row)
     db.commit()
@@ -308,7 +324,15 @@ def test_a_claim_nothing_can_check_is_unverifiable_and_never_false(db, book, ver
     data coverage rather than of judgement, and the two become impossible to tell apart."""
     inst = _company(db, symbol="WATCHUNK")
     proposal = _proposal(db, book, version, inst)
-    claim = _claim(db, proposal, metric="roce", comparator="GTE", threshold="15")
+    # Past its deadline AND past the grace a late filer is given, with nothing ever filed.
+    claim = _claim(
+        db,
+        proposal,
+        metric="roce",
+        comparator="GTE",
+        threshold="15",
+        due_days=-(watching.FILING_GRACE_DAYS + 1),
+    )
 
     report = watching.resolve_claims(db)
     db.commit()
@@ -558,3 +582,77 @@ def test_a_prediction_cannot_be_deleted_after_the_fact(db, book, version):
     with pytest.raises(DatabaseError):
         db.flush()
     db.rollback()
+
+
+# --- a prediction is graded only on what it could not have known ---------------------------------
+
+
+def test_a_claim_is_never_graded_on_the_filing_it_was_written_from(db, book, version):
+    """⚠ The most serious defect found in review. A claim is written from the newest annual
+    filing — "return on capital stays above 15%" because the filing shows 20% — and falls due
+    nine months later. For any claim written between roughly April and September the next
+    annual results are not out by then, so the grader read the SAME filing the claim came from
+    and marked it true. About half of each year's predictions would have scored themselves."""
+    inst = _company(db, symbol="WATCHSELF")
+    _accounts(
+        db,
+        inst,
+        "FY26",
+        pbt=D(200),
+        finance_costs=D(0),
+        equity=D(1000),
+        borrowings_current=D(0),
+        borrowings_noncurrent=D(0),
+    )
+    proposal = _proposal(db, book, version, inst)
+    # Made AFTER the FY26 year ended — so FY26 is the filing it was derived from.
+    claim = _claim(db, proposal, made=dt.datetime(2026, 5, 1, tzinfo=dt.UTC))
+
+    report = watching.resolve_claims(db)
+    db.commit()
+
+    assert report.true == 0 and report.false == 0, "graded on its own source, it cannot count"
+    assert report.waiting == 1
+    db.refresh(claim)
+    assert claim.status == "OPEN", "it waits for a filing it could not have seen"
+
+
+def test_a_claim_is_graded_once_a_filing_newer_than_it_arrives(db, book, version):
+    inst = _company(db, symbol="WATCHNEWER")
+    _accounts(
+        db,
+        inst,
+        "FY26",
+        pbt=D(50),
+        finance_costs=D(0),
+        equity=D(1000),
+        borrowings_current=D(0),
+        borrowings_noncurrent=D(0),
+    )
+    proposal = _proposal(db, book, version, inst)
+    claim = _claim(db, proposal)  # made before FY26 ended
+
+    watching.resolve_claims(db)
+    db.commit()
+    db.refresh(claim)
+    assert claim.status == "FALSE", "5% against a 15% claim, on a filing it could not have seen"
+
+
+def test_a_claim_whose_evidence_never_arrives_is_unverifiable_rather_than_graded(db, book, version):
+    """Waiting is not forever. A company that stops filing leaves the claim unverifiable —
+    never true, never false — once a late filer's grace is over."""
+    inst = _company(db, symbol="WATCHLATE")
+    _accounts(db, inst, "FY26", pbt=D(200), equity=D(1000))
+    proposal = _proposal(db, book, version, inst)
+    claim = _claim(
+        db,
+        proposal,
+        made=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
+        due_days=-(watching.FILING_GRACE_DAYS + 1),
+    )
+
+    report = watching.resolve_claims(db)
+    db.commit()
+    db.refresh(claim)
+    assert claim.status == "UNVERIFIABLE"
+    assert report.true == 0 and report.false == 0

@@ -42,8 +42,8 @@ from decimal import Decimal
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.core import llm
 from app.db.models import Fundamental, Mention, SourceItem
+from app.services.investments import billing
 from app.services.investments.scoring import Flag
 
 log = logging.getLogger(__name__)
@@ -216,18 +216,19 @@ Reply with JSON only: {"supports": true}"""
 
 
 async def _ask(question_block: str, evidence_block: str) -> dict:
-    reply = await llm.complete(
+    reply = await billing.complete(
         [
             {"role": "system", "content": _PROMPT},
             {"role": "user", "content": f"{question_block}\n\nEVIDENCE:\n{evidence_block}"},
         ],
         effort=EFFORT,
+        purpose="judge",
     )
     return json.loads(reply[reply.find("{") : reply.rfind("}") + 1])
 
 
 async def _verify(question: str, verdict: str, quote: str) -> bool:
-    reply = await llm.complete(
+    reply = await billing.complete(
         [
             {"role": "system", "content": _VERIFY_PROMPT},
             {
@@ -236,6 +237,7 @@ async def _verify(question: str, verdict: str, quote: str) -> bool:
             },
         ],
         effort=EFFORT,
+        purpose="verify",
     )
     parsed = json.loads(reply[reply.find("{") : reply.rfind("}") + 1])
     return bool(parsed.get("supports"))

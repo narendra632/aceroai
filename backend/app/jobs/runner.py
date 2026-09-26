@@ -30,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core import telemetry
 from app.db.models import GeneratedReview, JobRun, User
 from app.db.session import engine
 from app.jobs.registry import Job, JobResult, all_jobs
@@ -264,7 +265,11 @@ def _run_locked(db: Session, job: Job, user: User, key: str) -> str:
                 return "skipped_budget"
 
         _apply_timeouts(db)
-        result = job.run(db, user)
+        # ⚠ Every model call a job makes — however deep in a service — is billed to its user,
+        # so it appears on Insights and counts against the month's budget. Before this, a job
+        # not marked `uses_ai` could call a model freely and nothing anywhere recorded it.
+        with telemetry.billing(user.id):
+            result = job.run(db, user)
         _deliver(db, user, job, result)
         status = "silent" if result.silent else "ok"
         _record(db, job.name, key, status, started=started, detail=result.detail)

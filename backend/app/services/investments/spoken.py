@@ -31,7 +31,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from app.core import llm
+from app.services.investments import billing
 
 log = logging.getLogger(__name__)
 
@@ -87,12 +87,13 @@ def _normalise(text: str) -> str:
 
 
 async def _ask(text: str) -> dict:
-    reply = await llm.complete(
+    reply = await billing.complete(
         [
             {"role": "system", "content": _PROMPT},
             {"role": "user", "content": f"Transcript:\n{text}"},
         ],
         effort=EFFORT,
+        purpose="transliterate",
     )
     body = reply[reply.find("{") : reply.rfind("}") + 1]
     return json.loads(body)

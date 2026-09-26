@@ -71,8 +71,29 @@ def test_nothing_pasted_is_refused_before_a_request_is_made(youtube):
     assert youtube["urls"] == []
 
 
-def test_the_channel_id_is_read_from_either_field_the_page_uses(youtube):
-    """`externalId` and `channelId` both appear and are the same value; which one the page
-    carries has changed before."""
+def test_a_page_featuring_other_channels_resolves_to_its_own(youtube):
+    """⚠ The defect this replaced: the first `channelId` on a page is not the page's channel.
+    Measured on @zerodhaonline — ten distinct channel ids, the first belonging to someone else.
+    The old resolver returned it, so the title came from one channel and the uploads from
+    another, silently, in the table that measures where ideas come from."""
+    youtube["body"] = (
+        '<html><head><meta property="og:title" content="Zerodha">'
+        '<link rel="canonical" href="https://www.youtube.com/channel/UC59YUBhNLMkS2Q8NBWBGHAA">'
+        '</head><body>{"channelId":"UCjOVNkq-_HY9Q_LQv0FwlqA"}'
+        '{"externalId":"UC59YUBhNLMkS2Q8NBWBGHAA"}</body></html>'
+    )
+    assert feeds.resolve_channel("@zerodhaonline").channel_id == "UC59YUBhNLMkS2Q8NBWBGHAA"
+
+
+def test_the_owner_id_is_found_without_a_canonical_link(youtube):
+    youtube["body"] = (
+        '<html>{"channelId":"UCother00000000000000000"}{"externalId":"UCowner000000000000000000"}</html>'
+    )
+    assert feeds.resolve_channel("@x").channel_id == "UCowner000000000000000000"
+
+
+def test_a_bare_channel_id_is_not_trusted_to_be_the_page_owner(youtube):
+    """A page that says nothing better about itself is not trusted to be a channel page."""
     youtube["body"] = '<html>{"channelId":"UCjOVNkq-_HY9Q_LQv0FwlqA"}</html>'
-    assert feeds.resolve_channel("@x").channel_id == "UCjOVNkq-_HY9Q_LQv0FwlqA"
+    with pytest.raises(ProviderError):
+        feeds.resolve_channel("@x")

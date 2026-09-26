@@ -390,3 +390,30 @@ def test_every_research_tool_is_registered_and_reachable():
     assert declared == set(research.HANDLERS)
     registered = {s["function"]["name"] for s in tools.TOOLS}
     assert declared <= registered
+
+
+def test_each_company_appears_once_however_many_nights_it_was_refused(db, user, spec, version):
+    """The run reconsiders every company every night. Listing Apar three times reads as three
+    separate refusals rather than one standing one."""
+    inst = _company(db, symbol="RSCHTWICE")
+    _excellent(db, inst)
+    frameworks.propose_mapping(
+        db, inst, b_bottleneck="B1.1", spec=spec, framework_version_id=version.id
+    )
+    db.commit()
+    mirror = proposals.mirror(db, user.id)
+    for _ in range(3):
+        draft = proposals.draft_for(db, mirror, inst, spec, set())
+        proposals.write(
+            db,
+            book_row=mirror,
+            user_id=user.id,
+            draft=draft,
+            verdict=gates.Verdict([gates.GateResult("G3_margin_of_safety", False, False, "no")]),
+            batch_id=uuid.uuid4(),
+            framework_version_id=version.id,
+        )
+        db.commit()
+
+    result = call(db, user.id, "get_suggestions")
+    assert [row["symbol"] for row in result["blocked"]] == ["RSCHTWICE"]

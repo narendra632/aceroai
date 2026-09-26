@@ -223,7 +223,14 @@ def get_suggestions(db: Session, user_id: uuid.UUID, args: dict) -> dict:
     )
 
     open_rows, blocked = [], []
+    # ⚠ The newest word on each company, once. The run reconsiders every company every night,
+    # so "the last forty suggestions" is three nights of the same twelve names — and an answer
+    # listing Apar three times reads as three separate refusals rather than one standing one.
+    seen: set[uuid.UUID] = set()
     for row in rows:
+        if row.instrument_id in seen:
+            continue
+        seen.add(row.instrument_id)
         state = proposals.effective_status(db, row)
         entry_out = {
             "symbol": symbols.get(row.instrument_id),
@@ -262,8 +269,12 @@ def explain_company(db: Session, user_id: uuid.UUID, args: dict) -> dict:
 
     spec = _spec(db)
     mark = pricing.latest(db, [inst.id]).get(inst.id)
-    quality = scoring.quality_score(db, inst, spec)
-    flags = scoring.computed_flags(db, inst, price=mark.price if mark else None)
+    # ⚠ The same assessment the page shows, not a second computation of it. An earlier version
+    # scored here with no market value and reflexivity hard-coded off, so the assistant called
+    # every company BORDERLINE with its margin of safety unread while the page beside it said
+    # Q1 and Q3 — for the same company, at the same moment.
+    assessed = scoring.assess(db, inst, spec, price=mark.price if mark else None)
+    quality, flags = assessed.quality, assessed.flags
     mapping = frameworks.live_mapping(db, inst.id)
 
     return {
@@ -275,7 +286,8 @@ def explain_company(db: Session, user_id: uuid.UUID, args: dict) -> dict:
         "score": f"{quality.earned} of {quality.available}",
         "score_out_of_possible": str(quality.possible),
         "coverage": f"{quality.coverage:.0%}" if quality.coverage is not None else None,
-        "quadrant": scoring.quadrant(quality, reflexivity_high=False),
+        "quadrant": assessed.quadrant,
+        "market_value_inr": _money(assessed.market_cap),
         "years_read": quality.years_read,
         "years_possible": quality.history.obtainable if quality.history else None,
         "depth_note": (quality.history.why() if quality.history else "") or None,

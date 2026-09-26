@@ -21,6 +21,7 @@ import csv
 import datetime as dt
 import io
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 import httpx
 
@@ -52,6 +53,17 @@ class Listed:
     series: str
     isin: str | None
     listed_on: dt.date | None
+    #: As the exchange states it. None where the column is blank or not a positive number.
+    face_value: Decimal | None = None
+
+
+def _face(raw: str) -> Decimal | None:
+    """A positive face value, or None. ⚠ Zero is not a face value; it is the gap this fills."""
+    try:
+        value = Decimal((raw or "").strip())
+    except InvalidOperation:
+        return None
+    return value if value > 0 else None
 
 
 def _date(raw: str) -> dt.date | None:
@@ -101,6 +113,7 @@ def fetch(c: httpx.Client | None = None) -> list[Listed]:
                 series=series,
                 isin=row.get("ISIN NUMBER") or None,
                 listed_on=_date(row.get("DATE OF LISTING", "")),
+                face_value=_face(row.get("FACE VALUE", "")),
             )
         )
 

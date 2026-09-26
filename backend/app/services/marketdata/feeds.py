@@ -166,9 +166,24 @@ class Channel:
     url: str
 
 
-#: What a channel page calls itself. ⚠ `externalId` and `channelId` both appear and both are
-#: the same value; either is accepted because which one the page carries has changed before.
-_CHANNEL_ID = re.compile(r'"(?:externalId|channelId)":"(UC[\w-]{20,})"')
+#: Where a channel page names ITSELF, most authoritative first.
+#:
+#: ⚠ **The first `channelId` on a page is not the page's channel.** An earlier version took
+#: whichever of `externalId` or `channelId` appeared first, on the belief that the two were
+#: always the same value. Measured 27 Sep 2026: `@zerodhaonline` carries ten distinct
+#: `channelId`s — featured channels, collaborations — and the first of them is a different
+#: channel. The page's own id is `UC59YUBh…`; the resolver returned `UCjOVNkq…`. The title came
+#: from the right channel and the uploads from the wrong one, so the reading list would have
+#: shown one name while polling someone else — silently, and in the table that measures where
+#: ideas come from. It is also the likeliest reason the originally seeded "Zerodha" came back
+#: in Hindi.
+#:
+#: The canonical link and `externalId` both describe the page's owner. A bare `channelId` is
+#: never used: a page that offers nothing better is not trusted to be a channel page at all.
+_CHANNEL_SELF = (
+    re.compile(r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[\w-]{20,})"'),
+    re.compile(r'"externalId":"(UC[\w-]{20,})"'),
+)
 _CHANNEL_TITLE = re.compile(r'<meta property="og:title" content="([^"]+)"')
 
 
@@ -182,7 +197,8 @@ def resolve_channel(pasted: str, c: httpx.Client | None = None) -> Channel:
     the whole reason the current three are measurably the wrong three.
 
     Verified 24 Sep 2026 against `@handle`, a full `@` URL, a bare `UC…` id and a legacy `/c/`
-    path: all four resolve.
+    path: all four resolve. Re-verified 27 Sep 2026 after the id was found to be taken from the
+    wrong channel on pages that feature others — see `_CHANNEL_SELF`.
     """
     raw = (pasted or "").strip()
     if not raw:
@@ -211,7 +227,7 @@ def resolve_channel(pasted: str, c: httpx.Client | None = None) -> Channel:
         if own:
             c.close()
 
-    found = _CHANNEL_ID.search(r.text)
+    found = next((m for pattern in _CHANNEL_SELF if (m := pattern.search(r.text))), None)
     if not found:
         # ⚠ A video URL, a playlist, a search page or a typo all land here. Named as what it
         # is rather than as a network failure, because the two need different fixes.

@@ -101,7 +101,6 @@ from app.services.investments import (
     corpactions,
     entry,
     frameworks,
-    fundamentals,
     history,
     overview,
     pricing,
@@ -499,20 +498,10 @@ def _mapping_out(
     row = frameworks.bottleneck(spec, mapping.b_bottleneck)
     multiple = frameworks.multiple_for(spec, inst.sector)
 
-    # ⚠ Market cap is price x shares, and shares come from the filing (paid-up capital over
-    # face value) rather than from anywhere convenient. Without BOTH the margin of safety
-    # reports unknown rather than assuming anything about the price.
-    periods = fundamentals.by_period(db, inst.id, limit=6)
-    years = [p for p in periods if "Q" not in p]
-    shares = scoring._shares(periods, years[0]) if years else None
-    price = mark.price if mark else None
-    market_cap = (price * shares) if (price is not None and shares) else None
-
-    quality = scoring.quality_score(db, inst, spec, market_cap=market_cap)
-    flags = scoring.computed_flags(db, inst, price=price)
-    # Two or more red flags standing is what "the narrative is running" looks like when only
-    # the measured half of the checklist has been answered.
-    reflexive = sum(1 for f in flags if f.verdict == "YES") >= 2
+    # The one assessment every surface shows — the page, the nightly run and the assistant.
+    # See `scoring.assess` for why it is not written inline here any more.
+    assessed = scoring.assess(db, inst, spec, price=mark.price if mark else None)
+    quality, flags = assessed.quality, assessed.flags
     return MappingOut(
         id=mapping.id,
         instrument_id=inst.id,
@@ -560,8 +549,8 @@ def _mapping_out(
             history_note=(quality.history.why() or None) if quality.history else None,
         ),
         flags=[FlagOut.model_validate(f) for f in flags],
-        quadrant=scoring.quadrant(quality, reflexive),
-        years_read=len(years),
+        quadrant=assessed.quadrant,
+        years_read=quality.years_read,
     )
 
 

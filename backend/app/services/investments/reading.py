@@ -42,7 +42,6 @@ import httpx
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.core import llm
 from app.db.models import (
     AbMapping,
     Candidate,
@@ -56,6 +55,7 @@ from app.db.models import (
 )
 from app.services.errors import NotFound
 from app.services.investments import (
+    billing,
     frameworks,
     history,
     pricing,
@@ -626,6 +626,7 @@ def sync_universe(db: Session, c: httpx.Client | None = None) -> dict:
                     series=entry.series,
                     isin=entry.isin,
                     listed_on=entry.listed_on,
+                    face_value=entry.face_value,
                     refreshed_at=now,
                 )
             )
@@ -636,6 +637,7 @@ def sync_universe(db: Session, c: httpx.Client | None = None) -> dict:
             row.name = entry.name
             row.series = entry.series
             row.isin = entry.isin or row.isin
+            row.face_value = entry.face_value or row.face_value
             row.delisted_at = None
             row.refreshed_at = now
 
@@ -1096,7 +1098,7 @@ _VALID_STANCES = {"BULL", "BEAR", "NEUTRAL", "MENTION_ONLY"}
 
 
 async def _ask_stances(text: str, symbols: list[str]) -> dict[str, str]:
-    reply = await llm.complete(
+    reply = await billing.complete(
         [
             {"role": "system", "content": _STANCE_PROMPT},
             {
@@ -1105,6 +1107,7 @@ async def _ask_stances(text: str, symbols: list[str]) -> dict[str, str]:
             },
         ],
         effort="low",
+        purpose="stance",
     )
     body = reply[reply.find("{") : reply.rfind("}") + 1]
     parsed = json.loads(body)

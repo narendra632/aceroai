@@ -766,3 +766,21 @@ def test_a_blocked_suggestion_still_arms_nothing(db, real, user, spec, version):
         ).scalar_one()
         == 0
     )
+
+
+def test_a_claim_that_earnings_grow_is_tested_against_growth(db, real, user, spec, version):
+    """⚠ Found in review. "Earnings grow" was checked as profit above ZERO, so a company whose
+    profit halved would have been graded TRUE on a claim that it grew, for as long as it stayed
+    in profit. A near-certain claim does not add nothing to the record — it pads it."""
+    inst = _company(db, symbol="PROPGROW")
+    _excellent(db, inst)
+    frameworks.propose_mapping(
+        db, inst, b_bottleneck="B1.1", spec=spec, framework_version_id=version.id
+    )
+    db.commit()
+
+    draft = proposals.draft_for(db, proposals.mirror(db, user.id), inst, spec, set())
+    growth = [c for c in draft.claims if c["metric_key"] == "pat"]
+    assert growth, "this fixture has a margin of safety, so it asserts growth"
+    assert all(c["threshold"] > 0 for c in growth), "growth is measured against today's profit"
+    assert all("higher than" in c["claim_text"] for c in growth), "the sentence says what is tested"

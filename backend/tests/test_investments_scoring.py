@@ -624,3 +624,99 @@ def test_a_listing_date_is_a_floor_on_history_and_never_a_ceiling(db, company, s
     history = scoring.quality_score(db, inst, spec).history
     assert history.years_listed == 1
     assert history.obtainable == 2, "two years were read, so at least two could exist"
+
+
+# --- found in review -------------------------------------------------------------------------
+
+
+def test_a_balance_sheet_alone_is_not_a_year_of_earnings(db, company, spec):
+    """⚠ Before FY25 the exchange's March filings carry a balance sheet and no profit and loss.
+    Counting those as years read did two wrong things, both found on Kaynes: its note claimed
+    "everything it could have filed has been read" when FY25 was missing outright, and one year
+    of earnings walked past the rule that withholds a verdict until there are two."""
+    inst = company(symbol="BSONLY")
+    _listed(db, "BSONLY", dt.date(2022, 11, 22))
+    _file(db, inst, "FY26", pat=D(300), equity=D(1000), pbt=D(400))
+    _file(db, inst, "FY24", equity=D(900), cash=D(50))
+    _file(db, inst, "FY23", equity=D(800), cash=D(40))
+
+    score = scoring.quality_score(db, inst, spec)
+    assert score.years_read == 1, "three periods on file, one year of earnings"
+    assert score.history.limit == "SOURCE"
+    assert "1 of 3 possible" in score.history.why()
+    assert "everything it could have filed" not in score.history.why()
+
+
+def test_a_filed_face_value_of_zero_falls_back_to_the_exchanges(db, company, spec):
+    """⚠ Kaynes filed a face value of 0: no share count, no market value, and so no margin of
+    safety — half of the question the score answers, blank for one figure nobody could see."""
+    from app.db.models import ListedCompany
+
+    inst = company(symbol="ZEROFACE")
+    db.add(
+        ListedCompany(
+            symbol="ZEROFACE",
+            exchange="NSE",
+            name="Zeroface",
+            series="EQ",
+            face_value=D(10),
+            refreshed_at=dt.datetime.now(dt.UTC),
+        )
+    )
+    db.commit()
+    for period in ("FY26", "FY25"):
+        _file(
+            db, inst, period, pat=D(300), dep_amort=D(20), paid_up_capital=D(1000), face_value=D(0)
+        )
+
+    assessed = scoring.assess(db, inst, spec, price=D(50))
+    assert assessed.market_cap == D(5000), "1000 of paid-up capital at 10 a share is 100 shares"
+    mos = _part(assessed.quality, "margin_of_safety")
+    assert mos.points is not None, "the price half of the score is read"
+
+
+def test_a_sane_filed_face_value_is_never_overridden(db, company, spec):
+    from app.db.models import ListedCompany
+
+    inst = company(symbol="GOODFACE")
+    db.add(
+        ListedCompany(
+            symbol="GOODFACE",
+            exchange="NSE",
+            name="Goodface",
+            series="EQ",
+            face_value=D(10),
+            refreshed_at=dt.datetime.now(dt.UTC),
+        )
+    )
+    db.commit()
+    _file(db, inst, "FY26", pat=D(300), paid_up_capital=D(1000), face_value=D(2))
+    assert scoring.assess(db, inst, spec, price=D(1)).market_cap == D(500)
+
+
+def test_every_surface_reads_the_same_assessment(db, company, spec):
+    """⚠ The page, the nightly run and the assistant each computed this. Two copies agreed;
+    the assistant's had no market value and reflexivity hard-coded off, so it called every
+    company BORDERLINE while the page beside it said Q1."""
+    inst = company(symbol="SAMEBOX")
+    for period in ("FY26", "FY25"):
+        _file(
+            db,
+            inst,
+            period,
+            pat=D(300),
+            equity=D(1000),
+            pbt=D(400),
+            finance_costs=D(10),
+            ocf=D(300),
+            dep_amort=D(20),
+            cash=D(50),
+            borrowings_current=D(0),
+            borrowings_noncurrent=D(0),
+            paid_up_capital=D(100),
+            face_value=D(1),
+        )
+    assessed = scoring.assess(db, inst, spec, price=D(20))
+    assert assessed.market_cap == D(2000)
+    assert _part(assessed.quality, "margin_of_safety").points is not None
+    assert assessed.quadrant not in ("UNKNOWN",), "a fully read, priced company gets a box"

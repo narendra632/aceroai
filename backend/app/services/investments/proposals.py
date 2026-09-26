@@ -152,7 +152,9 @@ def _confidence(ab, quality, flags_yes: int) -> Decimal:
     """
     if quality.available <= 0:
         return ZERO
-    coverage = quality.available / Decimal(10)
+    # ⚠ Against what THIS company's test offers, not against ten — the same absolute
+    # denominator that was removed from the verdict for leaving a fully-read bank short.
+    coverage = quality.coverage if quality.coverage is not None else ZERO
     strength = quality.ratio or ZERO
     structural = (ab.total or ZERO) / Decimal(10) if ab.is_scored else Decimal("0.5")
     penalty = Decimal("0.08") * flags_yes
@@ -269,9 +271,24 @@ def _triggers_for(db: Session, inst: Instrument, quality, price: Decimal | None)
     return out
 
 
-def _claims_for(quality, flags) -> list[dict]:
-    """The falsifiable assertions. These are what make measurement possible in months."""
+def _claims_for(quality, flags, periods: dict[str, dict], years: list[str]) -> list[dict]:
+    """The falsifiable assertions. These are what make measurement possible in months.
+
+    ⚠ **Each claim must test what its sentence says.** Two did not. "Earnings grow" was checked
+    as profit above ZERO, and "margins stop deteriorating" as a margin above ZERO — so a company
+    whose profit halved would have been graded TRUE on a claim that it grew, for as long as it
+    stayed in profit. Near-certain claims do not merely add nothing to the record; they pad it,
+    and claim accuracy is the measure the whole module is eventually judged on.
+
+    Growth is now a comparison with the figure on file when the claim was written, and the
+    grader only reads a filing that post-dates the claim — see `watching.resolve_claims`.
+    """
     due = dt.date.today() + dt.timedelta(days=DEFAULT_HORIZON_DAYS)
+    newest = years[0] if years else None
+    pat_now = scoring._get(periods, newest, "pat") if newest else None
+    pbt_now = scoring._get(periods, newest, "pbt") if newest else None
+    revenue_now = scoring._get(periods, newest, "revenue") if newest else None
+    margin_now = (pbt_now / revenue_now) if (pbt_now is not None and revenue_now) else None
     out: list[dict] = []
     for part in quality.parts:
         if part.points is None or part.points == ZERO:
@@ -296,26 +313,31 @@ def _claims_for(quality, flags) -> list[dict]:
                     "due_by": due,
                 }
             )
-        elif part.name == "margin_of_safety":
+        elif part.name == "margin_of_safety" and pat_now is not None and pat_now > 0:
             out.append(
                 {
                     "claim_text": (
-                        "Earnings grow, so the margin of safety is not merely a low price."
+                        f"Profit in the next annual filing is higher than the "
+                        f"{_rupees(pat_now)} on file now, so the margin of safety is not "
+                        "merely a low price."
                     ),
                     "metric_key": "pat",
                     "comparator": "GT",
-                    "threshold": ZERO,
+                    "threshold": pat_now,
                     "due_by": due,
                 }
             )
     for flag in flags:
-        if flag.verdict == "YES" and flag.number == 8:
+        if flag.verdict == "YES" and flag.number == 8 and margin_now is not None:
             out.append(
                 {
-                    "claim_text": "Margins stop deteriorating as revenue grows.",
+                    "claim_text": (
+                        f"The pre-tax margin in the next annual filing is at least the "
+                        f"{margin_now * 100:.1f}% on file now — margins stop deteriorating."
+                    ),
                     "metric_key": "pbt_margin",
                     "comparator": "GTE",
-                    "threshold": ZERO,
+                    "threshold": margin_now.quantize(Decimal("0.000001")),
                     "due_by": due,
                 }
             )
@@ -351,17 +373,15 @@ def draft_for(
     mapping = frameworks.live_mapping(db, inst.id)
     ab = frameworks.ab_score(mapping, spec)
 
-    periods = fundamentals.by_period(db, inst.id, limit=6)
-    years = [p for p in periods if "Q" not in p]
-    shares = scoring._shares(periods, years[0]) if years else None
     mark = pricing.latest(db, [inst.id]).get(inst.id)
     price = mark.price if mark else None
-    market_cap = (price * shares) if (price is not None and shares) else None
-
-    quality = scoring.quality_score(db, inst, spec, market_cap=market_cap)
-    flags = scoring.computed_flags(db, inst, price=price)
+    # The filings this rests on, kept for the citations frozen into the suggestion below.
+    periods = fundamentals.by_period(db, inst.id, limit=6)
+    years = [p for p in periods if "Q" not in p]
+    # The same assessment the page and the assistant show — see `scoring.assess`.
+    assessed = scoring.assess(db, inst, spec, price=price)
+    quality, flags, quadrant = assessed.quality, assessed.flags, assessed.quadrant
     flags_yes = sum(1 for f in flags if f.verdict == "YES")
-    quadrant = scoring.quadrant(quality, flags_yes >= 2)
 
     confidence = _confidence(ab, quality, flags_yes)
     amount, qty, action = _size(book_row, confidence, price)
@@ -377,7 +397,7 @@ def draft_for(
         target_amount_inr=amount,
         target_qty=qty,
         triggers=_triggers_for(db, inst, quality, price),
-        claims=_claims_for(quality, flags),
+        claims=_claims_for(quality, flags, periods, years),
         ab_score=ab.total,
         quality_earned=quality.earned,
         quality_available=quality.available,
@@ -1105,7 +1125,7 @@ def synthesise(
 def _cap(db: Session, inst: Instrument, draft: Draft) -> Decimal | None:
     periods = fundamentals.by_period(db, inst.id, limit=6)
     years = [p for p in periods if "Q" not in p]
-    shares = scoring._shares(periods, years[0]) if years else None
+    shares = scoring.shares_outstanding(db, inst, periods, years)
     raw = (draft.price_snapshot or {}).get("price")
     if not shares or not raw:
         return None

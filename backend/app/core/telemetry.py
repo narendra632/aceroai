@@ -16,6 +16,7 @@ import logging
 import time
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 
 from fastapi.concurrency import run_in_threadpool
 
@@ -25,6 +26,31 @@ from app.db.session import SessionLocal
 
 log = logging.getLogger("aceroai.timing")
 persist_log = logging.getLogger(__name__)
+
+#: Who a model call made deep inside a service is on behalf of.
+#:
+#: ⚠ **Background model calls had nowhere to send their bill.** Chat knows its user because the
+#: request carries one; a service function five calls below a scheduled job does not, so every
+#: model call in the investments module — placing a company, reading a stance, answering a
+#: checklist question twice, transliterating a Hindi transcript — ran without recording what it
+#: cost. The Insights page under-reported spend, and the monthly budget could not stop what it
+#: could not see.
+#:
+#: The job runner sets this for the duration of a job; a service reads it. A context variable
+#: rather than a parameter because the alternative is threading a user id through a dozen
+#: signatures that have no other use for one, and the first one forgotten is a silent leak.
+billed_user: ContextVar[uuid.UUID | None] = ContextVar("billed_user", default=None)
+
+
+@contextmanager
+def billing(user_id: uuid.UUID):
+    """Attribute every model call inside this block to `user_id`."""
+    token = billed_user.set(user_id)
+    try:
+        yield
+    finally:
+        billed_user.reset(token)
+
 
 # Rough bytes-per-token for English prose. Real tokenizers differ per model; this is a
 # sizing aid for the context breakdown, never billing.

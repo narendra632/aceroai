@@ -199,6 +199,8 @@ class Resolved:
     true: int = 0
     false: int = 0
     unverifiable: int = 0
+    #: Due, but no filing newer than the prediction exists yet — left open, not graded.
+    waiting: int = 0
 
     def detail(self) -> dict:
         return {
@@ -206,7 +208,23 @@ class Resolved:
             "true": self.true,
             "false": self.false,
             "unverifiable": self.unverifiable,
+            "waiting": self.waiting,
         }
+
+
+#: How long past its deadline a prediction about a filing waits for that filing before it is
+#: recorded unverifiable. Listed companies must file annual results within sixty days of the
+#: year end, and the filings are read weekly; four months covers a late filer and a missed run
+#: without leaving a prediction open indefinitely.
+FILING_GRACE_DAYS = 120
+
+
+def _newest_annual_end(db: Session, instrument_id: uuid.UUID) -> dt.date | None:
+    """When the period the current annual figures describe ended."""
+    periods = fundamentals.by_period(db, instrument_id, limit=6)
+    ends = [row.get("_period_end") for p, row in periods.items() if "Q" not in p]
+    ends = [e for e in ends if e is not None]
+    return max(ends) if ends else None
 
 
 def resolve_claims(db: Session, *, today: dt.date | None = None) -> Resolved:
@@ -234,8 +252,38 @@ def resolve_claims(db: Session, *, today: dt.date | None = None) -> Resolved:
     )
 
     for claim in due:
-        report.checked += 1
         instrument_id = instruments.get(claim.proposal_id)
+
+        # ⚠ **A prediction may only be graded on evidence that did not exist when it was made.**
+        # This check was missing, and without it the record graded itself. A claim is written
+        # from the newest annual filing — "return on capital stays at or above 15%" because the
+        # filing on file shows 29% — and is due nine months later. For every claim written
+        # between roughly April and September, the next annual results are not out by then, so
+        # the grader read the newest filing on file, which was the SAME filing the claim was
+        # derived from, and marked it true. About half of each year's predictions would have
+        # scored themselves correct on the data that produced them, and claim accuracy would
+        # have measured nothing but that.
+        #
+        # So a claim about a filing waits, OPEN, until a filing covering a period that ended
+        # after the claim was made has been read. If one has not arrived by well past the
+        # deadline it is recorded unverifiable — never true, never false.
+        if claim.metric_key and claim.metric_key != "price" and instrument_id:
+            ended = _newest_annual_end(db, instrument_id)
+            made = claim.created_at.date() if claim.created_at else today
+            if ended is None or ended <= made:
+                if today <= claim.due_by + dt.timedelta(days=FILING_GRACE_DAYS):
+                    report.waiting += 1
+                    continue
+                report.checked += 1
+                claim.status = "UNVERIFIABLE"
+                claim.resolved_at = dt.datetime.now(dt.UTC)
+                claim.resolved_evidence = {
+                    "reason": "no filing covering a period after the prediction was read in time"
+                }
+                report.unverifiable += 1
+                continue
+
+        report.checked += 1
         value = (
             current_value(db, instrument_id, claim.metric_key)
             if instrument_id and claim.metric_key

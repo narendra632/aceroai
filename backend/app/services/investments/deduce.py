@@ -27,7 +27,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from app.core import llm
+from app.services.investments import billing
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def _catalogue(spec: dict) -> str:
 
 
 async def _ask(name: str, about: str, spec: dict) -> dict:
-    reply = await llm.complete(
+    reply = await billing.complete(
         [
             {"role": "system", "content": _PROMPT},
             {
@@ -96,6 +96,7 @@ async def _ask(name: str, about: str, spec: dict) -> dict:
             },
         ],
         effort=EFFORT,
+        purpose="place",
     )
     body = reply[reply.find("{") : reply.rfind("}") + 1]
     return json.loads(body)
