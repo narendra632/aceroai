@@ -1,711 +1,1125 @@
-# The Investments module, walked through
+# The Investments handbook
 
-*Written for Narendra, to be read once slowly and then kept for reference.*
-*Covers everything shipped up to 27 September 2026 — the ledger, the prices, the framework,
-the accounts, the scores, the suggestions, the watching, the reading layer that finds new
-companies, the parallel books, the reviews, the go/no-go criteria, and the record of
-predictions that grades the lot.*
+*Read Parts 1–3 once, slowly. Use Parts 4–8 as a manual — come back to the tab or the situation
+you are in. Parts 9–13 are for when you want to know how the numbers are made and how you will
+eventually judge the whole thing.*
 
-This is the document that explains the whole thing: what each part does, what the arithmetic
-actually computes, what you will see on the screen, and — most usefully — what happens in a
-handful of specific situations, using your own holdings and real numbers.
-
-There is no code in it. If a sentence here disagrees with the code, the code is wrong and it
-should be fixed, not the sentence.
+*Everything here uses your real book: GE Vernova T&D, HDFC Bank, Kaynes and Sai Life; two HDFC
+funds; SpaceX; four coins — about ₹1.04 lakh invested. Figures are from late September 2026.*
 
 ---
+
+## Contents
+
+**Understanding it**
+1. [The one idea](#part-1--the-one-idea)
+2. [The words you need first](#part-2--the-words-you-need-first)
+3. [The machine in one picture](#part-3--the-machine-in-one-picture)
+
+**Using it**
+
+4. [The page, tab by tab](#part-4--the-page-tab-by-tab)
+5. [Scenario A — Starting from a blank slate](#part-5--scenario-a-starting-from-a-blank-slate)
+6. [Scenario B — A normal day](#part-6--scenario-b-a-normal-day)
+7. [Scenario C — The monthly sit-down](#part-7--scenario-c-the-monthly-sit-down)
+8. [Talking to it — everything the chat can do](#part-8--talking-to-it)
+
+**Going deeper**
+
+9. [How the numbers are worked out](#part-9--how-the-numbers-are-worked-out)
+10. [How you will know whether any of this works](#part-10--how-you-will-know-whether-any-of-this-works)
+11. [What it will never do](#part-11--what-it-will-never-do)
+12. [What is not built yet](#part-12--what-is-not-built-yet)
+13. [The honest summary](#part-13--the-honest-summary)
+
+---
+
+# Understanding it
 
 ## Part 1 — The one idea
 
-> **Every investing tool records what you did and throws away why. This one keeps the why,
+> **Every investing app records what you did and throws away why. This one keeps the why,
 > freezes it before the outcome is known, and grades it later.**
 
-Groww knows you bought 5 Kaynes at ₹3,378.80 on 12 August. It has no idea why, and in eight
+Groww knows you bought 5 Kaynes at ₹3,378.80 on 12 August. It has no idea *why*. In eight
 months neither will you — you will have a story, and the story will have quietly rearranged
-itself to fit whatever happened.
+itself to fit whatever happened. If Kaynes doubled, you "always knew". If it halved, you "had a
+feeling". Neither is true, and you can never check, because the real reason was never written
+down.
 
-That gap is the whole reason this module exists. Everything below is scaffolding around it.
+That gap is the whole reason this module exists.
 
----
+### The analogy to keep in your head
 
-## Part 2 — The eight layers
+Imagine a weather forecaster who keeps a notebook. Every morning he studies the charts and
+writes down *"70% chance of rain today"* — before he looks out of the window. At the end of the
+year he opens the notebook and counts: on the days he said 70%, did it rain about 70% of the
+time? If yes, his forecasts mean something. If it rained 30% of the time, he is overconfident,
+and now he *knows* it instead of feeling fine about himself.
 
-The module is built in layers, and which layer a thing lives in decides how much it can be
-trusted. From the bottom:
+This module is that notebook, for investing:
 
-| | Layer | What it holds | Who writes it |
-|---|---|---|---|
-| 1 | **The ledger** | Your transactions | **You.** Never a machine |
-| 2 | **The market record** | Prices, NAVs, exchange rates, corporate actions | Fetched from five sources |
-| 3 | **The fold** | Positions, lots, cost basis, returns | Computed fresh every time |
-| 4 | **The framework** | Imperatives, bottlenecks, multiples | Your theory, versioned |
-| 5 | **Judgement** | Scoring, thesis-writing | ← *the only place a model belongs* |
-| 6 | **The gates** | Hard rules a suggestion must survive | Python, never a prompt |
-| 7 | **The record of judgement** | Proposals, decisions, conditions, claims | Append-only |
-| 8 | **The grading** | Did the claims come true? Was the confidence honest? | Computed |
-
-**The model touches exactly one layer.** Everything below it is fact; everything above it is
-deterministic code that can overrule it. That single constraint is the whole safety design —
-the model can be wrong about judgement, which is recoverable, and cannot be wrong about
-arithmetic, which is not.
-
-Layer 5 now has four inhabitants, and what they have in common is more important than what
-they do: **not one of them may produce a number or introduce a name.**
-
-| What it does | What it is allowed to answer with |
+| The forecaster | This module |
 |---|---|
-| Answer the six reflexivity questions news can settle | one of four verdicts, with a quote that must really be in the evidence |
-| Place a company on a bottleneck | an id from a closed list of 31, or nothing |
-| Read a direction onto a company a matcher already found | bullish, bearish, or neither |
-| Transliterate names out of Hindi commentary | plain text, which the exchange's 2,595-name register then accepts or rejects |
+| Studies the charts | Reads every company's filings and the sources you trust |
+| Writes "70% chance of rain" | Writes *"return on capital stays above 15%"*, with a confidence and a deadline |
+| Writes it **before** looking outside | Freezes it the night the thesis is formed — it can never be edited |
+| Counts at year-end | Grades every prediction automatically when the evidence arrives |
 
-Every score, price, ratio and threshold is still assembled from filed figures by ordinary
-code. A thesis built this way *cannot* contain a number that was never filed.
+It is **not** a machine for making money quickly. At ₹30,000 a month, better decisions are worth
+a few thousand rupees a year against simply buying an index fund. What it produces is rarer: a
+record of your reasoning that cannot be rewritten after the fact — which is the only thing that
+separates people who improve at investing from people who accumulate stories.
 
----
+### What it will and won't do for you
 
-## Part 3 — Layer by layer, in plain terms
-
-### Layer 1 — The ledger
-
-Everything you own is in here because you typed it. Nothing infers a holding, ever.
-
-It is **append-only**: there is no edit and no delete, and the database itself refuses both. A
-mistake is corrected by recording a new entry that supersedes the old one — both stay visible,
-and the history shows that you corrected it.
-
-Why so strict? Because the question this whole module exists to answer is *"what did I own in
-March, and what did I believe when I bought it?"* If a row can be changed afterwards, that
-question has no stable answer and every review built on it is a story rather than a
-measurement.
-
-### Layer 2 — The market record
-
-Prices are **observations**: a number, from a named source, at a stated moment. Five sources,
-each for what it is best at:
-
-| What | Daily close | Live price |
-|---|---|---|
-| Your four NSE stocks | **NSE's own bhavcopy** — official, no login | **Angel One** quote |
-| Your two mutual funds | **AMFI**, history via mfapi.in | — (one NAV a day) |
-| SpaceX + USD/INR | **Twelve Data** | Twelve Data |
-| Your four coins | **CoinGecko** (one year) | CoinGecko |
-| Crypto older than a year | **Binance** × that day's USD/INR | — |
-
-Two properties matter:
-
-**Nothing is ever overwritten.** Filling the same day twice writes nothing the second time. So
-the jobs are safe to re-run, and the first run on any database *is* the backfill.
-
-**A price has an age, and staleness depends on the market.** A closing price is *current*
-until the next session opens — flagging Friday's close as stale on Saturday afternoon would
-mark your whole book stale every weekend, which is how a warning stops being read.
-
-### Layer 3 — The fold
-
-Your positions are never stored. Every time anything needs them, the ledger is read from the
-beginning and folded into holdings.
-
-That sounds wasteful and is not: it is sub-millisecond on your book, and it means a position
-can never silently drift from the transactions underneath it. Storing a running total is how
-two numbers that must agree end up disagreeing with nobody noticing.
-
-Lots are kept separately, first-in-first-out, because that is how Indian demat sales are
-matched — and on a multi-lot holding, FIFO and weighted-average give **different** realised
-gains on the same sale. The page shows the average because that is what every broker app
-shows; the tax view uses FIFO, and each says which it is.
-
-### Layer 4 — The framework
-
-Your theory, stored as data: ten national imperatives, thirty-one bottlenecks, nineteen sector
-multiples.
-
-It is **versioned**. Change anything and a new version is written; every score already made
-still points at the version that produced it. That is what lets you improve the framework
-without corrupting the history of decisions made under the old one.
-
-**A company's place in it scores zero until you agree.** Acero can propose that a company
-clears a bottleneck; the claim is worth nothing until you click. Without that, a system reading
-enough news will eventually talk itself into believing an unrelated small-cap is nationally
-essential, and the score has no way to tell that apart from the real thing.
-
-### Layer 5 — Judgement
-
-A model reads news, filings and the channels you follow, and answers the six reflexivity
-questions that cannot be computed. Four of the ten flags are arithmetic and are computed; two
-of those four **override** whatever the model later says, because a measurable thing should
-never be a matter of opinion.
-
-Four gates stand between a model's answer and the record, and a verdict that fails any of them
-becomes UNKNOWN rather than an answer:
-
-1. **It must cite.** No quote, no verdict.
-2. **The quote must be real.** The words are checked against the evidence it was given. A
-   model answering from what it expects an article to say writes fluent quotes that are not
-   there.
-3. **A second reader must agree.** Two independent passes; disagreement is UNKNOWN.
-4. **It must not calculate.** Any verdict that produces a figure is refused — arithmetic is
-   layer 3's job and a model's arithmetic is not checkable by looking at it.
-
-The same shape governs the reading layer. A model may *transliterate* a Hindi transcript into
-Latin-script names, but the exchange's own list of 2,595 companies decides whether any of them
-is a company — so a hallucinated name is rejected exactly as a misheard one is, and a language
-model can never write a row into the table that measures where your ideas come from.
-
-### Layer 6 — The gates
-
-Nine hard rules, in ordinary Python, reading stored rows. No instruction anywhere asks a model
-to respect them, **because an instruction is a request**.
-
-A gate that a sufficiently persuasive argument can talk its way past is a preference. The whole
-point of writing rules down in advance is that they bind on exactly the day you would rather
-they did not.
-
-### Layer 7 — The record of judgement
-
-Every suggestion, with the price the system saw, the scores it rested on, which rules were
-checked and what each decided — all **frozen**. A review that recomputes the inputs is
-reconstructing a decision rather than examining one, and from the outside the two look the
-same.
-
-### Layer 8 — The grading
-
-Four measures over the predictions layer 7 froze. More in Part 7.
-
-**This layer was empty for a month, and the reason is worth keeping.** Predictions used to be
-written only for suggestions that survived every gate — and in a market where nothing is
-cheap, nothing survives. Fifty-seven suggestions were raised and fifty-seven were blocked, so
-the system produced exactly zero falsifiable predictions while appearing to run perfectly.
-The go/no-go asks for 150 resolved predictions inside a year; at zero a night it would have
-been at zero in a year, and nobody would have found out until the year was over.
-
-Predictions are now recorded **whether or not the gates open**, because calibration is a
-property of the judge rather than of the purchases — a forecaster is not graded only on the
-days someone carried an umbrella. Each carries the rule that refused the idea it came from,
-so a reader always knows which population a number was computed over.
-
-They are also deduplicated. The same company is reconsidered every night and its predictions
-come out identical, so recording each night's would have reached "150 resolved" inside a week
-with 150 copies of the same three sentences — a measure that reads as a large sample while
-being a sample of one. A prediction is recorded only where no open one already says the same
-thing about the same company.
+| It will | It won't |
+|---|---|
+| Keep an exact, uneditable record of everything you own and what it cost | Buy or sell anything. Ever. It cannot place an order |
+| Score every company from its own filings, and say exactly what it could not read | Tell you a company is good because a YouTuber said so |
+| Suggest a purchase — rarely — with the reasons and what would prove it wrong | Suggest something it cannot justify from filed numbers |
+| Refuse suggestions by hard rules, and show you which rule refused each | Let a persuasive argument talk its way past a rule |
+| Find companies you don't follow, from channels and the exchange's announcements | Put a company in your portfolio because it was mentioned |
+| Tell you whether any of this is working, against criteria written in advance | Move the goalposts once the results are in |
 
 ---
 
-## Part 4 — The arithmetic, explained
+## Part 2 — The words you need first
 
-Three scores. **They are never added together.** The most valuable thing your frameworks can
-tell you is *structurally essential, genuinely excellent, and still a bad purchase today* —
-which is exactly the finding an average destroys.
+You will see these words everywhere. Read them once; come back when one confuses you.
 
-### Score 1 — Structural (out of 10)
+### About what you own
 
-Pure arithmetic over a mapping you approved. No model involved and none permitted.
+**Ledger** — the list of every transaction you have ever recorded: buys, sells, dividends,
+fees. It is *append-only*: nothing is ever edited or deleted. A mistake is corrected by adding a
+new entry that says "this replaces that one", and both stay visible. *Why:* if the past could be
+edited, "what did I own in March?" would have no stable answer.
 
-| Component | Max | How it is earned |
-|---|---:|---|
-| **Breadth** | 4 | How many of the ten imperatives this bottleneck blocks. ≥6 → 4; 3–5 → 3; 2 → 2; 1 → 1 |
-| **Crisis** | 2 | A named shock pulled the spending forward |
-| **Timing** | 2 | Inflecting now → 2; inside your holding period → 1; beyond → 0 |
-| **Commitment** | 1 | A committed spend figure traceable to an ingested document |
-| **Investability** | 1 | Green → 1, amber → 0.5, red → 0 |
+**Lot** — one purchase of something. Buying Kaynes twice creates two lots, each with its own
+date and price. It matters for tax: in India, each lot becomes "long-term" separately, 12 months
+after its own purchase date.
 
-**Worked example — GE Vernova:**
+**Cost basis** — what you paid, including charges. Your book's cost basis is about ₹1,03,925.
 
-```
-breadth        4/4   transmission blocks 6 of the ten imperatives
-crisis         0/2   your notes call it implied, not one of your three named shocks
-timing         2/2   inflecting now, peaking FY26–30
-commitment     0/1   no ingested source yet carries the ₹200 trillion figure
-investability  1/1   green
-               ─────
-               7/10
-```
+**Unrealised / realised** — *unrealised* gain is on paper (you still hold it); *realised* is
+locked in by selling.
 
-> **The commitment point is withheld on purpose.** The rule requires a spend figure traceable
-> to an ingested document, and your framework document is not one. Awarding it from the
-> framework's own prose would be the system citing itself — precisely what the sourcing rule
-> exists to forbid. It will be earned once the reading layer ingests a budget document.
+**Price observation** — a price, from a named source, at a stated moment. Prices are never
+"the price"; they are "₹3,650 from NSE, 86 minutes ago". A price has an age, and the page tells
+you when one is stale.
 
-**Your whole universe, computed:**
+### About returns
 
-| | Score | |
-|---|---:|---|
-| Genus Power | **8/10** | ⚠ your highest, and you don't own it |
-| Kaynes · GE Vernova · Apar | 7/10 | |
-| Solar Industries | 6/10 | breadth floored at 1, carried by the crisis flag |
-| Sai Life · Neuland | 5/10 | |
-| Syrma | 4.5/10 | after correcting B2.2 to three crossings |
-| Premier Energies | 4.5/10 | |
-| HDFC Bank | 4/10 | correct — see below |
-| SpaceX · Rolex Rings | — | outside the framework |
+**Money-weighted return (XIRR)** — *your* return, including when you added money. If you put
+most of your money in right before a fall, this is low even if the stocks later recovered.
 
-**On HDFC Bank's 4/10.** This is the framework working, not failing. It is telling you that
-HDFC Bank is *not a structural play*. You do not own it because it unblocks a national
-imperative — you own it because it is a quality bank below 18× with an inverted narrative.
-That belongs in score 2 and score 3. Widening its bottleneck to flatter your largest holding
-would be rewriting your framework to agree with your portfolio.
+**Time-weighted return** — the return of the *choices*, ignoring when money arrived. It is what
+a fund manager is judged on. The page always shows both, because each answers a different
+question: "how did I do?" and "how good were the picks?"
 
-**On "at least N".** Twenty-three of the thirty-one bottlenecks carry a *floor* rather than an
-established count, because your notes spell the crossings out for only eight. The screen says
-"blocks at least 1" and offers a control to set the real figure. A gap in a write-up scored as
-a fact about India would mark ammunition structurally narrow because that section is short.
+### About judging companies
 
-### Score 2 — Business and price (out of what could be measured)
+**Framework** — your theory of where India's growth comes from, stored as data: ten national
+*imperatives* (energy, defence, manufacturing…), thirty-one *bottlenecks* (specific chokepoints
+like "transmission grid capacity"), and a fair valuation multiple for each sector.
 
-Every figure from the company's own filing with the exchange.
+**Mapping** — the statement "this company solves that bottleneck". GE Vernova T&D → B1.1
+(transmission). **A mapping scores nothing until you agree to it.**
 
-| Component | Max | The test |
-|---|---:|---|
-| Return on equity | 2 | ≥15% in ≥3 of the last 5 years |
-| Return on capital | 2 | 5-year average ≥15% → 2; ≥12% → 1 |
-| Profit into cash | 2 | 3-year mean cash flow ÷ profit ≥0.8 → 2; ≥0.6 → 1 |
-| Debt | 1 | Net debt < 2× earnings before interest and depreciation |
-| Retained earnings | 1 | Did each rupee retained create a rupee of value over 5 years |
-| Margin of safety | 2 | ≥25% below a defensible worth → 2; 0–25% → 1; above it → 0 |
+**Quality score** — how good the business is and how sensible the price, out of what *could be
+measured*. Always two numbers: "7 of 9". Seven of nine is strong; seven of seventeen would not
+be. The second number is how much was read.
 
-**The number is always reported as "earned out of available."** Six on its own means nothing:
-six of ten is mediocre and six of six is excellent, and the difference is entirely how many of
-the filings have been read.
+**Margin of safety** — how far below a defensible worth the market is asking. Positive means
+cheap; negative means expensive. Kaynes is currently **169% above** its worth by this measure.
 
-**Worked example — Apar Industries:**
+**Red flags** — ten questions, each one a warning sign (*"Has the valuation run far ahead of
+earnings?"*). **YES is always bad.** Four are arithmetic; six are read from news and filings.
+
+**The four boxes (quadrants)** — every company lands in one:
 
 ```
-return on capital   2/2   29.2% average over the 2 years read
-profit into cash    2/2   ₹1.28 of cash per rupee of profit
-debt                1/1   net debt 0.1× earnings
-return on equity    1/2   ≥15% in 2 of 2 years read
-retained earnings    —    needs 5 years of market value; the price record does not reach back
-margin of safety     —    no market price yet (watchlist backfill in progress)
-                    ─────
-                    6 of 7 measurable  =  86%
+                    story running hot        story quiet
+good business       Q1  supercharged         Q3  ignored compounder
+poor business       Q2  bubble — never buy   Q4  value trap — never buy
 ```
 
-> **A missing input is "—", never 0.** A company marked poor because its filings had not been
-> read is *indistinguishable*, from the outside, from a company that is genuinely poor. Only
-> one of those is a judgement.
+plus **BORDERLINE** — "not enough is known to put it in a box yet".
 
-**Margin of safety, in detail**, because it is where most refusals come from:
+### About suggestions and the record
 
-```
-owner earnings  = profit + depreciation − maintenance capex
-                  (maintenance capex is disclosed nowhere, so depreciation
-                   stands in for it — the two then cancel, which is why this
-                   lands close to profit and is flagged as a proxy)
+**Gate** — a hard rule a suggestion must pass, written in code. Nine of them. If one says no,
+the suggestion is **blocked** and never reaches you.
 
-worth           = owner earnings, averaged over 3 years  ×  the sector multiple
-margin          = (worth − market value) ÷ worth
-```
+**Suggestion (proposal)** — "buy X, this much, for these reasons", made at most once an
+evening, with a confidence figure and a list of things that would prove it wrong.
 
-**⚠ Trailing reported earnings, never a forecast.** No filing contains next year's profit, so a
-forecast can be checked against nothing — and an unverifiable number is exactly what this
-design forbids. **The consequence is real and you will meet it:** Acero will call your growth
-holdings expensive where your own forward estimate calls them fair. That is Buffett's
-discipline doing its job, not a bug.
+**Prediction (claim)** — a specific, checkable statement a thesis makes: *"return on capital
+stays at or above 15% in the next annual filing"*. Frozen when written. Graded later. **These
+are the point of the whole module.**
 
-**Worked example — GE Vernova, and it is the important one:**
+**Invalidation condition (trigger)** — something that, if it happened, would mean you were
+wrong to buy: *"price falls 25% below where this was suggested, without the accounts explaining
+it"*. Written *before* you buy, so you cannot rationalise past it afterwards.
 
-```
-sector multiple                          28×   (your own "fair PE 25–30x", midpoint)
-worth       = owner earnings × 28
-market cap  ≈ 4.35 × worth
-margin      = (worth − market cap) ÷ worth  =  −335%
-```
+**Research queue** — companies a source named that you do not follow. A lead, never a
+recommendation.
 
-**335% above a defensible worth.** The system independently arrived at your framework's own
-central finding: *structurally essential, genuinely excellent, and still a bad purchase today.*
+**Trust tier** — how much weight a source's word can carry: *filing* (the company telling the
+exchange), *press*, or *commentary* (YouTube, tips). A suggestion that rests on commentary alone
+is always refused.
 
-**Banks are measured differently.** For HDFC Bank, return on capital, profit-into-cash and the
-debt test all report "—". Borrowings are a bank's **raw material**, not its leverage; its cash
-flows follow deposits, not trading. Scoring those as though they described an industrial would
-class a sound bank as a failing business — and that classification would block you from ever
-adding to your largest holding.
+**Benchmark** — the index fund you could have bought instead. Beating nothing is easy; beating
+the alternative is the question.
 
-### Score 3 — Reflexivity (four of ten questions, so far)
-
-Ten red-flag questions. **YES is bad**, on all ten. Four are arithmetic and live now:
-
-| # | Question | How it is answered |
-|---|---|---|
-| 2 | Returns declining or below 15%? | From the filings |
-| 6 | Multiple expanded far faster than earnings? | Price × shares ÷ profit, year on year |
-| 8 | Margins deteriorating *as* revenue grows? | Both must be true |
-| 10 | Market's tone shifted sharply? | 52-week range > 60% of its low |
-
-Six need a model reading news and filings. **Flags 6 and 10 will override whatever that model
-eventually says**, because a measurable thing should never be a matter of opinion — and those
-two are exactly the ones a persuasive narrative would talk you out of.
-
-**A flag with no evidence is UNKNOWN, never NO.** A checklist that answers "no" by default
-reports a clean bill of health it never checked.
-
-### The four boxes
-
-```
-                 story running          quiet
-quality good     Q1 supercharged        Q3 ignored compounder
-quality poor     Q2 story w/o business  Q4 cheap for a reason
-```
-
-**Q2 and Q4 forbid a purchase outright, with no override.**
-
-And a fifth answer that matters more than it looks: **BORDERLINE — too little read to judge.**
-Assigned whenever the margin of safety is unknown, fewer than 6 points were measurable, or more
-than two components are missing.
-
-> A company blocked because its accounts have not been read yet is indistinguishable from one
-> blocked because it deserves it. I found Kaynes landing in "structural value trap" on *one
-> year* of data — which would have permanently blocked a holding you own, for a pipeline
-> reason. It now says "too little read to judge."
+**Shadow book** — a paper portfolio of what you *didn't* do: ideas you turned down, ideas the
+rules blocked. Tracked at the prices they would have happened at, so you can later ask "were the
+rules protecting me or just getting in the way?"
 
 ---
 
-## Part 5 — What happens in a day, and in a week
+## Part 3 — The machine in one picture
 
-| Time | What runs | Cost |
-|---|---|---|
-| 06:30 Sunday | `universe_sync` — the exchange's full equity list, 2,595 names | free |
-| 07:30 | `prices_daily` — fills any missing close for funds, US, crypto | free |
-| 08:00 | `benchmarks_sync` — the index funds you are measured against | free |
-| **08:10, 12:10, 16:10, 20:10, 23:10** | **`sources_poll`** — the exchange's five feeds and your channels, including the spoken words of every new video | free |
-| 16:45 weekdays | **`position_watch`** — checks every invalidation condition, settles due predictions | free |
-| 19:00 weekdays | `prices_india_close` — NSE's bhavcopy | free |
-| 20:00 weekdays | `corporate_actions_watch` — records splits, applies them on the ex-date | free |
-| 20:30 daily | `candidate_analysis` — takes up to four queued companies through the same four steps a holding goes through | a few model calls |
-| **21:00 daily** | **`evening_synthesis`** — the one run that decides | free today |
-| Sunday 08:00 | `fundamentals_sync` — reads every company's filings | free |
-| Saturday 09:00 | `investments_weekly_review` — the week in aggregate | free |
-| 1st of month | `investments_monthly_review`; quarterly on 1 Jan/Apr/Jul/Oct | free |
-| Monday 09:00 | `investments_disk_watch` — the module against its 250 MB budget | free |
+Here is everything the module does, as one flow. Each box is explained in Part 4.
 
-The 23:10 poll exists because NSE's announcement feed empties overnight: a day's filings are
-gone by morning, and a reader that only looked in daylight would miss them permanently.
+```
+  WHERE IDEAS COME FROM                 WHAT IT KNOWS ABOUT A COMPANY
+  ─────────────────────                 ─────────────────────────────
+  NSE announcements (5 feeds)           Its annual filings (read weekly)
+  Your YouTube channels (+ speech)      Its price (read daily)
+  Your inbox drops                      Your framework (where it fits)
+            │                                       │
+            ▼                                       ▼
+   ┌─────────────────┐                  ┌───────────────────────┐
+   │ Research queue  │ ──"Follow it"──▶ │ Tracked company       │
+   │ (leads only)    │                  │ score · flags · box   │
+   └─────────────────┘                  └───────────┬───────────┘
+                                                    │  every night at 21:00
+                                                    ▼
+                                        ┌───────────────────────┐
+                                        │  Nine gates (code)    │
+                                        └──────┬─────────┬──────┘
+                                        blocked│         │passed
+                                               ▼         ▼
+                                      Shadow book    Suggestion ──▶ YOU decide
+                                      + predictions  + predictions   (with a reason)
+                                               │         │
+                                               ▼         ▼
+                                        ┌───────────────────────┐
+                                        │  The record — frozen  │
+                                        └───────────┬───────────┘
+                                                    │  as evidence arrives
+                                                    ▼
+                                        ┌───────────────────────┐
+                                        │  Grading: were the    │
+                                        │  predictions right?   │
+                                        └───────────────────────┘
+```
 
-Two of these will interrupt you and the rest never will:
+And one thing sits outside the loop entirely: **your ledger**. You write it. Nothing in the
+flow above ever touches it. If you approve a suggestion, the *system's* paper book records it;
+if you then actually buy, you record that yourself — and the gap between the two books is one of
+the most interesting numbers the module produces.
 
-- **A fired invalidation condition** — always, immediately. A thesis you hold money against has
-  been contradicted by the facts, and being told is the entire reason the condition was written
-  down in advance.
-- **A suggestion** — at most one notification an evening.
+### The eight layers, and who is allowed to write each
 
-Everything else is silent. `evening_synthesis` records a row whether or not it suggests
-anything, because a system that only leaves a trace on the days it acted can never be measured
-against the days it should have acted and did not.
+| | Layer | Holds | Written by |
+|---|---|---|---|
+| 1 | Ledger | your transactions | **you only** |
+| 2 | Market record | prices, NAVs, exchange rates, splits | fetched from five sources |
+| 3 | The fold | positions, lots, returns | computed fresh, never stored |
+| 4 | Framework | your theory | you, versioned |
+| 5 | Judgement | the six judged flags, company placement, transliteration | **the only place a model works** |
+| 6 | Gates | the nine rules | code, never a prompt |
+| 7 | Record of judgement | suggestions, decisions, predictions | append-only |
+| 8 | Grading | were the predictions right, was the confidence honest | computed |
+
+**The single most important design rule:** a language model works in exactly one layer, and
+even there it may never produce a number or introduce a company name. It can pick a bottleneck
+from a closed list of 31, answer a red-flag question with a quote that is then checked word for
+word against the source, or read a Hindi transcript into Latin letters — which the exchange's
+list of 2,595 real companies then accepts or rejects. Every score, price and ratio is ordinary
+arithmetic over filed figures. *A thesis built this way cannot contain a number that was never
+filed.*
 
 ---
 
-## Part 6 — Six scenarios, worked through
+# Using it
 
-### Scenario 1 — An ordinary evening (what will actually happen tonight)
+## Part 4 — The page, tab by tab
 
-21:00. Acero reads eleven tracked companies, scores each one, applies nine rules to each, and
-proposes **nothing**. No notification. One `agent_runs` row saying eleven considered, zero
-proposed.
+The Investments page has one thing always on top, and five tabs below it. Each tab answers a
+question you ask at a different frequency — which is why they are tabs and not one long page.
 
-Open the page and the Suggestions panel says:
-
-> *Nothing is suggested right now. That is the usual and usually correct answer. Every evening
-> is recorded either way, so the quiet ones can be counted later.*
-
-**That is the system working.** A research analyst who finds something worth doing every single
-day is not an analyst.
-
-### Scenario 2 — Why nothing was suggested tonight, in detail
-
-Expand "refused by the rules" and you will see exactly this:
-
-| | Blocked by | Because |
+| Tab | The question it answers | How often |
 |---|---|---|
-| **GE Vernova** | the price | *335% above a defensible worth of 28×* |
-| Apar, Solar, Neuland, Syrma, Genus, Premier, Kaynes, Sai Life, HDFC Bank | business and price together | *too little of its accounts has been read to say which box it is in* |
-| **Rolex Rings** | its place in the framework | *off-framework holdings are already 19.3% of the book, at the 5% ceiling* |
+| **Holdings** | What is it worth? | daily glance |
+| **Decisions** | What should I do? | when something arrives |
+| **Framework** | What is each company judged against? | when assessing a company |
+| **Scorecard** | Is any of this working? | monthly |
+| **Records** | What is on the record? | at tax time, or to correct something |
 
-Three different kinds of refusal, and it is worth knowing which is which:
+---
 
-- **GE Vernova is a real verdict.** Enough was read; the answer is "too expensive". If the price
-  fell 70% or earnings quadrupled, this would change.
-- **The nine are a data gap**, and they resolve as the watchlist price backfill finishes over
-  the next few evening runs.
-- **Rolex is a rule about portfolio shape**, not about Rolex. SpaceX already occupies the whole
-  off-framework allowance.
+### Always on top — the Inbox
 
-> **On that 5% ceiling.** It governs what may be *added*, never what is already held. Applying
-> it backwards would block a position you took before the framework existed — not a decision
-> the rule was ever written to make.
+**What it is:** one box — *"Drop a link, a video, or something you heard…"*
 
-### Scenario 3 — A suggestion arrives
+**Why it is always visible:** an idea you heard at lunch goes nowhere unless capturing it takes
+three seconds. An inbox you have to navigate to is an inbox nobody uses.
 
-Say Apar's price backfill completes, its accounts read at 86%, and the price has fallen to
-where the margin of safety is 30%. All nine rules pass. At 21:00 you get:
+**What happens when you drop something:**
+- A link is read; a YouTube link has its spoken words read.
+- Every listed company it names is found (by matching against the exchange's list).
+- Companies you don't follow go into the research queue (**Decisions** tab).
+- Nothing is bought, scored as good, or recommended because you dropped it.
 
-> **APARINDS: start a position, and 1 other**
-> *Nothing moves until you decide. Each one carries what it rests on and what would prove it
-> wrong.*
+**Try:** paste *"my friend says Voltamp looks good"* — Voltamp lands in the queue with your
+words attached, so in three months you can see where the idea came from.
 
-The card shows:
+**Ask the assistant instead:** *"file this: [link]"* or *"a colleague mentioned Tata Power"*.
+
+---
+
+### Tab 1 — Holdings: *what is it worth?*
+
+This is the tab you'll open most. It is also the one you should *act* on least.
+
+**What you see, top to bottom:**
+
+1. **The totals** — *Invested* (₹1,03,925), *Current value*, gain/loss. If any holding has no
+   price yet, the total says so rather than counting it as zero.
+2. **Corporate actions** — a banner if a split or bonus is announced on something you hold. When
+   one is pending, that holding's gain/loss is marked unreliable (a 1:1 bonus halves the price
+   overnight; without this, Kaynes would show −50% one morning).
+3. **Crypto, separately** — shown apart because under Indian tax law (s.115BBH) a crypto loss
+   cannot be set against any other gain. One netted total would show a position the tax code
+   does not allow.
+4. **Return** — money-weighted and time-weighted, side by side (Part 2 explains the difference).
+5. **Where the money is** — a bar split by asset class.
+6. **Over time** — invested vs value, drawn only where a price was actually observed. Where no
+   price existed, the line has a gap rather than a guess.
+7. **The holdings table** — every position, sortable. **Click a row** to open its detail:
+   each lot, how many days until each becomes long-term for tax, what selling today would
+   mean, and for SpaceX the split between the stock's move and the rupee's.
+
+**How to read it well:** glance, don't stare. The Holdings tab shows you *prices*, and prices
+move daily for reasons that have nothing to do with your thesis. The decisions that matter are
+in the other tabs.
+
+**Ask the assistant:**
+- *"What's my portfolio worth?"* — totals, and which holdings are unpriced or stale
+- *"Show me Kaynes"* — lots, cost, holding period, days to long-term
+- *"HDFC Bank is at 780"* — records a price you just saw
+
+---
+
+### Tab 2 — Decisions: *what should I do?*
+
+Three panels. Everything here is waiting on you for a yes, a no, or a not-yet.
+
+#### Suggestions
+
+**What it shows:** open suggestions (rare), decided ones, and — collapsed — *the ones the rules
+refused*, with which rule refused each.
+
+**What a suggestion looks like** (an illustration — none is open today):
 
 ```
 APARINDS: start a position        ₹9,375 · 12 shares
                                   74% confident · 270 days · Q3
 
 Apar Industries clears B1.1, which blocks 6 of the ten imperatives.
-Structural score 7 of 10.
-What is good: roce — 29.2% average over 2 years read; cash_conversion —
-1.28 of profit arrived as cash; balance_sheet — net debt is 0.1× earnings.
-Not measured: retained_earnings — so this rests on 6 of 7 available
-points, not on ten.
-
-Suggested at ₹782.40, and that price is frozen onto this record.
+What is good: return on capital 29.2% average; cash conversion 1.28.
+Suggested at ₹782.40 — that price is frozen onto this record.
 
 WHAT WOULD PROVE THIS WRONG
- • Return on capital falls below 12% in the next annual filing.      (by 17 Jun 2027)
- • Less than 60 paise of each rupee of profit arrives as cash.       (by 17 Jun 2027)
- • The price falls below ₹586.80, a quarter below where this was
-   suggested, without the accounts explaining it.                    (by 17 Jun 2027)
+ • Return on capital falls below 12% in the next annual filing.
+ • Less than 60 paise of each rupee of profit arrives as cash.
+ • The price falls below ₹586.80 without the accounts explaining it.
 
 WHAT IT IS CLAIMING
  • Return on capital stays at or above 15%.
- • Profit keeps arriving as cash, at or above 0.8.
+ • Profit in the next annual filing is higher than the ₹X on file now.
 
 [ Why — in your own words. Required. ]
 [ Approve ]  [ Reject ]
 ```
 
-**The reason field is required and both buttons stay disabled until you fill it.** That is not
-politeness. It is the data that eventually reveals what kinds of suggestion you keep turning
-down — the only route by which the system learns anything about its own judgement.
+**The reason box is required.** Both buttons stay disabled until you write something. That is
+not politeness: your reasons are the only data that ever reveals what kinds of suggestion you
+keep turning down.
 
-**Where 74% comes from.** Confidence is *derived*, not chosen: 35% weight on how much could be
-measured, 40% on how strongly it scored, 25% on the structural score, minus 8 points per red
-flag standing. A figure a model picked because the argument felt strong would measure the
-model's mood; this measures what was known. It matters because confidence is the number
-calibration is scored against.
+**The normal state is "Nothing is suggested right now."** On a typical night all twelve
+companies are refused — usually because they are good businesses at bad prices. That is the
+rules working. An analyst who finds something to buy every day is not an analyst.
 
-### Scenario 4 — You approve it, then buy something different
+**Approving** records the decision and puts the position in the *system's* paper book. It does
+**not** buy anything and does not touch your ledger. If you then buy, record it yourself.
 
-Approve → the decision is recorded with your reason, the three conditions arm, and the
-**system's paper book** records the position.
+#### Written about lately
 
-Your real book is untouched. If you then buy 8 shares instead of 12, or wait a week, or don't
-buy at all — you enter that yourself, as you enter everything.
+**What it shows:** themes (bottlenecks) that sources have been talking about, *but only ones
+your book is exposed to* — with which of your holdings and queued companies sit on each.
 
-> The two books are deliberately separate. The gap between "what the system suggested" and
-> "what you did" is one of the most interesting numbers this module will ever produce, and
-> merging them would destroy it.
+**Why:** a video titled *"Why defence manufacturing is the decade's trade"* names no company.
+This panel turns it into "you hold nothing on defence manufacturing; two queued companies sit on
+it". It is a list to read, never a reason to act.
 
-### Scenario 5 — A condition fires
+#### Worth a look (the research queue)
 
-Four months later, Apar's annual filing lands and return on capital comes in at 10.4%.
+**What it shows:** companies a source named that you don't follow — who named them, what was
+said (the actual words), how many times, how long it has waited.
 
-16:45 the next weekday, `position_watch` reads it, compares against the 12% written down in
-June, and fires. Immediately:
+**Your three buttons per company:**
 
-> **APARINDS: something that would disprove the thesis has happened**
-> *Return on capital falls below 12% in the next annual filing. It now stands at 10.4. This was
-> written down before the position was taken.*
+| Button | What it does | When to use it |
+|---|---|---|
+| **Read its filings** | Runs the company through the same four steps a holding gets: placement, filings, price, score | You're curious and want the numbers |
+| **Follow it** | Adds it to your watchlist: priced daily, scored nightly, eligible for suggestions | The numbers look worth following |
+| **Not interested** | Dismisses it — you record *why* | It's not for you |
 
-The panel shows it above everything else, in red, with the evidence: *"roce now 10.4, against
-the 12 written down when the position was taken."*
+**Why "not interested" asks for a reason:** because the queue exists to measure your sources.
+A dismissal with a reason tells you, later, whether the channel was naming poor companies or you
+were being too strict.
 
-**It fires whether or not the story still looks good.** That is the point. A system that writes
-invalidation conditions and then reasons past them has quietly stopped being a system — and
-that failure is measured, by trigger discipline, which is the one criterion that is not
-statistical. A *single* ignored firing is a finding.
+**Real example:** Dixon Technologies is in your queue because a Hindi video titled *"2 Small Cap
+Stocks | Parimal Ade"* named it — the title named nobody; the spoken words named Syrma, Kaynes
+and Dixon. The excerpt shows the original words: *"Don टेक्नोलॉजीस"* (speech recognition heard
+"Dixon" as "Don"; the transliteration caught it; the exchange's list confirmed it).
 
-### Scenario 6 — A bonus issue is announced
-
-NSE announces a 1:1 bonus on Kaynes, ex-date in three weeks.
-
-**20:00 that evening** — `corporate_actions_watch` reads it, records it, and tells you. From
-that moment the holdings row is flagged and its profit-and-loss is marked unreliable. Nothing
-can be proposed about Kaynes (rule G7).
-
-**On the ex-date** — the price halves. Acero applies the bonus: your 5 shares become 10, your
-total cost basis is *unchanged*, and each lot's per-share cost halves — ₹960 and ₹722 become
-₹480 and ₹361, **not ₹420 twice**. Flattening them would conserve the total and report the
-wrong realised gain on every FIFO sale afterwards.
-
-Without this, your page would show Kaynes down 50% overnight. That is the single most likely
-way this system could have done you real damage, and the whole apparatus exists for it.
-
-> **If the announcement's wording is ambiguous, nothing is applied.** `BONUS 1:1` is
-> unambiguous; a bare `SPLIT 1:10` does not say which side is the old face value, and the two
-> readings differ by a factor of a hundred. Anything unreadable is flagged for you instead. The
-> confident wrong answer is a larger fiction than the one being fixed.
+**Ask the assistant:**
+- *"Did it suggest anything? Why not?"* — each refusal with its rule
+- *"What's in the research queue?"*
+- *"Reject the Apar suggestion — I want to see another quarter first"* → it prepares the
+  decision, reads it back, and records it only when you confirm
 
 ---
 
-## Part 7 — How you will know whether any of this works
+### Tab 3 — Framework: *what is each company judged against?*
+
+Reference material. You consult it when a company is being assessed, not every day.
+
+#### Framework
+
+**What it shows:** *"version 2 · 12 companies · 31 bottlenecks"*. Press **Show** to open every
+company, each with:
+
+- **Its place** — which bottleneck it sits on, the structural score (out of 10), and whether you
+  have agreed. **Agree** if the placement is right; **Move it** if it belongs elsewhere.
+- **Business and price** — the quality score with every component and its reason:
+
+```
+Business and price  7 of 9 measurable                 2 years of filings of 5 possible · Q1
+
+return on equity    2/2   at or above 15% in 2 of 2 year(s) read
+return on capital   2/2   29.2% average over 2 years read
+profit into cash    2/2   1.28 of profit arrived as cash
+debt                1/1   net debt is 0.1× earnings
+retained earnings    —    needs five years of market value
+margin of safety    0/2   40% ABOVE a worth of 26× owner earnings
+```
+
+- **Red flags** — each shown as a small tag; amber means it is standing.
+
+**How to read a component — three different marks for three different facts:**
+
+| Mark | Means | What you can do |
+|---|---|---|
+| `2/2`, `0/2` | measured | nothing — it's a fact |
+| `—` | not read yet (filing missing, or too new) | wait; it fills itself |
+| `n/a` | this test does not describe this kind of company | nothing — it is not a gap |
+
+HDFC Bank shows `n/a` for return on capital, cash conversion and debt — because deposits are a
+bank's raw material, not its debt — and is measured instead on **cost to income**,
+**provisions** and **funding spread**, which do describe a lender.
+
+**The depth note under each company** tells you *why* a reading is thin, and it matters which:
+
+- *"1 of 3 possible years read; the exchange's filings do not reach further back"* (Kaynes) —
+  the data exists somewhere but isn't machine-readable yet.
+- *"listed too recently for more than 1 full year to exist"* (Sai Life, listed Dec 2024) —
+  nothing can hurry this; the verdict arrives by itself when the next annual filing lands.
+
+#### What it reads
+
+**What it shows:** every source (with its trust tier), the box to **add a channel**, what those
+sources named lately, and how each source has actually performed.
+
+**Adding a channel:** paste anything from the address bar — `youtube.com/@channel`, a handle,
+or a channel id. It arrives **switched off**, waiting for you to press **Start reading it**.
+Pasting a link is not the same act as deciding to be influenced by it.
+
+**Why every mention is kept, even of companies you ignored:** judge a channel only on the ideas
+you acted on and you measure your own filter, not the channel. Forty names, three looked at, one
+that worked reads as 33% instead of 2.5%. The skipped ones are the denominator.
+
+**Ask the assistant:**
+- *"Why is Kaynes scored like that?"* — every component and its reason, the depth note, the box
+- *"Is HDFC Bank any good by your measures?"*
+- *"What did my channels say this week?"* / *"Which of my sources is actually worth reading?"*
+
+---
+
+### Tab 4 — Scorecard: *is any of this working?*
+
+A tab you open **on purpose, monthly**. Not daily, and never right after a stock you passed on
+has gone up — reading this casually trains worse judgement, not better.
+
+#### Against the alternative
+
+Your book against index funds (Nifty 50 and S&P 500, via funds you could actually have bought)
+over the same window. If part of your book has no index counterpart — crypto, say — it tells
+you what share, so you don't mistake a crypto move for stock-picking skill.
+
+Right now, over one year, your book is well behind the index. The panel also states what share
+of the book has no index counterpart, so you can see how much of that gap is crypto rather than
+stock-picking — exactly the kind of fact this panel exists to put in front of you.
+
+#### The books
+
+Several paper portfolios, all valued at the same prices at the same moment:
+
+| Book | Holds |
+|---|---|
+| **Real** | what you actually own |
+| **What the system suggested** | what you'd own if you'd done exactly what was approved |
+| **What the rules blocked** | ideas the gates refused, at the price they would have happened at |
+| **What I turned down** | suggestions you rejected |
+
+Read in aggregate, a year in, these answer the questions that matter: *were the rules protecting
+me or obstructing me? Were my rejections good calls?*
+
+#### Looking back
+
+The weekly, monthly and quarterly reviews, generated automatically: decisions made, what was
+blocked and why, which predictions are about to settle, how the queue is doing, how your
+sources performed, and the benchmark. The monthly one is your agenda for Part 7.
+
+#### Before any real money
+
+The six go/no-go criteria, written down before any could be measured. Each reads **met**,
+**not met**, or **not yet** — and *"not yet" is never "no"*. Part 10 covers these.
+
+**Ask the assistant:**
+- *"Am I beating the index?"*
+- *"What has it predicted, and how many came true?"*
+- *"Is this working? What's the verdict?"*
+
+---
+
+### Tab 5 — Records: *what is on the record?*
+
+#### Foreign holdings — Schedule FA
+
+SpaceX is a foreign asset, so your income-tax return needs a calendar-year disclosure: the
+peak value, the closing value, income received. This panel computes it from the ledger, and
+counts coverage against the days you actually **held** it (not the whole year) — so "priced on
+97 of 97 days held" rather than a misleading "97 of 365".
+
+#### Transactions
+
+Every entry in the ledger, newest first, and **Record one** to add a buy, sell, dividend or fee.
+Charges (brokerage, STT, stamp duty, GST) are computed for you from the rates in force.
+
+**To correct a mistake:** don't look for an edit button — there isn't one. Record the correct
+entry; it supersedes the old one, and both stay visible with the history showing you fixed it.
+
+**Ask the assistant:**
+- *"I bought 3 GE Vernova at 2,340 today"* → it shows you what it understood, costed, and waits
+  for **your confirmation** before writing anything
+- *"Undo that"* — reverses the last entry, on the record
+
+---
+
+## Part 5 — Scenario A: Starting from a blank slate
+
+*Imagine you've just installed the module and own what you own today. Here is how you'd set it
+up, in order, and why each step comes where it does. Budget about an hour for day one, and a
+few minutes on each of the next few days.*
+
+### Step 1 — Record what you own (20 minutes)
+
+Everything else is built on the ledger, so it comes first.
+
+For each holding, record every purchase as its own entry — **not** one combined line per
+stock. Kaynes bought twice is two entries, because each lot has its own tax clock and its own
+cost.
+
+Easiest in chat, one sentence per purchase:
+
+> *"I bought 5 Kaynes on 12 August 2026 at 3,378.80"*
+
+It replies with what it understood — quantity, price, date, the charges it computed, the total —
+and asks you to confirm. Nothing is written until you do. Do the same for GE Vernova, HDFC
+Bank, Sai Life, both HDFC funds, SpaceX and the four coins.
+
+**Check:** Holdings tab. Invested should match what your broker says you paid. If it doesn't,
+you have a missing or duplicate entry — find it now, not in six months.
+
+### Step 2 — Let the prices arrive (automatic, overnight)
+
+You do nothing. Stocks get NSE's official close at 19:00; funds get AMFI's NAV; SpaceX and the
+rupee rate come from Twelve Data; coins from CoinGecko. History back-fills itself on the first
+run.
+
+**Check the next morning:** Holdings shows *Current value* with no "unpriced" note. If one
+holding stays unpriced, ask the assistant *"which holdings have no price?"*.
+
+### Step 3 — Place each company in your framework (15 minutes)
+
+**Framework tab → Show.** Each company has a proposed place — a bottleneck — that scores
+**nothing until you agree**. Go through them one at a time:
+
+- Placement right? **Agree.**
+- Wrong bottleneck? **Move it.**
+- Not a structural play at all (HDFC Bank is a quality bank, not an unblocker of a national
+  imperative)? That's fine — its structural score will be low, and that is the framework being
+  honest rather than flattering your largest holding.
+
+**Why this step matters so much:** the first rule every suggestion must pass (G1) is *"does this
+company have an agreed place in the framework?"* A company you haven't agreed on can never be
+suggested. It's the guard against the system talking itself into believing a random small-cap is
+nationally essential.
+
+### Step 4 — Choose what it reads (10 minutes)
+
+**Framework tab → What it reads.** The five NSE feeds arrive already switched on — a company
+filing with the exchange is the company's own word, so there's no judgement call there.
+
+Channels are different. For each channel you trust:
+
+1. Paste its address into **Add channel**, with a note on why it's worth reading.
+2. It appears switched off. Press **Start reading it**.
+
+**Choose channels that name Indian companies.** Measured on the three this started with: two
+spoke Hindi about markets in general, and one taught valuation with American examples — across
+twelve recent videos they named zero NSE-listed companies. The machinery read all three
+correctly; they were simply the wrong sources.
+
+> ⚠ **If you added channels before 27 September 2026, re-add them once.** A fault in how a
+> channel address was turned into an id could pick up a *different* channel on pages that
+> feature others (measured on Zerodha's page: ten channel ids, the first belonging to someone
+> else). Paste each channel again: if the same channel is already registered nothing changes;
+> if a second entry appears, the first was wrong — switch it off.
+
+### Step 5 — Build a watchlist, deliberately wider than you think (ongoing)
+
+The module can only suggest, score and predict about companies it follows. Your four stocks are
+not enough, for a reason worth understanding:
+
+> Each company produces about two predictions a year, and most settle when the next annual
+> filing lands. Twelve companies → roughly thirty predictions a year. The go/no-go needs 150.
+> **At twelve companies that is about seven years. At forty, about two.**
+
+So widen it. Two ways:
+- From the research queue: **Follow it** on companies worth following.
+- From anywhere: drop a name in the inbox, then follow it from the queue.
+
+Following costs nothing but a daily price fetch. It is not buying, and it doesn't mean you like
+the company — it means you want the system to form and record an opinion about it.
+
+### Step 6 — Set a monthly AI budget (2 minutes)
+
+**Settings → monthly budget.** The module's model calls — reading red flags, placing new
+companies, reading Hindi transcripts — all count against it and appear on the Insights page.
+Once it's spent, those calls stop and fall back to honest defaults ("not read"), while
+everything free — prices, filings, the deterministic matching — carries on.
+
+### Step 7 — Read what it says about your book (15 minutes)
+
+**Framework tab → Show**, and read every company's card. Don't act on anything. Just learn to
+read it. For your four stocks today:
+
+| | Score | Box | What it's telling you |
+|---|---|---|---|
+| **GE Vernova T&D** | 7 of 9 | Q3 | Excellent business; the price is the problem |
+| **HDFC Bank** | 5 of 9 | Borderline | A solid lender on its own measures; right on the line |
+| **Kaynes** | 1 of 9 | Borderline | One year of earnings readable; 169% above its worth |
+| **Sai Life** | 3 of 9 | Borderline | Listed Dec 2024 — only one year can exist yet |
+
+And read each company's depth note. Knowing *why* a reading is thin is half of reading it.
+
+### Step 8 — The first night
+
+At 21:00 the evening run scores everything and applies the nine rules. Almost certainly:
+nothing suggested, everything refused, no notification. The next morning, **Decisions →
+Suggestions** says *"Nothing is suggested right now"*, and the refused list shows each company's
+rule.
+
+**And predictions start that night.** Even for refused ideas, each thesis's predictions are
+frozen with a deadline. Ask the assistant *"what has it predicted?"* the next day — you'll see
+them, each marked *"from a blocked idea"*.
+
+**Setup is done.** From here, the module mostly runs itself.
+
+---
+
+## Part 6 — Scenario B: A normal day
+
+*Five minutes. Most days, less.*
+
+### The rhythm
+
+| When | What happens | What you do |
+|---|---|---|
+| Morning | Overnight: prices in, feeds read, filings checked | Glance at **Holdings** if you like |
+| During the day | Channels and the exchange are read five times, the last at 23:10 | Nothing |
+| Whenever you hear something | — | Drop it in the **Inbox** |
+| Whenever you buy or sell | — | Record it (chat is fastest) |
+| 21:00 | The evening run decides | Nothing — you'll be told if there's something |
+
+**Two things will interrupt you. Nothing else will.**
+
+1. **A fired invalidation condition** — always, immediately. Something you wrote down as
+   "this would mean I'm wrong" has happened.
+2. **A suggestion** — at most once an evening, and rarely.
+
+Everything else is silent. That is deliberate: a tool that pings you daily trains you to watch
+prices, which is the habit this whole design exists to break.
+
+### What *not* to do on a normal day
+
+- **Don't open the Scorecard.** It moves on a scale of months. Checking it daily is like weighing
+  yourself hourly.
+- **Don't go looking for what you passed on.** The shadow books are for monthly reading in
+  aggregate. A rejected stock that rose is far more memorable than one that fell, and dipping in
+  after a winner teaches exactly the wrong lesson.
+
+### Five things that will happen, and what to do
+
+#### A friend mentions a stock
+
+Drop *"Rahul says Voltamp is going to double"* in the inbox. Voltamp lands in the research queue
+with Rahul's words attached. **That's it.** You don't need to research it tonight. It waits for
+your monthly sit-down, and if you follow it the system will form its own view from the filings.
+
+#### A suggestion arrives
+
+The notification reads *"APARINDS: start a position"*. Open **Decisions → Suggestions** — or ask
+the assistant *"explain the Apar suggestion"*.
+
+Read three things, in this order:
+1. **What would prove it wrong.** If you don't believe these conditions, don't approve.
+2. **What it's claiming.** Do these sound right to you?
+3. **The confidence** — derived, not felt: how much was read, how strongly it scored, how central
+   its bottleneck is, minus eight points per standing red flag.
+
+Then decide, with a reason in your own words. It lapses after 14 days — a suggestion made at
+one price is stale at another. If you approve and then actually buy, **record the purchase
+separately** — and if you buy 8 shares instead of 12, record 8. The gap is data.
+
+#### A condition fires
+
+*"KAYNES: something that would disprove the thesis has happened — Return on capital fell below
+12% in the new annual filing. It now stands at 10.4."*
+
+This is the most important notification the module sends. **It fires whether or not the story
+still sounds good** — that's the point. Your choices: sell, or hold and write down why the
+condition no longer applies. What you must not do is ignore it; the one go/no-go criterion with
+no sample-size excuse is *"when a condition fired, did you act?"* A single ignored firing is a
+finding.
+
+#### A bonus issue is announced
+
+NSE announces a 1:1 bonus on Kaynes. That evening you're told; the holding is marked "P&L
+unreliable" and no suggestion can be made about it. On the ex-date the module applies it: 5
+shares become 10, total cost unchanged, **each lot's cost per share halves separately** (₹960
+and ₹722 become ₹480 and ₹361 — not ₹420 twice, which would get your tax wrong on every future
+sale). You do nothing. If the announcement's wording is ambiguous, it asks you instead of
+guessing.
+
+#### You want to understand something
+
+This is what the assistant is best at. Ask plainly:
+
+> *"Why is HDFC Bank borderline?"*
+> *"What does margin of safety mean for Kaynes?"*
+> *"Why didn't it suggest GE Vernova when it scores 7 of 9?"*
+
+It answers from the same numbers the page shows, component by component, including what it
+could not read.
+
+---
+
+## Part 7 — Scenario C: The monthly sit-down
+
+*About 45 minutes, on the 1st of the month or the first weekend after. This is where the real
+decisions happen. Sit down with the page on one side and the assistant on the other.*
+
+### Before you start — read the monthly review
+
+**Scorecard → Looking back → the newest monthly review.** It's generated automatically on the
+1st and lists everything below. It's your agenda.
+
+### 1. Decide anything still open (5 minutes)
+
+**Decisions → Suggestions.** Anything still pending gets approved or rejected, with a reason.
+If you're unsure, rejecting with *"not sure — want another quarter"* is a perfectly good
+decision. It goes in the "turned down" book and will tell you, later, whether your caution was
+right.
+
+### 2. Triage the research queue (10 minutes)
+
+**Decisions → Worth a look.** For each company:
+- Heard of it, interested? **Read its filings**, then decide next month.
+- Numbers already look worth following? **Follow it.** (Remember Part 5, step 5 — a wider
+  watchlist is what makes the record useful.)
+- Not for you? **Not interested**, with the reason.
+
+Aim to leave the queue shorter than you found it. A queue that only grows gets abandoned.
+
+### 3. Check the framework (5 minutes)
+
+**Framework → Show.** Anything marked as needing re-confirmation — a placement expires rather
+than standing for ever — gets **Agree** or **Move it**. Newly followed companies get placed.
+
+### 4. Judge your sources (5 minutes)
+
+**Framework → What it reads.** For each channel, look at what it named and how those names did.
+A channel that named thirty companies, none of which you followed, is either poor or not
+aligned with your framework — either way, consider switching it off and trying another. This is
+the whole reason every mention is recorded.
+
+### 5. Read the scorecard (10 minutes)
+
+**Scorecard.** In this order:
+1. **Against the alternative** — am I beating the index fund? (Early on: probably not, and
+   that's information.)
+2. **The books** — what did the rules block, and how did those ideas do? What did I turn down?
+3. **Predictions** — ask the assistant *"which predictions settled this month, and how many came
+   true?"*
+
+Resist drawing conclusions from one month. You're looking for patterns over quarters.
+
+### 6. Deploy this month's money (10 minutes)
+
+This is the decision the whole month builds to: where does this month's ₹30,000 go?
+
+The module informs it; it doesn't make it. Work through it like this:
+
+1. **Is there an approved suggestion?** If yes, and you still agree — buy it, and record it.
+2. **Nothing approved?** That is the common case, and the module is telling you something real:
+   *nothing in your universe is good enough at today's price.* Its own logic suggests two honest
+   options — let the money wait for a better price, or put it in the index fund you're measured
+   against. Buying something the rules refused *just to deploy the money* is exactly the
+   behaviour the rules exist to catch.
+3. **Want to buy something the module didn't suggest?** You can — it's your money and your
+   ledger. Record it like any purchase. The gap between what you did and what it suggested is
+   one of the most valuable numbers it will ever produce, *provided you record honestly*.
+
+Whatever you decide, record it. A month where you deliberately did nothing is a decision too.
+
+### Once a quarter — the bigger question
+
+On the 1st of January, April, July and October, the quarterly review appears. Add one step:
+
+**Scorecard → Before any real money.** Read the six criteria. Expect most to say **not yet** for
+the first year — that's not failure, it's the absence of enough evidence. The question each
+quarter is simply: *is anything moving toward "not met"?* Part 10 explains each one.
+
+---
+
+## Part 8 — Talking to it
+
+The assistant reads the same numbers the page shows — computed by the same code — so the two can
+never disagree. Ask in plain words; you don't need these exact phrasings.
+
+### What you can ask, and what it does
+
+| You ask | It does | Writes anything? |
+|---|---|---|
+| *"What's my portfolio worth?"* | Totals, unpriced/stale holdings, crypto separately | no |
+| *"Show me Kaynes"* | Lots, cost, holding periods, days to long-term | no |
+| *"I bought 5 Kaynes at 3,378.80 today"* | Prepares the entry, costs it, **waits for you to confirm** | only after you confirm |
+| *"Undo that"* | Reverses an entry, on the record | yes, visibly |
+| *"HDFC Bank is at 780"* | Records a price you've seen | a price, not a holding |
+| *"File this: [link]"* / *"a friend likes Voltamp"* | Reads it, puts named companies in the queue | a lead |
+| *"Did it suggest anything? Why not?"* | Open suggestions, and each refusal with its rule | no |
+| *"Why is HDFC Bank scored like that?"* | Every component with its reason, depth note, box, flags, framework place | no |
+| *"What's in the research queue?"* | Waiting companies, who named them, what was said | no |
+| *"What did my channels say?"* | Sources, recent mentions, each source's record | no |
+| *"What has it predicted?"* | Open and settled predictions, which came from blocked ideas | no |
+| *"Am I beating the index?"* | The benchmark comparison, with its caveats | no |
+| *"Is this working?"* | The six criteria — met, not met, not yet | no |
+| *"Reject the Apar suggestion — too expensive for me"* | Prepares the decision, reads it back, **waits for you to confirm** | only after you confirm |
+
+### What it will not do from chat, and why
+
+- **Agree to a framework placement, approve a source, or follow a company.** These are
+  structural claims about your theory. They stay on the page where you can see exactly what
+  you're agreeing to.
+- **Invent your reason for a decision.** If you don't give one, it asks.
+- **Write anything in one step.** The ledger is your word, and a decision is the row the system
+  is eventually graded on. A model that could write either unaided could invent a holding, or
+  quietly write its own report card.
+
+### Using it to learn
+
+Its best use is as a patient tutor sitting on top of your own data:
+
+> *"Explain margin of safety using Kaynes as the example."*
+> *"Why does HDFC Bank get n/a for return on capital?"*
+> *"What's the difference between the two return figures on my Holdings tab?"*
+> *"If GE Vernova's price fell 40%, would it pass the rules?"*
+
+---
+
+# Going deeper
+
+## Part 9 — How the numbers are worked out
+
+Three scores. **They are never added together.** The most valuable thing your framework can tell
+you is *"structurally essential, genuinely excellent, and still a bad purchase today"* — and
+averaging the three would destroy exactly that finding.
+
+### Score 1 — Structural (out of 10)
+
+How central is this company's bottleneck to India's imperatives? Arithmetic over a placement you
+agreed to.
+
+| Component | Max | How it's earned |
+|---|---:|---|
+| Breadth | 4 | How many of the ten imperatives this bottleneck blocks (≥6 → 4; 3–5 → 3; 2 → 2; 1 → 1) |
+| Crisis | 2 | A named shock pulled the spending forward |
+| Timing | 2 | Inflecting now → 2; inside your holding period → 1 |
+| Commitment | 1 | A committed spend figure traceable to a document the system has read |
+| Investability | 1 | Green 1, amber 0.5, red 0 |
+
+HDFC Bank scores low here, and that's correct: you don't own it because it unblocks a national
+imperative — you own it as a quality bank. That belongs in score 2.
+
+### Score 2 — Business and price (out of what could be measured)
+
+Every figure comes from the company's own filing with the exchange.
+
+**For most companies:**
+
+| Component | Max | The test |
+|---|---:|---|
+| Return on equity | 2 | ≥15% in at least 60% of the years read ("3 of 5" held as a share) |
+| Return on capital | 2 | Average ≥15% → 2; ≥12% → 1 |
+| Profit into cash | 2 | Cash from operations ÷ profit ≥ 0.8 → 2; ≥ 0.6 → 1 |
+| Debt | 1 | Net debt < 2× earnings before interest and depreciation |
+| Retained earnings | 1 | Did each rupee kept create a rupee of value over five years |
+| Margin of safety | 2 | ≥25% below a defensible worth → 2; 0–25% below → 1; above → 0 |
+
+**For a bank** — detected from the rulebook the company *itself* filed under, so any bank or
+lender you add is recognised automatically — the three components that describe machinery
+(return on capital, profit into cash, debt) are `n/a`, and three that describe a lender take
+their place:
+
+| Component | Max | The test |
+|---|---:|---|
+| Cost to income | 2 | Operating costs as a share of net income; ≤60% good, ≤70% fair |
+| Provisions | 2 | Share of pre-provision profit lost to bad loans; ≤25% good, ≤40% fair |
+| Funding spread | 1 | How much of the interest it earns it keeps — a stand-in for cheap deposits |
+
+*Why HDFC Bank's cost-to-income shows 58% when everyone quotes ~40%:* the exchange gives the
+**consolidated** group, which includes HDFC Life, whose insurance premiums count as income and
+claims as costs. Every bank figure on screen says "on consolidated figures" so you know why it
+won't match what you look up.
+
+**When there isn't much history.** Before FY25, the exchange's March filings carry a balance sheet
+but no profit — so most companies have two readable years of earnings, and recently listed ones
+fewer. Every rule adapts: one year is scored at **half weight** and says *"a snapshot, so this
+earns half at most"*. The score is always shown; only the **box** waits until there are two years
+of earnings, so a single good or bad year can never block or bless a purchase.
+
+**Margin of safety, in detail** — because it's where most refusals come from:
+
+```
+owner earnings  = profit + depreciation − maintenance spending
+                  (maintenance spending isn't disclosed, so depreciation stands in —
+                   the two cancel, and it lands close to profit; flagged as a proxy)
+worth           = owner earnings, averaged over up to 3 years  ×  the sector multiple
+market value    = price × shares  (shares = paid-up capital ÷ face value, from the filing —
+                  or the exchange's own face value if the filing's is impossible)
+margin          = (worth − market value) ÷ worth
+```
+
+It uses **past reported earnings, never a forecast** — no filing contains next year's profit, and
+a number that can't be checked is exactly what this design forbids. The consequence is real:
+fast-growing companies will look expensive here even when your own forward view calls them fair.
+That's Buffett's discipline doing its job, not a bug.
+
+### Score 3 — Red flags (ten questions, YES is bad)
+
+| # | Question | Answered by |
+|---|---|---|
+| 1 | Business too complex, or outside a circle of competence? | reading |
+| **2** | **Returns declining or below 15%?** | **arithmetic** |
+| 3 | Needs massive capex just to stand still? | reading |
+| 4 | Management destroying value with deals or buybacks? | reading |
+| 5 | Lack of candour in how results are presented? | reading |
+| **6** | **Valuation multiple ran far ahead of earnings?** | **arithmetic — overrides reading** |
+| 7 | Dependent on a high share price or cheap capital? | reading |
+| **8** | **Margins falling even as revenue grows?** | **arithmetic** |
+| 9 | Hype-driven narrative ignoring execution risk? | reading |
+| **10** | **Market tone swung sharply in 12–18 months?** | **arithmetic — overrides reading** |
+
+The six "reading" answers must pass four checks or they become UNKNOWN: they must quote their
+evidence; the quote must really be in the source; a second, independent reader must agree; and
+the answer must not calculate anything. **A flag with no evidence is UNKNOWN, never NO** — a
+checklist that says "no" by default reports a clean bill of health it never checked.
+
+### The box
+
+Two or more standing red flags means "the story is running hot". Combined with a quality ratio
+above or below 60%, that gives the four boxes in Part 2. A company is **BORDERLINE** instead if
+less than 60% of its own test could be measured, its margin of safety is unknown, it has fewer
+than two years of earnings, or its score sits within 5 points of the line.
+
+### The nine rules (gates)
+
+| Rule | Refuses a suggestion when… |
+|---|---|
+| G1 Framework | the company has no agreed place in the framework (or the off-framework allowance — 5% of the book — is used up) |
+| G2 Box | it's in Q2 (bubble) or Q4 (value trap), or can't be boxed yet |
+| G3 Margin of safety | the price is above a defensible worth |
+| G4 Invalidation | fewer than two machine-checkable conditions could be written |
+| G6 Cooling off | you turned it down in the last 14 days |
+| G7 Corporate action | a split or bonus is outstanding |
+| G8 Price age | the price hasn't been checked recently |
+| G9 Volume | too many suggestions already this evening or month |
+| G11 Confidence | confidence is below 60% — it's a research note, not a suggestion |
+
+All nine are checked every time, and every answer is frozen onto the record — so a year from
+now you can ask *which rule refused what, and was it right to?*
+
+### How a prediction is graded
+
+1. Written the night a thesis forms — for refused ideas too — and never edited.
+2. Due nine months later.
+3. **Graded only on a filing that came out after it was made.** If the next annual results
+   aren't in by the deadline, it waits; if they never arrive, it's *unverifiable* — never
+   counted as right or wrong.
+4. Each company's same prediction is recorded once while open — so a sample of 150 means 150
+   different predictions, not 150 copies of three.
+
+---
+
+## Part 10 — How you will know whether any of this works
 
 ### The honest problem
 
-At ₹30,000 a month you will make thirty to forty-five decisions a year. **That is not enough to
-conclude anything about skill.** The statistical floor is about thirty observations and that is
-a *floor*, not a standard; serious work wants hundreds across different market conditions.
-Anyone who tells you otherwise — including this system, if it ever starts to — is selling
-something.
+At ₹30,000 a month you'll make thirty to forty-five decisions a year. **That is not enough to
+conclude anything about skill.** Thirty observations is a statistical *floor*; serious work
+wants hundreds, across different market conditions. Anyone who tells you otherwise — including
+this system, if it ever starts to — is selling something.
 
 ### The way around it
 
-Each thesis makes several specific, checkable assertions. Each position carries at least two
-invalidation conditions. Each suggestion carries a confidence level.
+Every thesis makes several specific predictions. So instead of forty outcomes a year you get a
+few hundred checkable statements — the difference between knowing in months and knowing in
+decades. That is why predictions are recorded even for refused ideas: the forecaster is graded
+on his forecasts, not only on the days he carried an umbrella.
 
-**That is a few hundred testable predictions a year instead of thirty outcomes** — the
-difference between knowing in months and knowing in decades. It is the entire reason claims are
-written down at all.
+### The six criteria (Scorecard → Before any real money)
 
-### The four measures
+Written down before any could be measured — which is the only reason they mean anything.
 
-| Measure | What it asks | Reports from |
+| Criterion | Asks | Today |
 |---|---|---|
-| **Claim accuracy** | Of the specific things it said would happen, how many did? | 20 resolved claims |
-| **Calibration** | When it says 80%, is it right 80% of the time? | 20 settled theses |
-| **Trigger discipline** | When something disproved a thesis, did anything happen? | **the first firing** |
-| **Decision record** | How often did you agree? | the first decision |
+| **Operating** | Has it run long enough, across at least two different market conditions? | met |
+| **Decisions** | At least 40 decisions recorded? | not yet |
+| **Calibration** | When it said 70%, was it right about 70% of the time? | not yet |
+| **Claims** | Did at least 60% of 150 predictions come true? | not yet — and it says how long |
+| **Discipline** | When a condition fired, was it acted on? One miss disqualifies | not yet — nothing has fired |
+| **Return** | Beat the index fund, after costs? | not met |
 
-All four show **"—"** today, and will for months.
+The **Claims** row tells you plainly if its target is out of reach at your current size — right
+now, about seven years at twelve companies. **Widening the watchlist is what shortens that, not
+waiting.**
 
-> **That blankness is the feature.** A precision computed over six outcomes reads *exactly*
-> like one computed over six hundred, and nothing in an interface can tell you which you are
-> looking at. So the figure is withheld rather than shown with a caveat — a caveat next to a
-> number is read as a number.
+**Return is deliberately last and least informative.** Over one year, a genuinely good strategy
+and a mediocre one look almost identical in returns. The criteria that grade the *reasoning* —
+claims, calibration, discipline — reach a verdict long before returns can.
 
-### But blank for the right reason, not the wrong one
-
-There is a failure that looks identical to healthy blankness and is not: a measure that can
-**never** fill. Both show "—" and neither complains.
-
-Two have been found and fixed, and they were the same mistake in different clothes — a
-threshold written as an absolute where it should have been relative to what could actually
-exist:
-
-| Looked like | Actually was |
-|---|---|
-| "Kaynes and Sai Life score unknown" | a five-year rule asked of a company listed eighteen months ago |
-| "no predictions yet" | predictions written only for suggestions the gates let through, and the gates let none through |
-
-So the criteria now say when their own target is out of reach. Most predictions settle on the
-next annual filing, which means a book of a dozen companies produces roughly thirty a year —
-and 150 of them needs about seven years at that size. The screen says so, in those words,
-because a permanently unmet criterion that looks pending is worse than one that is simply
-unmet. **Widening the watchlist is what shortens that, not waiting.**
-
-**Calibration** is scored with Brier: the mean squared gap between confidence stated and what
-happened. **Lower is better.** 0.25 is what a coin achieves by saying 50% to everything.
-Overconfidence is the most common and most correctable failure of a system like this, and it
-shows up here before anywhere else.
-
-**Trigger discipline is deliberately not statistical.** It reports from the first firing,
-because one ignored condition is a finding rather than a data point.
-
-**Decision record is described, not scored.** A high agreement rate could equally mean the
-system is good *or* that it has learned to suggest only what will be accepted. Whether your
-vetoes add or subtract is answered by the shadow book over years, not by counting.
-
-### The three shadow books
-
-Alongside the real book, three ledgers track what did **not** happen:
-
-- **What you turned down** — measures the cost of your vetoes
-- **What the budget could not fund** — measures the cost of the constraint
-- **What the rules blocked** — ⚠ the most valuable of the three, because it is the only way to
-  find out whether the safety rails are protecting or merely obstructing
-
-> **A warning about reading them.** Rejected ideas that went *up* are far more memorable than
-> rejected ideas that went down. Read in aggregate, on a schedule — never dipped into after a
-> name that got away. A shadow book read casually trains worse judgement, not better.
+> **"Not yet" is never "no."** A criterion with too little evidence reports *not yet* with the
+> count, and shows no number — because a figure computed on six outcomes looks exactly like one
+> computed on six hundred.
 
 ---
 
-## Part 8 — What it will never do
+## Part 11 — What it will never do
 
-- Connect to a brokerage, place an order, or read your real holdings. **Not a limitation to
-  engineer away later** — it is what keeps this outside the regulatory category that governs
-  automated trading in India.
-- Hold an opinion about the next few hours.
-- Compute your tax. It flags consequences; it does not file anything.
-- Propose crypto or mutual funds. Tracked and reported, never suggested — crypto because a flat
-  30% with no loss set-off changes the arithmetic of every position.
-- Be published or shared. The moment its output reaches a third party it becomes regulated
-  investment advice.
-- Be backtested. The model already knows what happened to these companies before its training
-  cutoff, so a backtest would produce a confident, wrong, deeply persuasive answer.
-- **Produce a number it cannot point to a source for.** If it does not have the figure, it says
-  it does not have the figure.
+- **Place an order, or connect to a broker in a way that could.** The market-data connection is
+  read-only by construction. What you do in the real world, you record.
+- **Write your ledger without you.** Every entry is yours, confirmed by you.
+- **Let a model produce a number or name a company into the record.** Models choose from closed
+  lists or produce text that deterministic code then checks.
+- **Let an instruction replace a rule.** The gates are code. A rule a clever enough argument can
+  talk its way past is a preference.
+- **Forecast earnings.** Every figure is reported, never predicted.
+- **Edit the past.** Transactions, decisions and predictions are append-only, enforced by the
+  database itself — not by anyone promising to be careful.
+- **Count what it couldn't read as zero.** Missing is shown as missing, everywhere.
 
 ---
 
-## Part 9 — The same module, in a conversation
-
-Everything above has a screen. It also has a chat interface, and the two read the same code —
-so a figure is never computed twice and the page and the assistant can never quote different
-numbers for the same portfolio.
-
-Ask in plain words: *what is my book worth*, *why is Kaynes scored like that*, *did it suggest
-anything*, *why is nothing being suggested*, *what did my channels say*, *what has it
-predicted*, *am I beating the index*, *is this working*. It answers from the tools, not from
-memory.
-
-**It can record a transaction and decide on a suggestion — both in two steps.** It tells you
-what it understood and waits for your confirmation before anything is written. That is not
-politeness: the ledger is your word, and a decision is the row the system is eventually graded
-on. A model that could write either in a single call could invent a holding, or quietly write
-its own report card.
-
-It cannot approve a framework mapping, approve a source, or promote a company out of the
-research queue. Those are structural claims about your theory, and they stay on the page where
-you can see what you are agreeing to.
-
----
-
-## Part 10 — What is not built yet, stated plainly
+## Part 12 — What is not built yet
 
 | | Why it matters |
 |---|---|
-| **Annual accounts before FY25** | The exchange tags earlier years' profit as a fourth quarter. Two years is what exists in machine-readable form; more means summing quarterly filings. Every rule now scales to what a company *could* have, so this thins a reading rather than blocking one |
-| **Retained-earnings test** | Needs five years of market value; the price record does not reach back that far. Fills itself with time |
-| **Asset quality for a bank** | Gross NPAs and the deposit mix are disclosed in the results but not under tags this reader collects. Provisioning and funding spread stand in, and say that they are standing in |
-| **Bank bands rest on one peer** | Cost-to-income and credit-cost bars are anchored on HDFC's own filing plus the shape of the peer set, not a measured distribution. Revisit when a second lender enters the book |
-| **The government-commitment point** | Withheld until a budget document is ingested |
-| **Your original framework documents** | Everything reads your framework through your cowork agent's summary of it. With the originals, most of the 23 provisional crossing counts could be established properly |
-| **Channels that discuss Indian companies** | Measured 24 Sep 2026: of the three registered, two publish in Hindi and one teaches valuation with American examples. The machinery reads all three correctly; the sources are the wrong sources, and you change them from the page |
+| **Accounts before FY25** | The exchange only publishes full-year profit in machine-readable form from FY25. Every rule scales to what exists, so this thins a reading rather than blocking one |
+| **Retained-earnings test** | Needs five years of market value; the price record doesn't reach that far back yet. Fills itself with time |
+| **Bank asset quality** | Gross NPAs and the deposit mix are published but not under tags this reader collects. Provisions and funding spread stand in, and say so |
+| **Bank thresholds rest on one peer** | Calibrated on HDFC Bank's own filing. Revisit when a second lender enters the book |
+| **Kaynes' market value in production** | Its filing reports a face value of zero; the exchange's figure fills it after the next Sunday universe sync |
+| **Government-commitment point** | Withheld until a budget document is read |
+| **Your original framework documents** | The framework is read through a summary of your notes; with the originals, 23 provisional crossing counts could be established properly |
 
-Parked deliberately, not forgotten: US companies, screenshot ingestion, a regime model,
+Parked deliberately, not forgotten: US companies, screenshot ingestion, a market-regime model,
 framework self-tuning, the hyperactive parallel book, and reading PDFs.
 
 ---
 
-## Part 11 — The honest summary
+## Part 13 — The honest summary
 
 This is a machine for producing an **auditable track record**, not a machine for making money.
 
 At ₹30,000 a month, a better decision process is worth a few thousand rupees a year against
-simply buying an index fund. As a money-making machine at this size, it does not pay for
-itself, and I would be lying if I said otherwise.
+simply buying an index fund. As a money-making machine at this size, it doesn't pay for itself,
+and it would be dishonest to say otherwise.
 
 What it pays for is two things:
 
-1. **You learn how software is really made** — and this module is the hardest, most real thing
-   in Acero.
-2. **A few hundred written, timestamped, unchangeable predictions and the reasoning behind
-   each.** That cannot be bought, backfilled, or hurried, and in a decade of investing it is
-   the thing that separates people who improve from people who accumulate stories.
+1. **You learn how investing decisions are really made** — by writing down what you believe
+   before you know how it turns out, and being graded on it.
+2. **A few hundred written, timestamped, unchangeable predictions**, and the reasoning behind
+   each. That cannot be bought, back-filled or hurried — and over a decade it is the thing that
+   separates people who improve from people who accumulate stories.
 
-The most valuable thing it produces in its first year is almost certainly not returns. It is
-the record — and the record is what makes the second year worth running.
+The most valuable thing it produces in its first year is almost certainly not returns. It is the
+record — and the record is what makes the second year worth running.
 
-It is designed so that the answer "no, this does not work" is easy to see. **That is the only
+It is designed so that the answer *"no, this doesn't work"* is easy to see. **That is the only
 design that makes the answer "yes" worth believing.**
 
 ---
 
-*Where the code is: `backend/app/services/investments/` — `portfolio` (the fold), `pricing`,
-`returns`, `taxrules`, `costmodel`, `entry`, `history`, `corpactions`, `schedulefa`,
-`frameworks`, `framework_data`, `fundamentals`, `scoring`, `gates`, `proposals`, `watching`,
-`overview`, and the research half: `reading`, `candidates`, `deduce`, `judgement`, `themes`,
-`spoken`, `benchmarks`, `reviews`, `books`, `verdict`. Market adapters in
-`backend/app/services/marketdata/` — `feed`, `feeds`, `universe`, `webpage`, `transcript`,
-`nse_xbrl`. Jobs in `backend/app/jobs/`. The screen in
-`frontend/src/components/InvestmentsView.tsx` and its panels, in five tabs. The same figures
-reach a conversation through `backend/app/core/tools/investments.py` (the ledger) and
-`research.py` (everything above it).*
+## Appendix — What runs, and when
+
+| Time | Job | What it does |
+|---|---|---|
+| Sun 06:30 | `universe_sync` | The exchange's full company list (and each company's face value) |
+| Daily 07:30 | `prices_daily` | Fund NAVs, SpaceX, the rupee rate, coins |
+| Daily 08:00 | `benchmarks_sync` | The index funds you're measured against |
+| 08:10 · 12:10 · 16:10 · 20:10 · 23:10 | `sources_poll` | NSE's five feeds and your channels, including the spoken words of new videos |
+| Weekdays 16:45 | `position_watch` | Checks every invalidation condition; grades predictions whose evidence has arrived |
+| Weekdays 19:00 | `prices_india_close` | NSE's official closing prices |
+| Weekdays 20:00 | `corporate_actions_watch` | Splits and bonuses — recorded when announced, applied on the ex-date |
+| Daily 20:30 | `candidate_analysis` | Up to four queued companies through placement, filings, price and score |
+| **Daily 21:00** | **`evening_synthesis`** | **Scores everything, applies the nine rules, records predictions, suggests — or doesn't** |
+| Sun 08:00 | `fundamentals_sync` | Every company's filings |
+| Sat 09:00 · 1st · quarterly | reviews | The weekly, monthly and quarterly reviews |
+
+The 23:10 poll exists because NSE's announcement feed empties overnight — a day's filings are
+gone by morning, and a reader that only looked in daylight would miss them for good.
+
+*Where the code is: `backend/app/services/investments/` for everything the module computes;
+`backend/app/services/marketdata/` for the adapters that fetch; `backend/app/jobs/` for the
+schedule; `backend/app/core/tools/investments.py` and `research.py` for the chat; and
+`frontend/src/components/InvestmentsView.tsx` with its panels for the screen. The rules the
+module promises to keep are in `openspec/specs/investments/spec.md`.*
