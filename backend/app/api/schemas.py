@@ -807,6 +807,9 @@ class ScorePartOut(BaseModel):
     #: bank. ⚠ Render as "—", never as a gap and never as zero. Three different renderings for
     #: three different facts: did badly, was not read, does not apply.
     applicable: bool = True
+    #: The measured quantity, where the page draws it: the margin of safety as a fraction,
+    #: positive below worth. Null for every part that is only ever a sentence.
+    value: Decimal | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -984,6 +987,8 @@ class MeasureOut(BaseModel):
     value: Decimal | None
     n: int
     detail: str
+    #: The sample it waits for, so progress can be drawn. Null where it does not wait.
+    needed: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1056,6 +1061,9 @@ class AttentionOut(BaseModel):
     """One thing the framework needs a person for."""
 
     kind: str
+    #: So the page can act on it in place — placing a company that has no mapping needs to
+    #: know which instrument it is, and a symbol is not an identity.
+    instrument_id: uuid.UUID | None = None
     symbol: str
     detail: str
 
@@ -1079,6 +1087,49 @@ class RemapIn(BaseModel):
     b_bottleneck: str | None = None
     off_framework: bool = False
     rationale: str | None = None
+
+
+class PlaceIn(BaseModel):
+    """Give a followed company with no place in the framework its first one.
+
+    Written unapproved, exactly like a mapping the system proposes: choosing a bottleneck is a
+    claim about the company, and it scores nothing until it is agreed with.
+    """
+
+    b_bottleneck: str | None = None
+    off_framework: bool = False
+    rationale: str | None = None
+
+
+class SuggestedPlaceOut(BaseModel):
+    """What the model thought, and whether it was confident enough to propose it."""
+
+    placed: bool
+    bottleneck: str | None
+    confidence: float
+    why: str
+
+
+class WaitingOut(BaseModel):
+    """One thing on the Investments page waiting for a decision from the user."""
+
+    #: Which part of the page it lives in: holdings · decisions · companies · sources.
+    tab: str
+    kind: str
+    #: urgent · decide · lead. ⚠ The order is the point: a condition that disproved a thesis
+    #: outranks a lead, and a list that gave them the same weight would teach its reader to
+    #: skim both.
+    severity: str
+    symbol: str | None = None
+    text: str
+    #: The row it is about, so the page can open it rather than just the tab.
+    ref: uuid.UUID | None = None
+
+
+class AttentionListOut(BaseModel):
+    items: list[WaitingOut]
+    #: Items per tab, for the counts on the tab bar.
+    counts: dict[str, int]
 
 
 class ApproveIn(BaseModel):

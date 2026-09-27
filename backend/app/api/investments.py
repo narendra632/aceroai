@@ -27,6 +27,7 @@ from app.api.schemas import (
     ActiveIn,
     ApproveIn,
     AssetTotalOut,
+    AttentionListOut,
     AttentionOut,
     AttributionOut,
     BenchmarkLineOut,
@@ -58,6 +59,7 @@ from app.api.schemas import (
     InvestmentReviewsOut,
     MappingOut,
     MeasureOut,
+    PlaceIn,
     PriceRefreshOut,
     PromoteIn,
     ProposalOut,
@@ -70,13 +72,16 @@ from app.api.schemas import (
     ReverseIn,
     ScheduleFaOut,
     SourceOut,
+    SuggestedPlaceOut,
     SummaryOut,
     ThemesOut,
     TotalsOut,
     TransactionOut,
     TriggerOut,
     VerdictOut,
+    WaitingOut,
 )
+from app.core import telemetry
 from app.db.models import (
     AbMapping,
     AgentRun,
@@ -537,6 +542,7 @@ def _mapping_out(
                     "available": p.available,
                     "detail": p.detail,
                     "applicable": p.applicable,
+                    "value": p.value,
                 }
                 for p in quality.parts
             ],
@@ -663,6 +669,68 @@ def remap(
     return _mapping_out(db, version.spec, inst, fresh, held)
 
 
+def _followed(db: Session, instrument_id: uuid.UUID) -> Instrument:
+    inst = db.get(Instrument, instrument_id)
+    if inst is None or inst.deleted_at is not None:
+        raise NotFound("instrument")
+    return inst
+
+
+@router.post("/framework/instruments/{instrument_id}/place")
+def place_instrument(
+    instrument_id: uuid.UUID,
+    body: PlaceIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MappingOut:
+    """Give a followed company with no place in the framework its first one, by hand.
+
+    ⚠ The step before `remap`. A company followed from the research queue before anything read
+    it has no mapping, so there is nothing to move — and before this, nothing on the page could
+    give it one. Written unapproved: it scores zero until agreed with, like every placement.
+    """
+    book = overview.real_book(db, user.id)
+    version = frameworks.current(db)
+    inst = _followed(db, instrument_id)
+    mapping = frameworks.place(
+        db,
+        inst,
+        spec=version.spec,
+        framework_version_id=version.id,
+        b_bottleneck=body.b_bottleneck,
+        off_framework=body.off_framework,
+        rationale=body.rationale,
+    )
+    db.commit()
+    held = {p.instrument_id for p in pf.positions(db, book.id)}
+    return _mapping_out(db, version.spec, inst, mapping, held)
+
+
+@router.post("/framework/instruments/{instrument_id}/suggest")
+def suggest_place(
+    instrument_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SuggestedPlaceOut:
+    """Ask the model where a followed company with no place belongs.
+
+    ⚠ A model call, so it is billed to the person who asked and stopped by their budget like
+    every other. The answer is chosen from the framework's own bottlenecks or not at all, and a
+    usable one is proposed UNAPPROVED — the same guard as for every candidate.
+    """
+    version = frameworks.current(db)
+    inst = _followed(db, instrument_id)
+    with telemetry.billing(user.id):
+        deduction = candidates.suggest_place(db, inst, version.spec, version.id)
+    db.commit()
+    return SuggestedPlaceOut(
+        placed=deduction.is_usable,
+        bottleneck=deduction.bottleneck_id if deduction.is_usable else None,
+        confidence=deduction.confidence,
+        why=deduction.why,
+    )
+
+
 @router.post("/framework/bottlenecks/{b_bottleneck}/crossings")
 def revise_crossings(
     b_bottleneck: str,
@@ -750,6 +818,144 @@ def _proposal_out(db: Session, row: Proposal) -> ProposalOut:
         decided_at=decision.decided_at if decision else None,
         decision_reason=decision.reason_text if decision else None,
     )
+
+
+# --- what is waiting on the user ------------------------------------------------------------
+#
+# ⚠ Found using the page: "1 company needs your agreement" lived in the third tab and "1 channel
+# waiting for you" inside a collapsed panel at the bottom of it, and the tab bar said nothing
+# about either. The only way to learn what needed you was to open everything. This is one
+# answer to "what is waiting, and where", for the tab counts and the list at the top.
+
+#: Most pressing first. A condition that disproved a thesis, or a share count the ledger has
+#: not caught up with, makes figures on the page wrong or a held position unexamined; a lead is
+#: an idea nobody has looked at yet.
+_SEVERITY = {"urgent": 0, "decide": 1, "lead": 2}
+
+_ACTION_WORDS = {
+    "INITIATE": "start a position",
+    "ADD": "add to it",
+    "HOLD": "hold",
+    "TRIM": "trim",
+    "EXIT": "sell out",
+    "ACCUMULATE_POOL": "set money aside for it",
+}
+
+
+@router.get("/attention")
+def get_attention(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AttentionListOut:
+    """Everything on the Investments page waiting for a decision from you, most pressing first."""
+    book = overview.real_book(db, user.id)
+    items: list[WaitingOut] = []
+
+    for trigger, symbol in db.execute(
+        sa.select(InvalidationTrigger, Instrument.symbol)
+        .join(Instrument, InvalidationTrigger.instrument_id == Instrument.id)
+        .where(InvalidationTrigger.status == "FIRED")
+        .order_by(InvalidationTrigger.fired_at.desc())
+    ).all():
+        items.append(
+            WaitingOut(
+                tab="decisions",
+                kind="FIRED",
+                severity="urgent",
+                symbol=symbol,
+                text=f"Something that would prove the {symbol} idea wrong has happened",
+                ref=trigger.id,
+            )
+        )
+
+    for action in corpactions.listing(db):
+        if action.status not in corpactions.OPEN:
+            continue
+        seen = corpactions.view(db, book.id, action)
+        what = seen.ratio_text or seen.action_type.lower()
+        items.append(
+            WaitingOut(
+                tab="holdings",
+                kind="CORPORATE_ACTION",
+                severity="urgent",
+                symbol=seen.symbol,
+                text=(
+                    f"{seen.symbol} announced a {what} — record it by hand"
+                    if action.status == "NEEDS_REVIEW"
+                    else f"{seen.symbol} announced a {what} — apply it to your holding"
+                ),
+                ref=action.id,
+            )
+        )
+
+    mirror = proposals.mirror(db, user.id)
+    for proposal in proposals.open_proposals(db, mirror.id):
+        inst = db.get(Instrument, proposal.instrument_id)
+        symbol = inst.symbol if inst else "?"
+        doing = _ACTION_WORDS.get(proposal.action, proposal.action.lower())
+        items.append(
+            WaitingOut(
+                tab="decisions",
+                kind="SUGGESTION",
+                severity="decide",
+                symbol=symbol,
+                text=f"A suggestion to {doing} in {symbol} is waiting for your yes or no",
+                ref=proposal.id,
+            )
+        )
+
+    for waiting in frameworks.needs_attention(db, frameworks.current(db).spec):
+        text = {
+            "UNMAPPED": f"{waiting.symbol} has no place in the framework yet",
+            "UNAPPROVED": f"Agree where the framework puts {waiting.symbol}",
+            "EXPIRED": f"Re-confirm where {waiting.symbol} sits — agreed over a year ago",
+        }.get(waiting.kind)
+        if text is None:
+            # Breadth floors and fallback multiples are caveats on a score, shown on the
+            # company itself; they are not a decision anyone is waiting on.
+            continue
+        items.append(
+            WaitingOut(
+                tab="companies",
+                kind=waiting.kind,
+                severity="decide",
+                symbol=waiting.symbol,
+                text=text,
+                ref=waiting.instrument_id,
+            )
+        )
+
+    for source in reading.registered(db):
+        if source.approved_at is None:
+            items.append(
+                WaitingOut(
+                    tab="sources",
+                    kind="SOURCE",
+                    severity="decide",
+                    text=f"{source.name} is waiting for you to start reading it",
+                    ref=source.id,
+                )
+            )
+
+    for line in reading.queue(db, statuses=("QUEUED", "ANALYSING")):
+        items.append(
+            WaitingOut(
+                tab="decisions",
+                kind="LEAD",
+                severity="lead",
+                symbol=line.symbol,
+                text=f"{line.symbol} was named by {line.named_by or 'a source'} — worth a look",
+                ref=line.id,
+            )
+        )
+
+    # The mirror book may have just been created for a first-time reader.
+    db.commit()
+    items.sort(key=lambda item: _SEVERITY[item.severity])
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item.tab] = counts.get(item.tab, 0) + 1
+    return AttentionListOut(items=items, counts=counts)
 
 
 @router.get("/proposals")

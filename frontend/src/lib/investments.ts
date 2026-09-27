@@ -5,6 +5,7 @@
  * functions choose words, icons and hues for it.
  */
 
+import type { Tone } from "@/components/investments/kit";
 import type { AssetClass, Holding } from "@/lib/api";
 
 export const ASSET_LABELS: Record<AssetClass, string> = {
@@ -97,4 +98,76 @@ export function num(value: string | null): number {
   if (value == null) return Number.NEGATIVE_INFINITY;
   const n = Number(value);
   return Number.isFinite(n) ? n : Number.NEGATIVE_INFINITY;
+}
+
+/* --- the words and tones the research half uses, in one place ----------------------------- */
+
+
+/** The four boxes, and the two ways of not being in one.
+ *
+ *  ⚠ Q2 and Q4 block a purchase outright, so they read as what they MEAN and wear the "bad"
+ *  tone. BORDERLINE is a refusal to convict on a partial reading — neutral, never red: it is
+ *  not a verdict against the company. */
+export const QUADRANT: Record<string, { label: string; tone: Tone }> = {
+  Q1: { label: "Quality, and the story running", tone: "good" },
+  Q3: { label: "Quality, quietly", tone: "info" },
+  Q2: { label: "A story without a business", tone: "bad" },
+  Q4: { label: "Cheap for a reason", tone: "bad" },
+  BORDERLINE: { label: "Too little read to judge", tone: "neutral" },
+  UNKNOWN: { label: "Nothing read yet", tone: "neutral" },
+};
+
+/** The ten red flags by what they ask, in a few words. The full question travels with each
+ *  flag from the server and is shown beside this — these are for scanning, not for judging. */
+export const FLAG_NAMES: Record<number, string> = {
+  1: "Hard to understand, or easily made obsolete",
+  2: "Weak or falling returns",
+  3: "Must spend heavily just to stand still",
+  4: "Value-destroying deals or buybacks",
+  5: "Management spin",
+  6: "Price ran ahead of profit",
+  7: "Needs a high share price or cheap money",
+  8: "Margins shrinking as it grows",
+  9: "A hype-driven story",
+  10: "Sharp swings in the market's mood",
+};
+
+/** What a suggestion proposes doing, in words. */
+export const ACTION_WORDS: Record<string, string> = {
+  INITIATE: "Start a position",
+  ADD: "Add to it",
+  HOLD: "Hold",
+  TRIM: "Trim",
+  EXIT: "Sell out",
+  ACCUMULATE_POOL: "Set money aside",
+};
+
+/** Which rule refused a suggestion, as the reason a person would give. */
+export const GATE_WORDS: Record<string, string> = {
+  G1_framework: "its place in the framework",
+  G2_quadrant: "business and price together",
+  G3_margin_of_safety: "the price",
+  G4_invalidation: "nothing would prove it wrong",
+  G6_cooling_off: "refused too recently",
+  G7_corporate_action: "an unrecorded split or bonus",
+  G8_price_age: "the price is too old",
+  G9_volume: "enough suggestions for now",
+  G11_confidence: "not confident enough",
+};
+
+/** How much weight a source's word can carry, as a word and a tone. */
+export const TIER: Record<number, { label: string; tone: Tone }> = {
+  1: { label: "filing", tone: "good" },
+  2: { label: "press", tone: "neutral" },
+  3: { label: "commentary", tone: "caution" },
+};
+
+/** "3 days ago", "5 weeks ago" — the question a waiting list is asked is "how long", and a
+ *  date makes the reader do the arithmetic. */
+export function ageText(days: number): string {
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  return `${Math.round(days / 30)} months ago`;
 }

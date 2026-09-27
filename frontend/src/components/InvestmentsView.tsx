@@ -1,23 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Wallet } from "lucide-react";
+import { Building2, Gauge, ListChecks, Radio, ScrollText, Wallet } from "lucide-react";
 
-import CorporateActions from "@/components/CorporateActions";
+import BenchmarksPanel from "@/components/BenchmarksPanel";
+import BooksPanel from "@/components/BooksPanel";
 import ForeignHoldings from "@/components/ForeignHoldings";
 import FrameworkPanel from "@/components/FrameworkPanel";
+import InboxDrop from "@/components/InboxDrop";
+import HoldingsTab from "@/components/investments/HoldingsTab";
+import { severityTone } from "@/components/investments/attention";
+import { RANGES, type RangeKey, type SortKey } from "@/components/investments/holdings";
+import { Count } from "@/components/investments/kit";
+import MeasuresPanel from "@/components/investments/MeasuresPanel";
+import NeedsYou from "@/components/investments/NeedsYou";
 import PositionSheet from "@/components/PositionSheet";
-import BenchmarksPanel from "@/components/BenchmarksPanel";
-import VerdictPanel from "@/components/VerdictPanel";
-import BooksPanel from "@/components/BooksPanel";
 import ProposalsPanel from "@/components/ProposalsPanel";
 import ReadingPanel from "@/components/ReadingPanel";
-import InboxDrop from "@/components/InboxDrop";
 import ResearchPanel from "@/components/ResearchPanel";
-import ThemesStrip from "@/components/ThemesStrip";
 import ReviewsPanel from "@/components/ReviewsPanel";
+import ThemesStrip from "@/components/ThemesStrip";
 import TransactionEntry from "@/components/TransactionEntry";
-import { InfoTip } from "@/components/InfoTip";
-import { Button } from "@/components/ui/button";
-import { Legend, Lines, StackedBar, type Series } from "@/components/ui/chart";
+import VerdictPanel from "@/components/VerdictPanel";
 import {
   Tabs,
   TabsContent,
@@ -25,152 +27,47 @@ import {
   TabsTrigger,
   useRememberedTab,
 } from "@/components/ui/tabs";
-import {
-  EmptyState,
-  ErrorState,
-  ListSkeleton,
-  Skeleton,
-} from "@/components/ui/states";
+import { ErrorState, ListSkeleton, Skeleton } from "@/components/ui/states";
 import * as api from "@/lib/api";
 import type {
+  Attention,
   Curve,
-  Holding,
   HoldingDetail,
   InvestmentSummary,
   InvestmentTransaction,
+  Waiting,
 } from "@/lib/api";
-import {
-  formatDateFull,
-  formatPrice,
-  formatQuantity,
-  formatRupees,
-  formatSignedPct,
-} from "@/lib/format";
-import {
-  ASSET_COLORS,
-  ASSET_LABELS,
-  ASSET_ORDER,
-  directionClass,
-  directionGlyph,
-  groupByAssetClass,
-  longTermText,
-  num,
-  sourceLabel,
-} from "@/lib/investments";
 
-/* The portfolio, as something you look at.
+/* The portfolio, and the research half beside it.
  *
- * Three rules run through every part of this screen, and they are all about honesty rather
- * than layout:
+ * ⚠ Six tabs, each named for what is in it. They answer questions asked at different
+ * frequencies — what is it worth (daily), what needs deciding (when something arrives), how
+ * does each company score (when one is being assessed), what is being read (when a source is
+ * added), is any of it working (monthly), what is on record (at tax time) — and stacked in one
+ * column they were ordered by nothing but the order they were written in.
  *
- *   - **A figure that cannot be computed is named, never zeroed.** An unpriced holding
- *     shows no value and says why; a total that excludes holdings lists them right beside
- *     it, at the same size — a caveat below the fold is a caveat nobody reads.
- *   - **Crypto sits apart.** Under s.115BBH its losses offset nothing, so netting it into
- *     one portfolio figure would show a position the tax code does not permit.
- *   - **Nothing is interpolated.** The value line exists only on days where every holding
- *     had an observed price, and the chart states the range it covers.
+ * ⚠ The page says what is waiting on you before you go looking. Before this, a company waiting
+ * for agreement lived in the third tab and a channel waiting for approval inside a collapsed
+ * panel at the bottom of it, and nothing on the tab bar said either existed. `/attention`
+ * answers "what, and where" in one request; the tab counts and the "Needs you" list both read
+ * it, and every action that could change it asks for it again.
  */
 
-const RANGES = [
-  { key: "3m", label: "3M", days: 90 },
-  { key: "6m", label: "6M", days: 182 },
-  { key: "1y", label: "1Y", days: 365 },
-  { key: "3y", label: "3Y", days: 1095 },
-  { key: "all", label: "All", days: null },
+const TABS = [
+  { key: "holdings", label: "Holdings", icon: Wallet },
+  { key: "decisions", label: "Decisions", icon: ListChecks },
+  { key: "companies", label: "Companies", icon: Building2 },
+  { key: "sources", label: "Sources", icon: Radio },
+  { key: "scorecard", label: "Scorecard", icon: Gauge },
+  { key: "records", label: "Records", icon: ScrollText },
 ] as const;
 
-const CURVE_SERIES: Series[] = [
-  { key: "invested", label: "Invested", color: "var(--series-2)" },
-  { key: "value", label: "Value", color: "var(--series-1)" },
-];
+type TabKey = (typeof TABS)[number]["key"];
 
-type SortKey = "symbol" | "cost" | "value" | "gain";
-
-/** What the chart says about its own coverage.
- *
- *  ⚠ Reports the COUNT of valued days, not just the first and last. Coverage can have a
- *  hole in the middle — buy something and leave it unpriced for a week — and naming only
- *  the endpoints would claim a continuity the data does not have. */
-function curveNote(curve: Curve | null): string {
-  if (!curve || curve.covered_days === 0) {
-    return "Only the invested line so far. Value history starts once prices are recorded, which arrives with the market feed — nothing here is guessed in the meantime.";
-  }
-  if (curve.covered_days === curve.total_days) {
-    return "Value is known for every day shown, from recorded prices.";
-  }
-  return `Value is known for ${curve.covered_days} of these ${curve.total_days} days, between ${curve.covered_from} and ${curve.covered_to}. The gaps are days when a holding had no recorded price, and nothing is drawn across them.`;
-}
-
-function Stat({
-  label,
-  value,
-  hint,
-  className,
-}: {
-  label: string;
-  value: string;
-  hint?: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p
-        className={`mt-1 text-xl font-semibold ${className ?? ""}`}
-        style={{ fontVariantNumeric: "tabular-nums" }}
-      >
-        {value}
-      </p>
-      {hint && <div className="mt-1 text-xs text-muted-foreground">{hint}</div>}
-    </div>
-  );
-}
-
-/** A sortable column header.
- *
- *  ⚠ Declared at module scope, not inside the view. A component defined inside another
- *  component is a new type on every render, so React remounts it — and this one contains
- *  the button you just pressed, which would lose focus on every sort. That breaks sorting
- *  by keyboard completely, and silently.
- *
- *  ⚠ `align` maps to whole class names rather than being interpolated. Tailwind extracts
- *  classes by scanning source text, so `text-${align}` produces no CSS at all.
- */
-function SortHeader({
-  label,
-  sortKey,
-  sort,
-  onSort,
-  align = "right",
-}: {
-  label: string;
-  sortKey: SortKey;
-  sort: { key: SortKey; desc: boolean };
-  onSort: (next: { key: SortKey; desc: boolean }) => void;
-  align?: "left" | "right";
-}) {
-  const active = sort.key === sortKey;
-  return (
-    <th
-      scope="col"
-      className={`px-3 py-2 font-medium ${align === "left" ? "text-left" : "text-right"}`}
-      aria-sort={active ? (sort.desc ? "descending" : "ascending") : "none"}
-    >
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 hover:text-foreground"
-        onClick={() =>
-          onSort({ key: sortKey, desc: active ? !sort.desc : true })
-        }
-      >
-        {label}
-        <span aria-hidden className={active ? "" : "opacity-0"}>
-          {sort.desc ? "▾" : "▴"}
-        </span>
-      </button>
-    </th>
-  );
+/** A remembered tab from before the tabs were renamed still opens something sensible. */
+function known(raw: string): TabKey {
+  if (raw === "framework") return "companies";
+  return (TABS.find((t) => t.key === raw)?.key ?? "holdings") as TabKey;
 }
 
 export default function InvestmentsView() {
@@ -178,21 +75,22 @@ export default function InvestmentsView() {
   const [curve, setCurve] = useState<Curve | null>(null);
   const [transactions, setTransactions] = useState<InvestmentTransaction[]>([]);
   const [loading, setLoading] = useState(true);
-  // Bumped when the inbox files something, so the research queue below refreshes without a
-  // page reload — dropping a link and not seeing it land reads as a failure.
+  const [failed, setFailed] = useState(false);
+  const [attention, setAttention] = useState<Attention | null>(null);
+  // Bumped when the inbox files something, so the research queue refreshes without a reload —
+  // dropping a link and not seeing it land reads as a failure.
   const [researchNonce, setResearchNonce] = useState(0);
   /* ⚠ Remembered across reloads. Someone who came for the research queue should not be
    * returned to "Holdings" every time the page refreshes. */
-  const [tab, setTab] = useRememberedTab("aceroai.investments.tab", "holdings");
-  const [failed, setFailed] = useState(false);
-  const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("all");
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
-    key: "value",
-    desc: true,
-  });
+  const [rawTab, setRawTab] = useRememberedTab("aceroai.investments.tab", "holdings");
+  const tab = known(rawTab);
+  const [range, setRange] = useState<RangeKey>("all");
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "value", desc: true });
   const [openSymbol, setOpenSymbol] = useState<string | null>(null);
   const [detail, setDetail] = useState<HoldingDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  /** Where the "needs you" list last sent the reader: a DOM id to bring into view. */
+  const [arrival, setArrival] = useState<{ id: string; n: number } | null>(null);
 
   const since = useMemo(() => {
     const days = RANGES.find((r) => r.key === range)?.days;
@@ -207,8 +105,7 @@ export default function InvestmentsView() {
    *
    * Changing the time range is a question about the chart alone — it must not refetch the
    * holdings and re-run the fold. Recording a transaction changes both, so that path calls
-   * `load()`. Collapsing them into one function is the version that looks simpler and makes
-   * every range click reload the whole portfolio. */
+   * `load()`. */
   const loadBook = useCallback(async () => {
     try {
       const [s, t] = await Promise.all([
@@ -229,26 +126,34 @@ export default function InvestmentsView() {
     try {
       setCurve(await api.getInvestmentHistory(since));
     } catch {
-      // The chart failing is not the portfolio failing. Leave the last curve up rather
-      // than blanking a page whose holdings loaded perfectly well.
+      // The chart failing is not the portfolio failing.
       setCurve(null);
     }
   }, [since]);
+
+  /* ⚠ A failure here leaves the last answer up rather than clearing it. The counts are a
+     convenience on top of panels that each load their own data; a blip must not make it look
+     as though nothing is waiting. */
+  const refreshAttention = useCallback(() => {
+    api
+      .getAttention()
+      .then(setAttention)
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     await Promise.all([loadBook(), loadCurve()]);
     setLoading(false);
-  }, [loadBook, loadCurve]);
+    refreshAttention();
+  }, [loadBook, loadCurve, refreshAttention]);
 
-  // Bumped when a background refresh records new prices, so both halves reload once.
   const [pricesVersion, setPricesVersion] = useState(0);
 
-  // Two effects, so the range control genuinely only touches the chart. `loadBook` has no
-  // dependencies and so runs once; `loadCurve` changes with the range and so runs again.
   useEffect(() => {
     void loadBook().finally(() => setLoading(false));
-  }, [loadBook]);
+    refreshAttention();
+  }, [loadBook, refreshAttention]);
 
   useEffect(() => {
     void loadCurve();
@@ -256,8 +161,7 @@ export default function InvestmentsView() {
 
   // ⚠ Live prices are fetched AFTER the page has drawn, never before. The page shows what is
   // recorded at once — with each price's age — and freshens a moment later if anything was
-  // stale. Waiting on the refresh first would make every open as slow as the slowest price
-  // source, and an unreachable one would hold the page hostage for its timeout.
+  // stale. Waiting on the refresh first would make every open as slow as the slowest source.
   useEffect(() => {
     let cancelled = false;
     api
@@ -265,7 +169,6 @@ export default function InvestmentsView() {
       .then((r) => {
         if (!cancelled && r.written > 0) setPricesVersion((v) => v + 1);
       })
-      // A failed refresh changes nothing: the recorded prices are already on screen, aged.
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -287,16 +190,49 @@ export default function InvestmentsView() {
       .finally(() => setDetailLoading(false));
   }, [openSymbol]);
 
+  /* Bring the row the reader was sent to into view.
+   *
+   * ⚠ Polled, briefly, rather than scrolled once. Each tab's panels fetch their own data when
+   * the tab opens, so the row does not exist at the moment the tab changes — a single scroll
+   * would find nothing on exactly the first visit, which is the one that matters. */
+  useEffect(() => {
+    if (!arrival) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const el = document.getElementById(arrival.id);
+      tries += 1;
+      if (el || tries > 25) window.clearInterval(timer);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.remove("arrived");
+      void el.offsetWidth; // restart the animation if it is the same row twice
+      el.classList.add("arrived");
+      window.setTimeout(() => el.classList.remove("arrived"), 2600);
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [arrival]);
+
+  const goTo = useCallback(
+    (next: TabKey, domId: string | null) => {
+      setRawTab(next);
+      if (domId) setArrival((was) => ({ id: domId, n: (was?.n ?? 0) + 1 }));
+    },
+    [setRawTab],
+  );
+
+  const onWaiting = useCallback(
+    (next: Waiting["tab"], ref: string | null) => goTo(next, ref ? `item-${ref}` : `tab-${next}`),
+    [goTo],
+  );
+
   if (loading && !summary) {
     return (
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-y-auto">
           <div className="mx-auto max-w-5xl space-y-4 p-4">
-            <div className="grid gap-3 sm:grid-cols-4">
-              {[0, 1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-24" />
-              ))}
-            </div>
+            <Skeleton className="h-11" />
+            <Skeleton className="h-11" />
+            <Skeleton className="h-48" />
             <ListSkeleton rows={5} />
           </div>
         </div>
@@ -320,657 +256,113 @@ export default function InvestmentsView() {
     );
   }
 
-  const { totals, holdings } = summary;
-  const priced = holdings.filter((h) => h.market_value_inr != null);
-  const unpriced = holdings.filter((h) => h.market_value_inr == null);
-
-  /* ⚠ Values come from `by_asset_class`, computed on the server. Summing holdings here to
-     get a subtotal would be float arithmetic on money — the exact thing the string-typed
-     API exists to prevent. `num()` below converts only for segment WIDTH. */
-  const byClass = new Map(
-    summary.by_asset_class.map((a) => [a.asset_class, a]),
-  );
-  const allocation = ASSET_ORDER.flatMap((cls) => {
-    const total = byClass.get(cls);
-    if (!total?.market_value_inr) return [];
-    return [
-      {
-        key: cls,
-        label: ASSET_LABELS[cls],
-        value: num(total.market_value_inr),
-        display: formatRupees(total.market_value_inr),
-        color: ASSET_COLORS[cls],
-      },
-    ];
-  }).filter((s) => s.value > 0);
-  const allocationTotal = allocation.reduce((sum, a) => sum + a.value, 0);
-  // Crypto's own cost and value, for the line that says why it is reported apart. Read from
-  // the server's subtotals — never summed here, which would be money arithmetic in a float.
-  const crypto = byClass.get("CRYPTO");
-
-  const curvePoints =
-    curve?.points.map((p) => ({
-      day: p.day,
-      values: {
-        invested: num(p.invested_inr),
-        value: p.value_inr == null ? null : num(p.value_inr),
-      },
-    })) ?? [];
-
-  function sortRows(rows: Holding[]): Holding[] {
-    const key = sort.key;
-    const value = (h: Holding) =>
-      key === "symbol"
-        ? h.symbol
-        : key === "cost"
-          ? num(h.cost_basis_inr)
-          : key === "value"
-            ? num(h.market_value_inr)
-            : num(h.unrealised_inr);
-    return [...rows].sort((a, b) => {
-      const av = value(a);
-      const bv = value(b);
-      const cmp =
-        typeof av === "string"
-          ? av.localeCompare(bv as string)
-          : av - (bv as number);
-      return sort.desc ? -cmp : cmp;
-    });
-  }
+  const waitingIn = (key: TabKey) =>
+    attention?.items.filter((i) => i.tab === (key as Waiting["tab"])) ?? [];
 
   return (
-    /* ⚠ A two-layer wrapper, not one — and the layer split is the actual fix.
-     *
-     * The first attempt here was a single `flex-1 overflow-y-auto` div, which matches
-     * Tasks/Journal/Settings and LOOKS complete: the sidebar lives outside this component,
-     * so a view with no scroll region of its own grows the whole shell instead of scrolling
-     * internally, dragging the sidebar up with it. That diagnosis was right; the fix was
-     * incomplete. `overflow-y-auto` alone only clips content ONCE the box already has a
-     * fixed height — it does not by itself stop a flex item's content from demanding more
-     * height than its share of the row in the first place, and a box with several grid
-     * sections, an SVG chart and a table is exactly the content shape that can. The result
-     * was two scrollbars at once: the browser's own (because the shell genuinely grew) and
-     * this div's (because it was ALSO, separately, an auto-overflow box).
-     *
-     * `MessageList.tsx` — the one part of this app whose content is the most unpredictable
-     * (streamed, variable height, arrives while the user is reading) — already solved this
-     * with `overflow-hidden` on the sizing layer and `h-full overflow-y-auto` on the
-     * scrolling layer underneath it. `overflow-hidden` is a hard clip: the outer div is
-     * forced to the height flexbox actually gave it, full stop, whatever its content wants.
-     * The inner `h-full` then just fills that guaranteed space and scrolls within it. Copied
-     * here rather than reinvented, because it is the pattern this codebase has already
-     * proven against the least forgiving content on the page. */
+    /* ⚠ A two-layer wrapper, not one — and the split is the fix. A single `flex-1
+     * overflow-y-auto` div lets content demand more height than its share of the row, and the
+     * shell grows: two scrollbars at once. `overflow-hidden` on the sizing layer is a hard clip
+     * to the height flexbox gave it; the inner `h-full` fills that and scrolls within it —
+     * the pattern MessageList proved against the least forgiving content in the app. */
     <div className="flex-1 overflow-hidden">
       <div className="h-full overflow-y-auto">
-        <div className="mx-auto max-w-5xl space-y-8 p-4 pb-16">
-          {/* ⚠ At the very top, one line, always visible. Friction here kills the whole
-          input channel — an inbox that takes three taps to reach is one nobody uses, and the
-          ideas that would have gone into it go nowhere instead. */}
-          <InboxDrop onFiled={() => setResearchNonce((n) => n + 1)} />
+        <div className="mx-auto max-w-5xl space-y-4 p-4 pb-16">
+          {/* ⚠ At the very top, one line, always visible. Friction here kills the whole input
+              channel — an inbox that takes three taps to reach is one nobody uses. */}
+          <InboxDrop
+            onFiled={() => {
+              setResearchNonce((n) => n + 1);
+              refreshAttention();
+            }}
+            onSee={() => goTo("decisions", "worth-a-look")}
+          />
 
-          {/* ⚠ Five tabs, not thirteen stacked panels.
-          Each answers a question asked at a different frequency: what is it worth (daily),
-          what should I do (when something arrives), what does the framework say (when a
-          company is being assessed), is any of this working (monthly), what is on record
-          (at tax time). Stacked in one column they were ordered by nothing but the order
-          they were written in, and the only thing they shared was the scrollbar. */}
-          <Tabs value={tab} onValueChange={setTab} className="space-y-6">
-            <TabsList>
-              <TabsTrigger value="holdings">Holdings</TabsTrigger>
-              <TabsTrigger value="decisions">Decisions</TabsTrigger>
-              <TabsTrigger value="framework">Framework</TabsTrigger>
-              <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
-              <TabsTrigger value="records">Records</TabsTrigger>
+          <NeedsYou attention={attention} onGo={onWaiting} />
+
+          <Tabs value={tab} onValueChange={(v) => setRawTab(v)} className="space-y-4">
+            {/* ⚠ Two rows of three on a phone rather than a sideways scroll. Scrolled, three of
+                the six tabs sat off-screen with nothing to say they existed — Sources and
+                Records among them, each of which can carry a count. */}
+            <TabsList
+              aria-label="Investments sections"
+              className="grid grid-cols-3 sm:flex"
+            >
+              {TABS.map(({ key, label, icon: Icon }) => {
+                const waiting = waitingIn(key);
+                return (
+                  <TabsTrigger
+                    key={key}
+                    value={key}
+                    className="justify-center px-2 max-sm:[&>svg]:hidden sm:justify-start sm:px-3"
+                  >
+                    <Icon aria-hidden="true" />
+                    {label}
+                    {waiting.length > 0 && (
+                      <Count
+                        n={waiting.length}
+                        tone={severityTone(waiting)}
+                        label={waiting.length === 1 ? "thing waiting" : "things waiting"}
+                      />
+                    )}
+                  </TabsTrigger>
+                );
+              })}
             </TabsList>
 
-            {/* --- what it is worth ------------------------------------------------- */}
-            <TabsContent value="holdings" className="space-y-8">
-
-            {/* --- what it is worth ------------------------------------------------------- */}
-            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {/* ⚠ `cost_basis_inr`, not `invested_inr`. The latter counts only priced,
-              non-ring-fenced holdings so it stays comparable with market value — which
-              makes it ZERO on a book with no prices. Running the page for the first time
-              is what caught it. */}
-              <Stat
-                label="Invested"
-                value={formatRupees(totals.cost_basis_inr)}
+            <TabsContent value="holdings" id="tab-holdings">
+              <HoldingsTab
+                summary={summary}
+                curve={curve}
+                range={range}
+                onRange={setRange}
+                sort={sort}
+                onSort={setSort}
+                onOpen={setOpenSymbol}
+                onChanged={() => void load()}
               />
-              {/* ⚠ `*_all_*`: the whole book, crypto included. The other fields exclude
-              ring-fenced holdings so they stay comparable with each other — and pairing one of
-              those with "Invested", which counts everything, reported a GAIN on a book that was
-              down. */}
-              <Stat
-                label="Current value"
-                value={
-                  totals.is_complete
-                    ? formatRupees(totals.market_value_all_inr)
-                    : "—"
-                }
-                hint={
-                  totals.is_complete
-                    ? undefined
-                    : `waiting on ${totals.unpriced.length} price${totals.unpriced.length === 1 ? "" : "s"}`
-                }
-              />
-              <Stat
-                label="Unrealised"
-                value={
-                  totals.is_complete
-                    ? `${directionGlyph(totals.unrealised_all_inr)} ${formatRupees(totals.unrealised_all_inr)}`
-                    : "—"
-                }
-                className={
-                  totals.is_complete
-                    ? directionClass(totals.unrealised_all_inr)
-                    : undefined
-                }
-                hint={
-                  totals.is_complete
-                    ? formatSignedPct(totals.unrealised_all_pct)
-                    : undefined
-                }
-              />
-              <Stat
-                label="Realised"
-                value={formatRupees(totals.realised_inr)}
-                className={directionClass(totals.realised_inr)}
-              />
-            </section>
-
-            {/* ⚠ Above the chart and the holdings on purpose. An announced split the ledger
-            does not know about makes every figure below this point wrong for that holding —
-            by half, in the worst case — so the explanation has to be read first. */}
-            <CorporateActions
-              actions={summary.corporate_actions}
-              onChange={() => void load()}
-            />
-
-            {unpriced.length > 0 && (
-              <div className="rounded-xl border border-border bg-card p-4">
-                <p className="text-sm font-medium">
-                  {unpriced.length} of {holdings.length} holdings have no price
-                  yet
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  They are excluded from the totals above rather than counted as
-                  zero, so those figures cover only part of the book. Prices
-                  arrive with the market feed.
-                </p>
-                <ul className="mt-2 flex flex-wrap gap-1.5">
-                  {unpriced.map((h) => (
-                    <li
-                      key={h.symbol}
-                      className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                    >
-                      {h.symbol}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {num(totals.ring_fenced_inr) !== 0 && (
-              <div className="rounded-xl border border-border bg-card p-4">
-                <p className="text-sm">
-                  <span className="font-medium">Crypto, separately:</span>{" "}
-                  {crypto && (
-                    <>
-                      {formatRupees(crypto.invested_inr)} invested, now{" "}
-                      {crypto.market_value_inr
-                        ? formatRupees(crypto.market_value_inr)
-                        : "unpriced"}{" "}
-                      ·{" "}
-                    </>
-                  )}
-                  <span className={directionClass(totals.ring_fenced_inr)}>
-                    {formatRupees(totals.ring_fenced_inr)}
-                  </span>{" "}
-                  unrealised.
-                </p>
-                <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  Counted in the totals above; kept out of tax netting.
-                  <InfoTip label="Why crypto is separate">
-                    Under s.115BBH a crypto loss cannot be set against any other
-                    gain — not even a different crypto gain, not in a later year —
-                    so a single netted number would show a position the tax code
-                    does not allow.
-                  </InfoTip>
-                </p>
-              </div>
-            )}
-
-            {/* --- return ---------------------------------------------------------------- */}
-            <section className="grid gap-3 sm:grid-cols-2">
-              {summary.returns.map((r) => (
-                <div
-                  key={r.kind}
-                  className="rounded-xl border border-border bg-card p-4"
-                >
-                  {/* ⚠ What the number IS stays on the card: one of these is per year and the
-                      other a total over a window, and two bare percentages invite being read as
-                      the same kind of number. Only the elaboration hides behind the "i". */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium">
-                        {r.kind === "money_weighted"
-                          ? "How your money has done"
-                          : "How your picks have done"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {r.kind === "money_weighted"
-                          ? "per year"
-                          : r.covers_from
-                            ? `12 months to ${formatDateFull(r.covers_to ?? r.covers_from)}`
-                            : "over the period"}{" "}
-                        · {r.label}
-                      </p>
-                    </div>
-                    {r.explanation && (
-                      <InfoTip label={`What ${r.label} means`}>{r.explanation}</InfoTip>
-                    )}
-                  </div>
-                  {r.value != null ? (
-                    <>
-                      <p
-                        className={`mt-2 text-xl font-semibold ${directionClass(r.value)}`}
-                        style={{ fontVariantNumeric: "tabular-nums" }}
-                      >
-                        {formatSignedPct(r.value)}
-                      </p>
-                      {r.headline && (
-                        <p className="mt-1 text-xs text-muted-foreground">{r.headline}</p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Not available — {r.unavailable_because}.
-                    </p>
-                  )}
-                </div>
-              ))}
-            </section>
-
-            {/* --- allocation ------------------------------------------------------------ */}
-            {allocation.length > 0 && (
-              <section className="space-y-3">
-                <h2 className="text-sm font-semibold">Where the money is</h2>
-                <StackedBar
-                  segments={allocation}
-                  format={(n) => formatRupees(String(n))}
-                />
-                <Legend
-                  series={allocation.map((s) => ({
-                    key: s.key,
-                    label: s.label,
-                    color: s.color,
-                  }))}
-                />
-                {allocation.some((a) => a.key === "CRYPTO") && (
-                  <p className="text-xs text-muted-foreground">
-                    ⚠ This includes crypto, which the totals above keep separate.
-                    Both are right: you are exposed to it, so it belongs in a
-                    picture of where the money is — but its gains and losses
-                    cannot be netted against anything else, so it stays out of a
-                    single portfolio figure. Adding these segments up will not
-                    give you the number at the top of the page.
-                  </p>
-                )}
-                <ul className="space-y-1.5">
-                  {[...priced]
-                    .sort(
-                      (a, b) => num(b.market_value_inr) - num(a.market_value_inr),
-                    )
-                    .map((h) => (
-                      <li
-                        key={h.symbol}
-                        className="flex items-center gap-3 text-sm"
-                      >
-                        <span className="w-24 shrink-0 font-medium">
-                          {h.symbol}
-                        </span>
-                        <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                          <span
-                            className="block h-full rounded-full"
-                            style={{
-                              width: `${(num(h.market_value_inr) / allocationTotal) * 100}%`,
-                              background: ASSET_COLORS[h.asset_class],
-                            }}
-                          />
-                        </span>
-                        <span className="w-24 shrink-0 text-right tabular-nums text-muted-foreground">
-                          {formatRupees(h.market_value_inr)}
-                        </span>
-                      </li>
-                    ))}
-                </ul>
-                {unpriced.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Not shown, because they cannot be valued:{" "}
-                    {unpriced.map((h) => h.symbol).join(", ")} — together{" "}
-                    {formatRupees(summary.unpriced_cost_inr)} at cost.
-                  </p>
-                )}
-              </section>
-            )}
-
-            {/* --- over time ------------------------------------------------------------- */}
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold">Over time</h2>
-                <div className="flex gap-1" role="group" aria-label="Time range">
-                  {RANGES.map((r) => (
-                    <Button
-                      key={r.key}
-                      size="sm"
-                      variant={range === r.key ? "secondary" : "ghost"}
-                      onClick={() => setRange(r.key)}
-                      aria-pressed={range === r.key}
-                    >
-                      {r.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-xl border border-border bg-card p-4">
-                {curvePoints.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-muted-foreground">
-                    Nothing to plot yet — the lines start at your first
-                    transaction.
-                  </p>
-                ) : (
-                  <>
-                    <Lines
-                      data={curvePoints}
-                      series={CURVE_SERIES}
-                      format={(n) => formatRupees(String(n))}
-                      note={curveNote(curve)}
-                    />
-                    <Legend series={CURVE_SERIES} className="mt-3" />
-                  </>
-                )}
-              </div>
-            </section>
-
-            {/* --- holdings -------------------------------------------------------------- */}
-            <section className="space-y-3">
-              <h2 className="text-sm font-semibold">Holdings</h2>
-              {holdings.length === 0 ? (
-                <EmptyState
-                  icon={Wallet}
-                  title="Nothing in this book yet"
-                  hint="Record a transaction below, or tell Acero in chat — both write to the same ledger."
-                />
-              ) : (
-                <>
-                  {/* Table on a real screen. */}
-                  <div className="hidden overflow-hidden rounded-xl border border-border md:block">
-                    <table className="w-full text-sm">
-                      <caption className="sr-only">
-                        Holdings, grouped by asset class, with cost, value and
-                        unrealised gain
-                      </caption>
-                      <thead className="bg-muted/50 text-xs text-muted-foreground">
-                        <tr>
-                          <SortHeader
-                            label="Holding"
-                            sortKey="symbol"
-                            sort={sort}
-                            onSort={setSort}
-                            align="left"
-                          />
-                          <th
-                            scope="col"
-                            className="px-3 py-2 text-right font-medium"
-                          >
-                            Qty
-                          </th>
-                          <th
-                            scope="col"
-                            className="px-3 py-2 text-right font-medium"
-                          >
-                            Last price
-                          </th>
-                          <SortHeader
-                            label="Invested"
-                            sortKey="cost"
-                            sort={sort}
-                            onSort={setSort}
-                          />
-                          <SortHeader
-                            label="Value"
-                            sortKey="value"
-                            sort={sort}
-                            onSort={setSort}
-                          />
-                          <SortHeader
-                            label="Unrealised"
-                            sortKey="gain"
-                            sort={sort}
-                            onSort={setSort}
-                          />
-                        </tr>
-                      </thead>
-                      {groupByAssetClass(holdings).map(([cls, rows]) => (
-                        <tbody key={cls} className="border-t border-border">
-                          <tr>
-                            <th
-                              scope="colgroup"
-                              colSpan={6}
-                              className="bg-muted/30 px-3 py-1.5 text-left text-xs font-semibold"
-                            >
-                              {ASSET_LABELS[cls]}
-                              <span className="ml-2 font-normal text-muted-foreground">
-                                {formatRupees(byClass.get(cls)?.invested_inr)}{" "}
-                                invested
-                              </span>
-                            </th>
-                          </tr>
-                          {sortRows(rows).map((h) => (
-                            <tr
-                              key={h.symbol}
-                              className="cursor-pointer border-t border-border hover:bg-accent/40"
-                              onClick={() => setOpenSymbol(h.symbol)}
-                            >
-                              <th
-                                scope="row"
-                                className="px-3 py-2.5 text-left font-medium"
-                              >
-                                <button
-                                  type="button"
-                                  className="text-left hover:underline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setOpenSymbol(h.symbol);
-                                  }}
-                                >
-                                  {h.symbol}
-                                </button>
-                                <span className="block text-xs font-normal text-muted-foreground">
-                                  {longTermText(h) ?? "no long-term boundary"}
-                                </span>
-                                {/* An ANNOUNCED action outranks a guessed one: it says
-                                the same thing with a source behind it. */}
-                                {h.open_action ? (
-                                  <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                                    <AlertTriangle className="size-3" />
-                                    {h.open_action.ratio_text ?? "action"} pending
-                                  </span>
-                                ) : (
-                                  h.suspicious_move && (
-                                    <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                                      <AlertTriangle className="size-3" />
-                                      possible unrecorded split
-                                    </span>
-                                  )
-                                )}
-                              </th>
-                              <td className="px-3 py-2.5 text-right tabular-nums">
-                                {formatQuantity(h.quantity)}
-                              </td>
-                              <td className="px-3 py-2.5 text-right tabular-nums">
-                                {h.mark ? (
-                                  <>
-                                    {formatPrice(h.mark.price, h.currency)}
-                                    <span
-                                      className="block text-xs text-muted-foreground"
-                                      title={`Price from ${sourceLabel(h.mark.source)}`}
-                                    >
-                                      {h.mark.age_text}
-                                      {h.mark.is_stale ? " · stale" : ""}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">
-                                    no price yet
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2.5 text-right tabular-nums">
-                                {formatRupees(h.cost_basis_inr)}
-                              </td>
-                              <td className="px-3 py-2.5 text-right tabular-nums">
-                                {h.market_value_inr
-                                  ? formatRupees(h.market_value_inr)
-                                  : "—"}
-                              </td>
-                              <td
-                                className={`px-3 py-2.5 text-right tabular-nums ${directionClass(h.unrealised_inr)}`}
-                              >
-                                {h.unrealised_inr ? (
-                                  <>
-                                    {directionGlyph(h.unrealised_inr)}{" "}
-                                    {formatRupees(h.unrealised_inr)}
-                                    <span className="block text-xs">
-                                      {formatSignedPct(h.unrealised_pct)}
-                                    </span>
-                                  </>
-                                ) : (
-                                  "—"
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      ))}
-                    </table>
-                  </div>
-
-                  {/* Cards on a phone. ⚠ Not a horizontally scrolling table — that hides the
-                  columns that matter behind a gesture nobody performs, on the device this
-                  app is installed on. */}
-                  <ul className="space-y-2 md:hidden">
-                    {sortRows(holdings).map((h) => (
-                      <li key={h.symbol}>
-                        <button
-                          type="button"
-                          onClick={() => setOpenSymbol(h.symbol)}
-                          className="w-full rounded-xl border border-border bg-card p-3 text-left"
-                        >
-                          <div className="flex items-baseline justify-between gap-3">
-                            <span className="font-medium">{h.symbol}</span>
-                            <span className="tabular-nums">
-                              {h.market_value_inr
-                                ? formatRupees(h.market_value_inr)
-                                : formatRupees(h.cost_basis_inr)}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex items-baseline justify-between gap-3 text-xs">
-                            <span className="text-muted-foreground">
-                              {formatQuantity(h.quantity)} ·{" "}
-                              {ASSET_LABELS[h.asset_class]}
-                            </span>
-                            <span className={directionClass(h.unrealised_inr)}>
-                              {h.unrealised_inr
-                                ? `${directionGlyph(h.unrealised_inr)} ${formatSignedPct(h.unrealised_pct)}`
-                                : "at cost — no price yet"}
-                            </span>
-                          </div>
-                          {h.open_action ? (
-                            <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                              <AlertTriangle className="size-3" />{" "}
-                              {h.open_action.ratio_text ?? "action"} pending
-                            </p>
-                          ) : (
-                            h.suspicious_move && (
-                              <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                                <AlertTriangle className="size-3" /> possible
-                                unrecorded split
-                              </p>
-                            )
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </section>
-
             </TabsContent>
 
-            {/* --- what to do about it ---------------------------------------------- */}
-            {/* ⚠ Everything here is waiting on a person. A live proposal, a theme the book
-            is exposed to, a company in the queue — three resolutions of the same signal, and
-            the reason they share a tab is that they share an answer: yes, no, or not yet. */}
-            <TabsContent value="decisions" className="space-y-8">
-              <ProposalsPanel />
-
-              {/* ⚠ Directly above the queue. A sector getting attention and a company
-              landing in the queue are the same signal at two resolutions, and reading them
-              together is what stops a theme feeling like trivia. */}
-              <ThemesStrip />
-
-              <ResearchPanel reloadKey={researchNonce} />
+            {/* ⚠ Everything here is waiting on a person, most pressing first: a condition that
+                disproved a thesis, then live suggestions, then leads, then the themes they
+                came from. What already happened — refusals and past decisions — sits below,
+                closed, because it is for judging the rules rather than for acting today. */}
+            <TabsContent value="decisions" id="tab-decisions" className="space-y-4">
+              <ProposalsPanel onChanged={refreshAttention}>
+                <ResearchPanel reloadKey={researchNonce} onChanged={refreshAttention} />
+                <ThemesStrip />
+              </ProposalsPanel>
             </TabsContent>
 
-            {/* --- what it is judged against ---------------------------------------- */}
-            {/* ⚠ The framework and the reading sit together because one is the standard and
-            the other is the evidence. They are reference material: consulted when a company
-            is being assessed, not glanced at daily — which is precisely why they no longer
-            occupy the middle of the page someone opens to check a price. */}
-            <TabsContent value="framework" className="space-y-8">
-              <FrameworkPanel />
-
-              {/* ⚠ Below the framework, because what a source said is evidence for a
-              judgement rather than a judgement, and reading it first is how commentary ends
-              up setting the agenda. Collapsed by default for the same reason. */}
-              <ReadingPanel />
+            <TabsContent value="companies" id="tab-companies">
+              <FrameworkPanel onChanged={refreshAttention} arrival={arrival?.id ?? null} />
             </TabsContent>
 
-            {/* --- is any of this working ------------------------------------------- */}
-            {/* ⚠ A tab you have to choose, on purpose. All four answer "is this experiment
-            worth continuing", which is a question for a scheduled sit-down and not for a
-            spare minute — and a benchmark comparison browsed after a name that got away
-            trains worse judgement rather than better. */}
-            <TabsContent value="scorecard" className="space-y-8">
-              {/* ⚠ First, because the books answer "which of my ledgers did best" and this
-              answers "did any of them beat simply buying the index" — which is the prior
-              question, and the one it is easiest to avoid asking. */}
-              <BenchmarksPanel />
+            <TabsContent value="sources" id="tab-sources">
+              <ReadingPanel onChanged={refreshAttention} />
+            </TabsContent>
 
-              <BooksPanel />
-
-              <ReviewsPanel />
-
-              {/* ⚠ Last, and collapsed. These six move on a scale of months; anywhere more
-              prominent would invite watching them the way one watches a price, which is
-              exactly the habit writing them down in advance exists to prevent. */}
+            {/* ⚠ A tab you choose on purpose. All of it answers "is this experiment worth
+                continuing", which is a question for a scheduled sit-down and not for a spare
+                minute. The criteria come first because they are the question; the comparison
+                with index funds second because it is the one easiest to avoid asking. */}
+            <TabsContent value="scorecard" id="tab-scorecard" className="space-y-4">
               <VerdictPanel />
+              <BenchmarksPanel />
+              <MeasuresPanel />
+              <BooksPanel />
+              <ReviewsPanel />
             </TabsContent>
 
-            {/* --- what is on the record -------------------------------------------- */}
-            {/* ⚠ The ledger and the yearly schedule that reads it. Transactions are the only
-            facts in this whole page — everything else is a fold over them — so they are kept
-            where they can be checked, not where they can be casually edited. */}
-            <TabsContent value="records" className="space-y-8">
-              <ForeignHoldings />
-
+            {/* ⚠ Transactions first: they are the only facts on this whole page — everything
+                else is a fold over them. The yearly schedule that reads them is for tax time. */}
+            <TabsContent value="records" id="tab-records" className="space-y-4">
               <TransactionEntry
                 transactions={transactions}
                 loading={loading}
                 onChanged={() => void load()}
               />
+              <ForeignHoldings />
             </TabsContent>
           </Tabs>
 

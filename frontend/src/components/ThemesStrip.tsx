@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Radar } from "lucide-react";
 
-import { InfoTip } from "@/components/InfoTip";
+import { Chip, Section } from "@/components/investments/kit";
 import * as api from "@/lib/api";
 import type { Themes } from "@/lib/api";
 
@@ -34,40 +34,43 @@ export default function ThemesStrip() {
   // teaches its reader to skip the space it occupies.
   if (!data || data.themes.length === 0) return null;
 
-  return (
-    <section className="rounded-xl border border-border bg-card p-3">
-      <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-        <Radar className="size-3.5 text-muted-foreground" />
-        Written about lately
-        <InfoTip label="How this is worked out">
-          Articles about a sector name no company, so nothing would normally
-          come of them. The framework knows which chokepoints matter and who
-          sits on each, so a theme becomes a list of your own holdings. It is
-          something to read, never a reason to act.
-        </InfoTip>
-      </h2>
+  const held = data.themes.filter((t) => t.held.length > 0).length;
 
-      <ul className="mt-2 space-y-1.5">
+  return (
+    <Section
+      icon={Radar}
+      memory="decisions.themes"
+      title="Written about lately"
+      summary={`${data.themes.length} ${data.themes.length === 1 ? "theme" : "themes"} in what was read${
+        held ? ` · ${held} touch${held === 1 ? "es" : ""} what you hold` : ""
+      } — something to read, never a reason to act`}
+      tip="An article about a sector names no company. The framework knows who sits on each chokepoint, so a theme becomes a list of your own holdings."
+      flush
+    >
+      <ul className="divide-y divide-border">
         {data.themes.map((row) => (
-          <li key={row.bottleneck_id} className="text-xs">
-            <span className="font-medium">{row.name}</span>
-            <span className="text-muted-foreground">
-              {" "}
-              · {row.mentions} {row.mentions === 1 ? "piece" : "pieces"}
-            </span>
-            {row.held.length > 0 && (
-              <span className="block text-muted-foreground">
-                you hold: <span className="text-foreground">{row.held.join(", ")}</span>
+          <li key={row.bottleneck_id} className="px-4 py-2.5 text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="font-medium">{row.name}</span>
+              <span className="text-xs text-muted-foreground">
+                {row.mentions} {row.mentions === 1 ? "piece" : "pieces"}
               </span>
-            )}
-            {row.queued.length > 0 && (
-              <span className="block text-muted-foreground">
-                waiting to be looked at: {row.queued.join(", ")}
-              </span>
+            </div>
+            {(row.held.length > 0 || row.queued.length > 0) && (
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {row.held.map((symbol) => (
+                  <Chip key={`h-${symbol}`} tone="accent">
+                    you hold {symbol}
+                  </Chip>
+                ))}
+                {row.queued.map((symbol) => (
+                  <Chip key={`q-${symbol}`}>waiting: {symbol}</Chip>
+                ))}
+              </div>
             )}
           </li>
         ))}
       </ul>
-    </section>
+    </Section>
   );
 }

@@ -46,6 +46,15 @@ function niceMax(value: number): number {
   return step * magnitude;
 }
 
+/** How many date labels fit along an axis this wide.
+ *
+ *  ⚠ A fixed six fitted a desktop card and overlapped into one unreadable string on a phone,
+ *  where "Nov 2024Mar 2025Jul 2025" is what a 330px chart printed. A label needs about 72px
+ *  with its gap, so the count follows the width, between two and six. */
+function axisLabels(plotW: number): number {
+  return Math.max(2, Math.min(6, Math.floor(plotW / 72)));
+}
+
 function ticksFor(max: number, count = 4): number[] {
   return Array.from({ length: count + 1 }, (_, i) => (max / count) * i);
 }
@@ -205,8 +214,8 @@ export function StackedArea({
             strokeWidth={1}
           />
           {data.map((d, i) =>
-            // Roughly six labels, whatever the range.
-            i % Math.max(1, Math.ceil(data.length / 6)) === 0 ? (
+            // Up to six labels, as many as the width holds without colliding.
+            i % Math.max(1, Math.ceil(data.length / axisLabels(plotW))) === 0 ? (
               <text
                 key={d.day}
                 x={x(i)}
@@ -528,7 +537,7 @@ export function Lines({
             strokeWidth={1}
           />
           {data.map((d, i) =>
-            i % Math.max(1, Math.ceil(data.length / 6)) === 0 ? (
+            i % Math.max(1, Math.ceil(data.length / axisLabels(plotW))) === 0 ? (
               <text
                 key={d.day}
                 x={x(i)}

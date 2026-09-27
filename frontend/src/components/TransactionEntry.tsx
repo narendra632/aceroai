@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Plus, RotateCcw } from "lucide-react";
+import { AlertTriangle, Plus, RotateCcw, ScrollText } from "lucide-react";
 
+import { Chip, Section, type Tone } from "@/components/investments/kit";
 import { Button } from "@/components/ui/button";
 import DatePicker from "@/components/ui/date-picker";
 import {
@@ -164,6 +165,7 @@ export default function TransactionEntry({ transactions, loading, onChanged }: P
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   // Kept only while the form is open and has something in it. An empty form is not a
   // draft, and restoring one would reopen the panel every visit for no reason.
@@ -278,21 +280,27 @@ export default function TransactionEntry({ transactions, loading, onChanged }: P
     }
   }
 
+  const live = transactions.filter((t) => t.superseded_by_id == null).length;
+
   return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">Transactions</h2>
+    <Section
+      icon={ScrollText}
+      title="Transactions"
+      collapsible={false}
+      summary={`${live} in the record · nothing is ever edited or deleted — a mistake is corrected by a reversing entry, and both stay`}
+      actions={
         <Button
-          variant={open ? "ghost" : "outline"}
+          variant={open ? "ghost" : "default"}
           size="sm"
           onClick={() => (open ? reset() : setOpen(true))}
         >
           {open ? "Cancel" : <><Plus className="size-4" /> Record one</>}
         </Button>
-      </div>
-
+      }
+      flush
+    >
       {open && (
-        <div className="space-y-4 rounded-xl border border-border bg-card p-4">
+        <div className="space-y-4 border-b border-border bg-muted/20 p-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Instrument" htmlFor="txn-symbol" hint="Ticker or fund symbol">
               <input
@@ -510,51 +518,146 @@ export default function TransactionEntry({ transactions, loading, onChanged }: P
       )}
 
       {loading ? (
-        <ListSkeleton rows={3} />
+        <ListSkeleton rows={3} className="p-4" />
       ) : transactions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+        <p className="px-4 py-4 text-sm text-muted-foreground">Nothing recorded yet.</p>
       ) : (
-        <ul className="divide-y divide-border rounded-xl border border-border">
-          {transactions.map((t) => {
-            const dead = t.superseded_by_id != null;
-            return (
-              <li
-                key={t.id}
-                className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2.5 text-sm"
-              >
-                <span className={dead ? "text-muted-foreground line-through" : "font-medium"}>
-                  {t.txn_type.toLowerCase()} {formatQuantity(t.quantity)} {t.symbol}
-                </span>
-                <span className={`text-muted-foreground ${dead ? "line-through" : ""}`}>
-                  @ {formatPrice(t.price, t.currency)}
-                </span>
-                <span className="ml-auto tabular-nums text-muted-foreground">
-                  {formatDay(t.trade_date)}
-                </span>
-                {dead ? (
-                  <span className="w-full text-xs text-muted-foreground">
-                    Superseded by a later correction. Kept so the record still shows what was
-                    entered at the time.
-                  </span>
-                ) : t.supersedes_id ? (
-                  <span className="w-full text-xs text-muted-foreground">
-                    A correction{t.note ? ` — ${t.note}` : ""}.
-                  </span>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => reverse(t)}
-                    aria-label={`Reverse ${t.txn_type.toLowerCase()} ${t.symbol}`}
-                  >
-                    <RotateCcw className="size-3.5" /> Reverse
-                  </Button>
-                )}
-              </li>
-            );
-          })}
+        /* Grouped by month. ⚠ A flat list of "Nov 17", "Dec 7", "Feb 11" spans two years and
+           never says which — the month header carries the year so each row does not have to. */
+        <ul className="divide-y divide-border">
+          {byMonth(transactions).map(([month, rows]) => (
+            <li key={month}>
+              <p className="bg-muted/30 px-4 py-1.5 text-xs font-semibold text-muted-foreground">
+                {month}
+              </p>
+              <ul className="divide-y divide-border">
+                {rows.map((t) => (
+                  <Entry
+                    key={t.id}
+                    txn={t}
+                    confirming={confirming === t.id}
+                    onAsk={() => setConfirming(t.id)}
+                    onCancel={() => setConfirming(null)}
+                    onReverse={() => {
+                      setConfirming(null);
+                      void reverse(t);
+                    }}
+                  />
+                ))}
+              </ul>
+            </li>
+          ))}
         </ul>
       )}
-    </section>
+    </Section>
+  );
+}
+
+function byMonth(rows: InvestmentTransaction[]): [string, InvestmentTransaction[]][] {
+  const groups = new Map<string, InvestmentTransaction[]>();
+  for (const t of rows) {
+    const [y, m] = t.trade_date.slice(0, 7).split("-").map(Number);
+    const label = new Date(y, m - 1, 1).toLocaleDateString(undefined, {
+      month: "long",
+      year: "numeric",
+    });
+    groups.set(label, [...(groups.get(label) ?? []), t]);
+  }
+  return [...groups.entries()];
+}
+
+const KIND: Record<string, { label: string; tone: Tone }> = {
+  BUY: { label: "Bought", tone: "good" },
+  SIP: { label: "SIP", tone: "good" },
+  SELL: { label: "Sold", tone: "caution" },
+  DIVIDEND: { label: "Dividend", tone: "info" },
+  BONUS: { label: "Bonus", tone: "neutral" },
+  SPLIT: { label: "Split", tone: "neutral" },
+};
+
+/** One line of the ledger.
+ *
+ *  ⚠ Reversing asks first. A reversal is itself a permanent entry in a ledger that can never be
+ *  edited — one stray tap wrote one, and undoing it meant a second correction on top. The
+ *  confirmation names exactly what will be reversed, so the question is answerable. */
+function Entry({
+  txn: t,
+  confirming,
+  onAsk,
+  onCancel,
+  onReverse,
+}: {
+  txn: InvestmentTransaction;
+  confirming: boolean;
+  onAsk: () => void;
+  onCancel: () => void;
+  onReverse: () => void;
+}) {
+  const dead = t.superseded_by_id != null;
+  const kind = KIND[t.txn_type] ?? { label: t.txn_type.toLowerCase(), tone: "neutral" as Tone };
+  return (
+    <li className={`px-4 py-2.5 text-sm ${dead ? "text-muted-foreground" : ""}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Chip tone={dead ? "neutral" : kind.tone}>{kind.label}</Chip>
+        <span className={dead ? "line-through" : "font-medium"}>
+          {formatQuantity(t.quantity)} {t.symbol}
+        </span>
+        <span className={`text-muted-foreground ${dead ? "line-through" : ""}`}>
+          @ {formatPrice(t.price, t.currency)}
+        </span>
+        <span className="ml-auto flex items-center gap-3">
+          {/* The chip already says which way the money went, so the amount is shown unsigned —
+              "Bought … −₹9,409" read as a loss. The sign is only removed from the text; the
+              figure is the server's, untouched. */}
+          <span className="hidden tabular-nums text-muted-foreground sm:inline">
+            {formatRupees(t.net_inr.replace(/^-/, ""))}
+          </span>
+          <span className="w-14 text-right tabular-nums text-muted-foreground">
+            {formatDay(t.trade_date)}
+          </span>
+          {!dead && !t.supersedes_id && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              // Hidden, not removed, while asking — so the row does not shift under the pointer.
+              className={confirming ? "invisible" : undefined}
+              onClick={onAsk}
+              aria-label={`Reverse ${kind.label.toLowerCase()} ${t.symbol}`}
+              title="Reverse this entry"
+            >
+              <RotateCcw className="size-3.5" />
+            </Button>
+          )}
+        </span>
+      </div>
+      {dead ? (
+        <p className="mt-1 text-xs">
+          Superseded by a later correction — kept so the record still shows what was entered.
+        </p>
+      ) : t.supersedes_id ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          A correction{t.note ? ` — ${t.note}` : ""}.
+        </p>
+      ) : null}
+      {confirming && (
+        <div
+          role="alertdialog"
+          aria-label="Confirm reversal"
+          className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-caution/40 bg-caution/5 p-2.5 text-xs"
+        >
+          <span className="min-w-0 flex-1">
+            Reverse <strong>{kind.label.toLowerCase()} {formatQuantity(t.quantity)} {t.symbol}</strong>{" "}
+            on {formatDay(t.trade_date)}? A reversing entry is added; the original stays in the
+            record, struck through.
+          </span>
+          <Button size="sm" variant="destructive" onClick={onReverse}>
+            Reverse it
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancel} autoFocus>
+            Keep it
+          </Button>
+        </div>
+      )}
+    </li>
   );
 }

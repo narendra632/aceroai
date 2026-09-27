@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck, ChevronRight } from "lucide-react";
 
-import { InfoTip } from "@/components/InfoTip";
+import { Section } from "@/components/investments/kit";
 import * as api from "@/lib/api";
 import type { InvestmentReview } from "@/lib/api";
 
@@ -44,20 +44,26 @@ function Measure({ m }: { m: InvestmentReview["content"]["measures"][number] }) 
   );
 }
 
-function One({ review }: { review: InvestmentReview }) {
+function One({ review, first }: { review: InvestmentReview; first: boolean }) {
   const c = review.content;
   const decided = Object.entries(c.decisions.counts);
 
   return (
-    <details className="border-t border-border px-3 py-2.5 first:border-t-0">
-      <summary className="cursor-pointer list-none">
-        <span className="text-sm font-medium">{review.headline}</span>
-        <span className="block text-xs text-muted-foreground">
-          {when(review.period_start)} – {when(review.period_end)}
+    <details open={first} className="group border-t border-border px-4 py-3 first:border-t-0">
+      <summary className="flex cursor-pointer list-none items-start gap-2 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          aria-hidden="true"
+          className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
+        />
+        <span>
+          <span className="text-sm font-medium">{review.headline}</span>
+          <span className="block text-xs text-muted-foreground">
+            {when(review.period_start)} – {when(review.period_end)}
+          </span>
         </span>
       </summary>
 
-      <div className="mt-3 space-y-3 text-xs">
+      <div className="mt-3 space-y-3 pl-6 text-xs">
         {/* What you decided, in your own words — the data that eventually says what kinds of
             suggestion you keep turning down. */}
         {decided.length > 0 && (
@@ -76,8 +82,8 @@ function One({ review }: { review: InvestmentReview }) {
           </div>
         )}
 
-        {/* ⚠ The rails are reported too. A refusal nobody is shown is a rule nobody can ever
-            ask whether it was protecting or merely obstructing. */}
+        {/* ⚠ The rails are reported too. A refusal nobody is shown is a rule nobody can ever ask
+            whether it was protecting or merely obstructing. */}
         {c.blocked.length > 0 && (
           <p className="text-muted-foreground">
             The rules refused {c.blocked.length}:{" "}
@@ -119,7 +125,7 @@ function One({ review }: { review: InvestmentReview }) {
         </p>
 
         <div>
-          <p className="font-medium">How it is doing</p>
+          <p className="font-medium">How it was doing</p>
           <ul className="mt-1">
             {c.measures.map((m) => (
               <Measure key={m.name} m={m} />
@@ -150,7 +156,6 @@ function One({ review }: { review: InvestmentReview }) {
 export default function ReviewsPanel() {
   const [data, setData] = useState<InvestmentReview[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,43 +169,30 @@ export default function ReviewsPanel() {
   }, []);
 
   if (failed || !data) return null;
+  const [latest] = data;
 
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-          <CalendarCheck className="size-3.5 text-muted-foreground" />
-          Looking back
-          <InfoTip label="What these are">
-            Written on Saturdays, at month end and at quarter end, from the
-            facts as they were on that day. They are never recomputed — a review
-            regenerated later would show a position that recovered as never
-            having fallen, and the most interesting part of a review is the part
-            that turned out to be wrong.
-          </InfoTip>
-        </h2>
-        <button
-          type="button"
-          className="text-xs text-muted-foreground underline underline-offset-2"
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? "hide" : "show"}
-        </button>
-      </div>
-
-      {open && (
-        <div className="rounded-xl border border-border bg-card">
-          {data.length === 0 ? (
-            <p className="px-3 py-4 text-sm text-muted-foreground">
-              The first one arrives on Saturday morning. No market is open then,
-              nothing is urgent, and the week is complete — which is the whole
-              reason it happens at that hour.
-            </p>
-          ) : (
-            data.map((review) => <One key={review.id} review={review} />)
-          )}
-        </div>
+    <Section
+      icon={CalendarCheck}
+      memory="scorecard.reviews"
+      defaultOpen={false}
+      title="Looking back"
+      summary={
+        latest
+          ? `${data.length} review${data.length === 1 ? "" : "s"} · latest ${when(latest.period_end)}: ${latest.headline}`
+          : "The first review is written on Saturday morning"
+      }
+      tip="Written on Saturdays, at month end and at quarter end, from the facts as they were that day — and never recomputed, so what turned out wrong stays visible."
+      flush
+    >
+      {data.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-muted-foreground">
+          The first one arrives on Saturday morning — no market is open, nothing is urgent, and
+          the week is complete.
+        </p>
+      ) : (
+        data.map((review, i) => <One key={review.id} review={review} first={i === 0} />)
       )}
-    </section>
+    </Section>
   );
 }

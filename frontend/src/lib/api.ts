@@ -1095,6 +1095,9 @@ export type ScorePart = {
    *  well), "—" (not read), "n/a" (does not apply). Collapsing the last two is what made a
    *  fully-read bank look half-read and left it permanently unjudgeable. */
   applicable: boolean;
+  /** The measured quantity where the page draws it — the margin of safety as a fraction,
+   *  positive below worth and negative above. Null for parts that are only a sentence. */
+  value?: string | null;
 };
 
 /** ⚠ `earned` and `available` belong together. Six on its own means nothing: six of ten is
@@ -1227,6 +1230,8 @@ export type Measure = {
   value: string | null;
   n: number;
   detail: string;
+  /** The sample it waits for before it reports, so progress can be drawn. */
+  needed?: number | null;
 };
 
 /** A condition that came true — written down before the position was taken. */
@@ -1293,6 +1298,8 @@ export type FrameworkAttention = {
     | "EXPIRED"
     | "BREADTH_FLOOR"
     | "NO_MULTIPLE";
+  /** So a company with no place can be placed where it is listed. */
+  instrument_id: string | null;
   symbol: string;
   detail: string;
 };
@@ -1674,6 +1681,65 @@ export async function approveMapping(
     body: JSON.stringify({ note: note ?? null }),
   });
   if (!r.ok) return investmentError(r, "that mapping could not be approved");
+  return r.json();
+}
+
+/** Give a followed company with no place in the framework its first one, by hand. It arrives
+ *  unapproved — choosing a bottleneck is a claim about the company, agreed with separately. */
+export async function placeInstrument(
+  instrumentId: string,
+  input: { b_bottleneck?: string | null; off_framework?: boolean; rationale?: string },
+): Promise<Mapping> {
+  const r = await req(`/api/investments/framework/instruments/${instrumentId}/place`, {
+    method: "POST",
+    body: JSON.stringify({
+      b_bottleneck: input.b_bottleneck ?? null,
+      off_framework: input.off_framework ?? false,
+      rationale: input.rationale ?? null,
+    }),
+  });
+  if (!r.ok) return investmentError(r, "that company could not be placed");
+  return r.json();
+}
+
+export type SuggestedPlace = {
+  placed: boolean;
+  bottleneck: string | null;
+  confidence: number;
+  why: string;
+};
+
+/** Ask the model where a followed company with no place belongs. ⚠ A billed model call; a
+ *  usable answer is proposed UNAPPROVED, and an unsure one leaves the company unplaced with
+ *  the reason. */
+export async function suggestPlace(instrumentId: string): Promise<SuggestedPlace> {
+  const r = await req(`/api/investments/framework/instruments/${instrumentId}/suggest`, {
+    method: "POST",
+  });
+  if (!r.ok) return investmentError(r, "no suggestion could be made");
+  return r.json();
+}
+
+/** One thing on the page waiting for a decision from you. */
+export type Waiting = {
+  tab: "holdings" | "decisions" | "companies" | "sources";
+  kind: string;
+  /** ⚠ Most pressing first: urgent (a disproved thesis, a split the ledger has not caught up
+   *  with), then decide, then lead. */
+  severity: "urgent" | "decide" | "lead";
+  symbol: string | null;
+  text: string;
+  ref: string | null;
+};
+
+export type Attention = {
+  items: Waiting[];
+  counts: Partial<Record<Waiting["tab"], number>>;
+};
+
+export async function getAttention(): Promise<Attention> {
+  const r = await req("/api/investments/attention");
+  if (!r.ok) throw new Error("could not load what is waiting");
   return r.json();
 }
 

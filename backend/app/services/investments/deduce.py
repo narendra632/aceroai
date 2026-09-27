@@ -27,6 +27,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from app.services import budget
 from app.services.investments import billing
 
 log = logging.getLogger(__name__)
@@ -112,6 +113,10 @@ def bottleneck_for(name: str, about: str, spec: dict) -> Deduction:
     known = {row["id"] for row in spec.get("bottlenecks", ())}
     try:
         answer = _run(name, about, spec)
+    except budget.BudgetExceeded:
+        # ⚠ Named, not folded into "could not be reached". The two need different fixes, and a
+        # person told the model was down would try again tomorrow and be refused again.
+        return Deduction(None, 0.0, "this month's model budget is spent, so nothing was asked")
     except Exception as exc:  # noqa: BLE001 - any provider or parse failure lands here
         log.warning("bottleneck deduction failed (%s); leaving it unmapped", type(exc).__name__)
         return Deduction(None, 0.0, "the model could not be reached")

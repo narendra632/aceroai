@@ -49,11 +49,16 @@ function TabsTrigger({
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium",
         "text-muted-foreground transition-colors",
-        "hover:text-foreground",
+        "hover:bg-muted/60 hover:text-foreground",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "data-[state=active]:bg-muted data-[state=active]:text-foreground",
+        /* ⚠ The selected tab is marked three ways — fill, text weight and the icon taking the
+         * accent — because "which one am I on" is the first thing a tab bar is asked, and a
+         * faint grey fill against a grey card answered it only if you already knew. */
+        "data-[state=active]:bg-primary/10 data-[state=active]:text-foreground",
+        "data-[state=active]:font-semibold [&[data-state=active]>svg]:text-primary",
+        "[&>svg]:size-4 [&>svg]:shrink-0",
         className,
       )}
       {...props}

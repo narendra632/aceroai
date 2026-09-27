@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Inbox, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Inbox, Loader2, X } from "lucide-react";
 
 import * as api from "@/lib/api";
 import type { DropResult } from "@/lib/api";
@@ -21,58 +21,86 @@ function looksLikeUrl(value: string) {
 
 /* ⚠ A refusal is reported as plainly as a success. "Nothing was read" and "nobody was named"
    are different outcomes, and an inbox that blurred them would have its user dropping links
-   into a void without ever knowing. */
-function Outcome({ result, onClear }: { result: DropResult; onClear: () => void }) {
+   into a void without ever knowing.
+
+   ⚠ One line, not a card. The first version rendered a full card that stayed pinned above
+   every tab until dismissed, so a filed link pushed the whole page down on Holdings, Records
+   and everywhere else. Where it went is a link away; what it said is the line. */
+function Outcome({
+  result,
+  onClear,
+  onSee,
+}: {
+  result: DropResult;
+  onClear: () => void;
+  onSee?: () => void;
+}) {
   const queued = result.discovered;
   const known = result.already_followed;
 
+  let line: React.ReactNode;
+  let tone = "text-muted-foreground";
+  if (!result.stored) {
+    tone = "text-caution";
+    line = (
+      <>
+        Not filed — {result.note}
+        {result.named.length > 0 && <> It named {result.named.join(", ")}.</>}
+      </>
+    );
+  } else if (queued.length > 0) {
+    line = (
+      <>
+        Filed. <strong className="text-foreground">{queued.join(", ")}</strong> added to Worth a
+        look
+        {known.length > 0 && <>; also filed against {known.join(", ")}</>}.
+      </>
+    );
+  } else if (known.length > 0) {
+    line = <>Filed against what you already follow: {known.join(", ")}.</>;
+  } else {
+    line = <>Filed. No listed company was named in it — kept anyway, so the record stays whole.</>;
+  }
+
   return (
-    <div className="mt-2 rounded-lg border border-border bg-muted/30 p-2.5 text-xs">
+    <div className="mt-2 flex items-start gap-2 px-1 text-xs" role="status">
       {result.stored ? (
-        <>
-          <p className="font-medium">Filed: {result.title}</p>
-          {queued.length > 0 && (
-            <p className="mt-1 text-muted-foreground">
-              Added to the research queue: <strong>{queued.join(", ")}</strong>
-            </p>
-          )}
-          {known.length > 0 && (
-            <p className="mt-1 text-muted-foreground">
-              Filed against what you already follow: {known.join(", ")}
-            </p>
-          )}
-          {queued.length === 0 && known.length === 0 && (
-            <p className="mt-1 text-muted-foreground">
-              No listed company was named in it — kept anyway, so the record of what you
-              read stays complete.
-            </p>
-          )}
-          {result.trust_tier === 1 && (
-            <p className="mt-1 text-muted-foreground">
-              Treated as a filing, because it came from an exchange or a regulator.
-            </p>
-          )}
-        </>
+        <CheckCircle2 className="mt-px size-3.5 shrink-0 text-good" aria-hidden="true" />
       ) : (
-        <p className="text-muted-foreground">
-          Not filed — {result.note}
-          {result.named.length > 0 && (
-            <span className="mt-1 block">It named: {result.named.join(", ")}</span>
-          )}
-        </p>
+        <AlertTriangle className="mt-px size-3.5 shrink-0 text-caution" aria-hidden="true" />
+      )}
+      <p className={`min-w-0 flex-1 ${tone}`} title={result.title}>
+        {line}
+        {result.trust_tier === 1 && result.stored && " Treated as a filing."}
+      </p>
+      {result.stored && queued.length > 0 && onSee && (
+        <button
+          type="button"
+          onClick={onSee}
+          className="shrink-0 font-medium text-primary underline-offset-2 hover:underline"
+        >
+          See it
+        </button>
       )}
       <button
         type="button"
         onClick={onClear}
-        className="mt-1.5 text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        aria-label="Dismiss"
+        className="touch-target shrink-0 rounded text-muted-foreground hover:text-foreground"
       >
-        dismiss
+        <X className="size-3.5" />
       </button>
     </div>
   );
 }
 
-export default function InboxDrop({ onFiled }: { onFiled?: () => void }) {
+export default function InboxDrop({
+  onFiled,
+  onSee,
+}: {
+  onFiled?: () => void;
+  onSee?: () => void;
+}) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<DropResult | null>(null);
@@ -125,8 +153,10 @@ export default function InboxDrop({ onFiled }: { onFiled?: () => void }) {
         </button>
       </div>
 
-      {failed && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{failed}</p>}
-      {result && <Outcome result={result} onClear={() => setResult(null)} />}
+      {failed && <p className="mt-2 px-1 text-xs text-bad">{failed}</p>}
+      {result && (
+        <Outcome result={result} onClear={() => setResult(null)} onSee={onSee} />
+      )}
     </section>
   );
 }

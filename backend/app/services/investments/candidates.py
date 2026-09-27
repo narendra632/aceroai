@@ -35,6 +35,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.db.models import AbMapping, Candidate, Instrument, ListedCompany, Mention
+from app.services.errors import Invalid
 from app.services.investments import (
     deduce,
     frameworks,
@@ -132,6 +133,54 @@ def place(db: Session, candidate: Candidate, spec: dict, version_id: uuid.UUID) 
     )
     db.flush()
     return result
+
+
+def suggest_place(
+    db: Session, instrument: Instrument, spec: dict, version_id: uuid.UUID
+) -> deduce.Deduction:
+    """Ask where a followed company with no place belongs, and propose it if the answer is usable.
+
+    The same deduction a candidate gets in `place`, for a company that skipped it — one that
+    was followed from the queue before anything read it. The evidence is what sources said
+    about it, under either identity it may have been recorded with.
+
+    ⚠ The proposal is unapproved and scores nothing, exactly as for a candidate. An answer the
+    model is unsure of, or one naming a bottleneck the framework does not have, leaves the
+    company unplaced and says why — which is the honest state, not a failure.
+    """
+    if frameworks.live_mapping(db, instrument.id) is not None:
+        raise Invalid(f"{instrument.symbol} already has a place in the framework; move it instead")
+    listed = db.execute(
+        sa.select(ListedCompany.id).where(ListedCompany.symbol == instrument.symbol)
+    ).scalar_one_or_none()
+    said = sa.or_(
+        Mention.instrument_id == instrument.id,
+        Mention.listed_company_id == listed if listed else sa.false(),
+    )
+    excerpts = list(
+        db.execute(
+            sa.select(Mention.claim_excerpt)
+            .where(said, Mention.claim_excerpt.isnot(None))
+            .order_by(Mention.created_at.desc())
+            .limit(6)
+        ).scalars()
+    )
+    about = deduce.describe(instrument.name, excerpts)
+    deduction = deduce.bottleneck_for(instrument.name, about, spec)
+    if deduction.is_usable:
+        frameworks.propose_mapping(
+            db,
+            instrument,
+            b_bottleneck=deduction.bottleneck_id,
+            spec=spec,
+            framework_version_id=version_id,
+            proposed_by="AGENT",
+            rationale=(
+                f"{deduction.why} (confidence {deduction.confidence:.0%}); from {about[:300]}"
+            ),
+        )
+        db.flush()
+    return deduction
 
 
 def read_filings(

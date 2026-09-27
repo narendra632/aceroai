@@ -130,6 +130,10 @@ class Part:
     #: withheld the verdict. A hole can be filled by fetching another filing; this cannot,
     #: because there is nothing missing.
     applicable: bool = True
+    #: The measured quantity itself, where the page needs it as a number rather than a
+    #: sentence — the margin of safety, as a fraction (positive below worth, negative above).
+    #: ⚠ Beside `detail`, never instead of it: the sentence says what it was measured against.
+    value: Decimal | None = None
 
     @property
     def is_known(self) -> bool:
@@ -855,6 +859,7 @@ def _margin_of_safety(
             else f"{abs(mos) * 100:.0f}% ABOVE a worth of {multiple.value}× {basis}{caveat}"
         ),
         _cites(periods, usable[: len(earnings)]),
+        value=mos.quantize(Decimal("0.001")),
     )
 
 

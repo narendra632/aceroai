@@ -1,63 +1,47 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Scale, ShieldX } from "lucide-react";
+import { AlertTriangle, History, Lightbulb, ShieldAlert, ShieldX, Target } from "lucide-react";
 
-import { InfoTip } from "@/components/InfoTip";
+import { Callout, Chip, Meter, Quiet, Section } from "@/components/investments/kit";
 import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api";
 import type { Proposal, ProposalsView } from "@/lib/api";
 import { formatDateFull, formatRupees } from "@/lib/format";
+import { ACTION_WORDS, GATE_WORDS, QUADRANT } from "@/lib/investments";
 
 /* What the system suggests, and what its own rules refused.
  *
  * ⚠ **Nothing here moves any money.** Approving updates the paper book the system's own
  * decisions build up; what you do in life is your word, entered like any other transaction.
- * The gap between those two books is one of the most interesting numbers this produces, and
- * merging them would destroy it.
  *
  * Three things are rendered that a tidier screen would hide, and each is the point:
  *
- *   - **Refusals.** A rule whose cost is invisible is a rule nobody can evaluate. Seeing what
- *     the rails blocked is the only way to judge whether they protect or merely obstruct.
- *   - **What would prove it wrong**, beside the argument rather than behind it. A thesis
- *     shown without its invalidation conditions reads as a recommendation.
+ *   - **Refusals.** A rule whose cost is invisible is a rule nobody can evaluate. They are
+ *     grouped — forty rows of "the price" said one thing forty times — and closed, because
+ *     they are for judging the rules, not for acting on today.
+ *   - **What would prove it wrong**, beside the argument rather than behind it. A thesis shown
+ *     without its invalidation conditions reads as a recommendation.
  *   - **Evenings that suggested nothing.** A system that only leaves a trace on the days it
  *     acted can never be measured against the days it should have.
+ *
+ * The prediction record ("how it is doing") moved to the Scorecard: it answers whether the
+ * reasoning works, which is a monthly question, and this tab is for what needs deciding now.
  */
 
-const ACTION: Record<string, string> = {
-  INITIATE: "start a position",
-  ADD: "add to it",
-  HOLD: "hold",
-  TRIM: "trim",
-  EXIT: "sell out",
-  ACCUMULATE_POOL: "set money aside — one share costs more than the ceiling",
-};
-
-const GATE: Record<string, string> = {
-  G1_framework: "its place in the framework",
-  G2_quadrant: "business and price together",
-  G3_margin_of_safety: "the price",
-  G4_invalidation: "what would prove it wrong",
-  G6_cooling_off: "raised too soon after a refusal",
-  G7_corporate_action: "an unrecorded corporate action",
-  G8_price_age: "the price is too old",
-  G9_volume: "enough suggestions for now",
-  G11_confidence: "not confident enough to be worth your time",
-};
-
-const MEASURE: Record<string, string> = {
-  claim_accuracy: "Of the specific things it said would happen, how many did",
-  calibration: "When it says 80%, is it right 80% of the time",
-  trigger_discipline: "When something disproved a thesis, did anything happen",
-  decision_record: "How often you agreed",
-};
-
-export default function ProposalsPanel() {
+/** ⚠ `children` renders between what is live and what already happened. The leads and themes
+ *  belong to "decide now" and the refusals and past decisions to "judge the rules later", and
+ *  one fetch serves both halves — so the panel frames the others rather than being stacked
+ *  above them, which put forty refusals between the suggestions and the leads. */
+export default function ProposalsPanel({
+  onChanged,
+  children,
+}: {
+  onChanged?: () => void;
+  children?: React.ReactNode;
+}) {
   const [data, setData] = useState<ProposalsView | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showRefused, setShowRefused] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -72,23 +56,29 @@ export default function ProposalsPanel() {
     void load();
   }, [load]);
 
-  if (failed || !data) return null;
+  if (failed) {
+    return (
+      <div className="space-y-4">
+        <Callout tone="caution" title="Suggestions could not be loaded">
+          The rest of the page is unaffected. Reload to try again.
+        </Callout>
+        {children}
+      </div>
+    );
+  }
+  // ⚠ No early return while loading: the leads below render in the same place either way, so
+  // they are not unmounted and fetched twice when the suggestions arrive.
+  const recent = data?.recent ?? [];
+  const refused = recent.filter((p) => p.status === "BLOCKED");
+  const settled = recent.filter((p) => p.status === "APPROVED" || p.status === "REJECTED");
 
-  const refused = data.recent.filter((p) => p.status === "BLOCKED");
-  const settled = data.recent.filter(
-    (p) => p.status === "APPROVED" || p.status === "REJECTED",
-  );
-
-  async function decide(
-    p: Proposal,
-    outcome: "APPROVE" | "REJECT",
-    reason: string,
-  ) {
+  async function decide(p: Proposal, outcome: "APPROVE" | "REJECT", reason: string) {
     setBusy(p.id);
     setError(null);
     try {
       await api.decideProposal(p.id, outcome, reason);
       await load();
+      onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "that did not work");
     } finally {
@@ -97,168 +87,178 @@ export default function ProposalsPanel() {
   }
 
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-          Suggestions
-          <InfoTip label="What these are">
-            The system proposes; it never acts. Nothing is bought or sold by
-            Acero — approving records the decision in its own paper book, and
-            what you do in real life you enter yourself. The difference between
-            the two is deliberately visible.
-          </InfoTip>
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          {data.runs_recorded} evening{data.runs_recorded === 1 ? "" : "s"}{" "}
-          recorded
-          {data.last_run_at
-            ? `, last on ${formatDateFull(data.last_run_at)}`
-            : ""}
-        </p>
-      </div>
-
-      {/* ⚠ Above everything, including live suggestions. A fired condition means a thesis
-          you hold money against has been contradicted by the facts — and being told when
-          that happens is the entire reason the condition was written down in advance. */}
-      {data.fired.length > 0 && (
-        <div className="rounded-xl border border-destructive/50 bg-destructive/5 p-4">
-          <p className="flex items-center gap-1.5 text-sm font-medium">
-            <AlertTriangle className="size-4 text-destructive" />
-            {data.fired.length} thing{data.fired.length === 1 ? "" : "s"} that
-            would disprove a thesis {data.fired.length === 1 ? "has" : "have"}{" "}
-            happened
+    <div className="space-y-4">
+      {/* ⚠ Above everything, including live suggestions. A fired condition means a thesis you
+          hold money against has been contradicted by the facts — and being told when that
+          happens is the entire reason the condition was written down in advance. */}
+      {data?.fired.map((f) => (
+        <Callout
+          key={f.id}
+          id={`item-${f.id}`}
+          tone="bad"
+          title={
+            <>
+              {f.symbol}: something that would prove the idea wrong has happened
+            </>
+          }
+        >
+          <p className="text-foreground">{f.description}</p>
+          <p className="mt-1 text-xs">
+            {f.metric_key} is now {String(f.evidence.value ?? "?")}, against the{" "}
+            {String(f.evidence.threshold ?? "?")} written down when the position was taken
+            {f.fired_at ? ` · ${formatDateFull(f.fired_at)}` : ""}. Decide whether the reason you
+            hold it still stands.
           </p>
-          <ul className="mt-2 space-y-1.5">
-            {data.fired.map((f) => (
-              <li key={f.id} className="text-xs">
-                <span className="font-medium">{f.symbol}</span> —{" "}
-                {f.description}
-                <span className="block text-muted-foreground">
-                  {f.metric_key} now {String(f.evidence.value ?? "?")}, against
-                  the {String(f.evidence.threshold ?? "?")} written down when
-                  the position was taken
-                  {f.fired_at ? ` · ${formatDateFull(f.fired_at)}` : ""}
+        </Callout>
+      ))}
+
+      {data && (
+        <Section
+          icon={Lightbulb}
+          title="Suggestions"
+          count={data.open.length}
+          countTone="accent"
+          collapsible={false}
+          summary={
+            <>
+              Checked every evening — {data.runs_recorded} evening
+              {data.runs_recorded === 1 ? "" : "s"} so far
+              {data.last_run_at ? `, last on ${formatDateFull(data.last_run_at)}` : ""}. Nothing is
+              bought or sold for you.
+            </>
+          }
+          flush={data.open.length > 0}
+        >
+          {data.open.length === 0 ? (
+            <Quiet>
+              Nothing suggested right now. That is the usual answer, and usually the right one —
+              the quiet evenings are recorded too, so they can be counted later.
+            </Quiet>
+          ) : (
+            <div className="divide-y divide-border">
+              {data.open.map((p) => (
+                <Card
+                  key={p.id}
+                  proposal={p}
+                  busy={busy === p.id}
+                  onDecide={(outcome, reason) => decide(p, outcome, reason)}
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {error && (
+        <p className="text-sm text-bad" role="alert">
+          {error}
+        </p>
+      )}
+
+      {children}
+
+      {refused.length > 0 && <Refused refused={refused} />}
+
+      {settled.length > 0 && (
+        <Section
+          icon={History}
+          memory="decisions.decided"
+          defaultOpen={false}
+          title="Decided"
+          summary={`${settled.length} recent · ${
+            settled.filter((p) => p.status === "APPROVED").length
+          } approved, ${settled.filter((p) => p.status === "REJECTED").length} rejected`}
+          flush
+        >
+          <ul className="divide-y divide-border">
+            {settled.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-4 py-2.5">
+                <span className="text-sm font-medium">{p.symbol}</span>
+                <span className="text-xs text-muted-foreground">
+                  {ACTION_WORDS[p.action] ?? p.action}
+                </span>
+                <Chip tone={p.status === "APPROVED" ? "good" : "neutral"}>
+                  {p.status.toLowerCase()}
+                </Chip>
+                {p.decision_reason && (
+                  <span className="w-full text-xs text-muted-foreground">
+                    “{p.decision_reason}”
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+/** What the rules refused, grouped so the pattern is readable.
+ *
+ *  ⚠ Kept, and shown on request — a rule you never see the cost of is a rule you cannot tell
+ *  is working. But forty lines of the same refusal is not information, it is a wall, and the
+ *  question it answers is "which rule, and for whom", which a grouping answers at a glance. */
+function Refused({ refused }: { refused: Proposal[] }) {
+  const byRule = new Map<string, number>();
+  const latest = new Map<string, Proposal>();
+  for (const p of refused) {
+    const rule = p.blocked_by ?? "unknown";
+    byRule.set(rule, (byRule.get(rule) ?? 0) + 1);
+    // `recent` arrives newest first, so the first seen per company is its latest refusal.
+    if (!latest.has(p.symbol)) latest.set(p.symbol, p);
+  }
+  const rules = [...byRule.entries()].sort((a, b) => b[1] - a[1]);
+  const [top] = rules;
+
+  return (
+    <Section
+      icon={ShieldX}
+      memory="decisions.refused"
+      defaultOpen={false}
+      title="Refused by the rules"
+      summary={`${refused.length} refusals across ${latest.size} ${
+        latest.size === 1 ? "company" : "companies"
+      } · mostly ${GATE_WORDS[top[0]] ?? top[0]}`}
+      tip="Kept so the rules can be judged too. Most refusals are the price rule saying a good company costs too much right now — that is the rules working."
+    >
+      <div className="space-y-4">
+        <div>
+          <p className="mb-2 text-xs font-medium">Which rule</p>
+          <ul className="space-y-1.5">
+            {rules.map(([rule, n]) => (
+              <li key={rule} className="grid grid-cols-[10rem_1fr] items-center gap-3 text-xs">
+                <span className="truncate text-muted-foreground">{GATE_WORDS[rule] ?? rule}</span>
+                <Meter
+                  value={n}
+                  max={refused.length}
+                  label={`${GATE_WORDS[rule] ?? rule}: ${n} refusals`}
+                  tone="neutral"
+                  text={String(n)}
+                  width="w-full max-w-64"
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="mb-2 text-xs font-medium">Latest, per company</p>
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {[...latest.values()].map((p) => (
+              <li key={p.id} className="px-3 py-2 text-xs">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{p.symbol}</span>
+                  <Chip>{GATE_WORDS[p.blocked_by ?? ""] ?? p.blocked_by}</Chip>
+                </span>
+                <span className="mt-1 block text-muted-foreground">
+                  {p.gates.find((g) => g.gate === p.blocked_by)?.detail}
                 </span>
               </li>
             ))}
           </ul>
         </div>
-      )}
-
-      {data.open.length === 0 && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm">Nothing is suggested right now.</p>
-          {/* ⚠ Said plainly rather than left blank. Proposing nothing is usually the correct
-              outcome, and a screen that looks broken when the system is behaving well
-              teaches the reader to distrust it. */}
-          <p className="mt-1 text-xs text-muted-foreground">
-            That is the usual and usually correct answer. Every evening is
-            recorded either way, so the quiet ones can be counted later.
-          </p>
-        </div>
-      )}
-
-      {data.open.map((p) => (
-        <Card
-          key={p.id}
-          proposal={p}
-          busy={busy === p.id}
-          onDecide={(outcome, reason) => decide(p, outcome, reason)}
-        />
-      ))}
-
-      {settled.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm font-medium">Decided</p>
-          <ul className="mt-2 space-y-1">
-            {settled.map((p) => (
-              <li key={p.id} className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{p.symbol}</span>{" "}
-                {ACTION[p.action] ?? p.action} — {p.status.toLowerCase()}
-                {p.decision_reason ? `: “${p.decision_reason}”` : ""}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {refused.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-2 text-left"
-            onClick={() => setShowRefused((v) => !v)}
-          >
-            <span className="flex items-center gap-1.5 text-sm font-medium">
-              <ShieldX className="size-3.5 text-muted-foreground" />
-              {refused.length} refused by the rules
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {showRefused ? "hide" : "show"}
-            </span>
-          </button>
-          {/* ⚠ Shown on request, not hidden. A rule whose cost is invisible is a rule nobody
-              can ever evaluate — but nor should refusals crowd out the live decisions. */}
-          <p className="mt-1 text-xs text-muted-foreground">
-            Kept so the rails can be judged too: a rule you never see the cost
-            of is a rule you cannot tell is working.
-          </p>
-          {showRefused && (
-            <ul className="mt-3 space-y-2">
-              {refused.map((p) => (
-                <li key={p.id} className="text-xs">
-                  <span className="font-medium">{p.symbol}</span> —{" "}
-                  {GATE[p.blocked_by ?? ""] ?? p.blocked_by}
-                  <span className="block text-muted-foreground">
-                    {p.gates.find((g) => g.gate === p.blocked_by)?.detail}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {data.measures.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="flex items-center gap-1.5 text-sm font-medium">
-            <Scale className="size-3.5 text-muted-foreground" />
-            How it is doing
-            <InfoTip label="Why most of these are blank">
-              At thirty-odd decisions a year nothing statistical can be said
-              about returns for years. But each thesis makes several checkable
-              assertions, so a year produces a few hundred testable predictions
-              — which is how this becomes answerable in months rather than
-              decades. Until there are enough, no figure is shown: a number over
-              six outcomes reads exactly like one over six hundred.
-            </InfoTip>
-          </p>
-          <dl className="mt-2 space-y-1.5">
-            {data.measures.map((m) => (
-              <div key={m.name} className="text-xs">
-                <dt className="text-muted-foreground">
-                  {MEASURE[m.name] ?? m.name}
-                </dt>
-                {/* ⚠ "—" while the sample is too small. Withholding the figure IS the
-                    feature; showing it with a caveat would still be read as a finding. */}
-                <dd>
-                  <span className="font-medium tabular-nums">
-                    {m.value == null ? "—" : m.value}
-                  </span>
-                  <span className="ml-2 text-muted-foreground">{m.detail}</span>
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      )}
-
-      {error && (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
-    </section>
+      </div>
+    </Section>
   );
 }
 
@@ -273,97 +273,103 @@ function Card({
 }) {
   const [reason, setReason] = useState("");
   const price = p.price_snapshot?.price as string | undefined;
+  const confidence = Math.round(Number(p.confidence) * 100);
+  const box = QUADRANT[p.quadrant ?? ""];
 
   return (
-    <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-sm font-medium">
-          {p.symbol}: {ACTION[p.action] ?? p.action}
+    <article id={`item-${p.id}`} className="scroll-mt-4 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="text-lg font-semibold">{p.symbol}</span>
+            <Chip tone="accent">{ACTION_WORDS[p.action] ?? p.action}</Chip>
+            {box && <Chip tone={box.tone}>{box.label}</Chip>}
+          </p>
           {p.target_amount_inr && (
-            <span className="ml-2 font-normal">
+            <p className="mt-1 text-sm tabular-nums">
               {formatRupees(p.target_amount_inr)}
               {p.target_qty ? ` · ${p.target_qty} shares` : ""}
-            </span>
+              <span className="text-muted-foreground"> · over {p.horizon_days} days</span>
+            </p>
           )}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {Math.round(Number(p.confidence) * 100)}% confident ·{" "}
-          {p.horizon_days} days · {p.quadrant}
-        </p>
+        </div>
+        <div className="text-right">
+          <Meter
+            value={confidence}
+            max={100}
+            label="How confident it is"
+            text={`${confidence}%`}
+            tone={confidence >= 70 ? "good" : "caution"}
+          />
+          <p className="mt-0.5 text-xs text-muted-foreground">confident</p>
+        </div>
       </div>
 
-      {/* The argument, exactly as recorded. Never re-worded on display: what the system said
-          is the thing being judged later. */}
-      <p className="mt-2 whitespace-pre-line text-sm">{p.thesis}</p>
+      {/* The argument, exactly as recorded. Never re-worded on display: what the system said is
+          the thing being judged later. */}
+      <p className="mt-3 whitespace-pre-line text-sm leading-relaxed">{p.thesis}</p>
 
-      {price && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Suggested at {formatRupees(price)}, and that price is frozen onto this
-          record — what the system saw is a different fact from what the market
-          later did.
-        </p>
-      )}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        {p.triggers.length > 0 && (
+          <div>
+            <p className="flex items-center gap-1.5 text-xs font-semibold">
+              <ShieldAlert className="size-3.5 text-caution" aria-hidden="true" />
+              What would prove it wrong
+            </p>
+            <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+              {p.triggers.map((t) => (
+                <li key={t.id}>
+                  {t.description}{" "}
+                  <span className="text-faint">(by {formatDateFull(t.window_until)})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {p.claims.length > 0 && (
+          <div>
+            <p className="flex items-center gap-1.5 text-xs font-semibold">
+              <Target className="size-3.5 text-info" aria-hidden="true" />
+              What it predicts will happen
+            </p>
+            <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+              {p.claims.map((c) => (
+                <li key={c.id}>{c.claim_text}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
 
-      {p.triggers.length > 0 && (
-        <div className="mt-3">
-          <p className="text-xs font-medium">
-            What would prove this wrong
-            <InfoTip label="Why this matters">
-              Each is a number, a comparison and a date, so it can actually be
-              checked. “If the story changes” cannot be, which means a position
-              carrying it could never be shown to be wrong.
-            </InfoTip>
-          </p>
-          <ul className="mt-1 space-y-0.5">
-            {p.triggers.map((t) => (
-              <li key={t.id} className="text-xs text-muted-foreground">
-                • {t.description}{" "}
-                <span className="opacity-70">
-                  (by {formatDateFull(t.window_until)})
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {p.reflexivity_flags_yes > 0 && (
+          <Chip tone="caution" icon={AlertTriangle}>
+            {p.reflexivity_flags_yes} red flag{p.reflexivity_flags_yes === 1 ? "" : "s"} against it
+          </Chip>
+        )}
+        {price && (
+          <span className="text-xs text-muted-foreground">
+            Suggested at {formatRupees(price)} — that price is frozen onto this record.
+          </span>
+        )}
+      </div>
 
-      {p.claims.length > 0 && (
-        <div className="mt-2">
-          <p className="text-xs font-medium">What it is claiming</p>
-          <ul className="mt-1 space-y-0.5">
-            {p.claims.map((c) => (
-              <li key={c.id} className="text-xs text-muted-foreground">
-                • {c.claim_text}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {p.reflexivity_flags_yes > 0 && (
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="size-3" />
-          {p.reflexivity_flags_yes} red flag
-          {p.reflexivity_flags_yes === 1 ? "" : "s"} standing against it
-        </p>
-      )}
-
-      <div className="mt-3 space-y-2">
+      <div className="mt-4 rounded-lg bg-muted/40 p-3">
         {/* ⚠ Required, not optional. The reason in your own words is the data that eventually
-            shows what kinds of suggestion you keep turning down — the only way the system
-            learns anything about its own judgement. */}
-        <input
+            shows what kinds of suggestion you keep turning down. */}
+        <label htmlFor={`why-${p.id}`} className="text-xs font-medium">
+          Your decision, and why — in your own words
+        </label>
+        <textarea
+          id={`why-${p.id}`}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Why — in your own words. Required."
-          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          rows={2}
+          placeholder="Required. e.g. the price is fine but I already hold enough of this theme"
+          className="mt-1.5 w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
         />
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            disabled={busy || !reason.trim()}
-            onClick={() => onDecide("APPROVE", reason)}
-          >
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={busy || !reason.trim()} onClick={() => onDecide("APPROVE", reason)}>
             {busy ? "Saving…" : "Approve"}
           </Button>
           <Button
@@ -374,8 +380,11 @@ function Card({
           >
             Reject
           </Button>
+          <span className="text-xs text-muted-foreground">
+            Approving moves no money — buy it yourself, then record it.
+          </span>
         </div>
       </div>
-    </div>
+    </article>
   );
 }

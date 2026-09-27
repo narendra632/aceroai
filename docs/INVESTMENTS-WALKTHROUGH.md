@@ -248,16 +248,63 @@ filed.*
 
 ## Part 4 — The page, tab by tab
 
-The Investments page has one thing always on top, and five tabs below it. Each tab answers a
-question you ask at a different frequency — which is why they are tabs and not one long page.
+The Investments page has two things always on top — the **Inbox** and, when something is
+waiting, **Needs you** — and six tabs below them. Each tab answers a question you ask at a
+different frequency, which is why they are tabs and not one long page.
 
 | Tab | The question it answers | How often |
 |---|---|---|
-| **Holdings** | What is it worth? | daily glance |
-| **Decisions** | What should I do? | when something arrives |
-| **Framework** | What is each company judged against? | when assessing a company |
+| **Holdings** | What do I own, and what is it worth? | daily glance |
+| **Decisions** | What needs deciding? | when something arrives |
+| **Companies** | How does each company I follow score? | when assessing a company |
+| **Sources** | What is it reading, and is it worth reading? | when adding a channel; monthly |
 | **Scorecard** | Is any of this working? | monthly |
-| **Records** | What is on the record? | at tax time, or to correct something |
+| **Records** | What is on the record? | when you buy or sell; at tax time |
+
+---
+
+### How to read any screen here
+
+Four conventions run through every tab. Learn them once and the page reads itself.
+
+**1. A number on a tab means something is waiting there.**
+
+```
+ Holdings   Decisions (1)   Companies (1)   Sources (1)   Scorecard   Records
+```
+
+The colour of the number tells you how much it matters:
+
+| Colour | Means | Example |
+|---|---|---|
+| **Red** | urgent — deal with it first | a condition that would prove an idea wrong has happened; a split your ledger hasn't caught up with |
+| **Orange** (the app's accent) | your decision | a suggestion waiting for yes or no; a company waiting for you to agree where it sits; a channel waiting to be switched on |
+| **Grey** | worth a look, no hurry | a company a source named |
+
+No number anywhere means nothing is waiting.
+
+**2. Colours on chips always mean the same thing, and always come with a word.**
+
+| Colour | Means | You'll see it on |
+|---|---|---|
+| **Green** | good | *Quality, and the story running* · *25% below worth* · *reading* · *Bought* |
+| **Yellow** | needs care, not wrong | *206% above worth* · *1 red flag* · *waiting for you* · *commentary* |
+| **Red** | a hard no | *A story without a business* · *Cheap for a reason* |
+| **Blue** | for information | *Quality, quietly* · notes explaining a figure |
+| **Grey** | neutral | *Too little read to judge* · *watchlist* · *off* |
+
+The word is always there too, so you never have to rely on the colour alone.
+
+**3. A score is a bar *and* two numbers.** `Business ▬▬▬▬▬▬▬▭▭ 7/9` means seven points earned
+out of nine that could be measured. Both numbers matter: 6/6 is excellent and 6/10 is mediocre,
+and the difference is only how much could be read. Mostly-full bars are green, half-full
+yellow, nearly-empty red.
+
+**4. Every panel opens and closes, and still says what's inside when it's closed.** Click a
+header (the **›** turns to **⌄**). A closed panel shows its headline — *"40 refusals across 12
+companies · mostly the price"* — so closing it hides the detail, never the fact. The page
+remembers what you opened and closed. What a tab exists to show is open when you arrive;
+history and reference material start closed.
 
 ---
 
@@ -271,7 +318,9 @@ three seconds. An inbox you have to navigate to is an inbox nobody uses.
 **What happens when you drop something:**
 - A link is read; a YouTube link has its spoken words read.
 - Every listed company it names is found (by matching against the exchange's list).
-- Companies you don't follow go into the research queue (**Decisions** tab).
+- Companies you don't follow go into **Worth a look** (on the **Decisions** tab).
+- One line under the box tells you what happened — *"Filed. VOLTAMP added to Worth a look"* —
+  with **See it** to jump there. If nothing could be filed, the line says why, in yellow.
 - Nothing is bought, scored as good, or recommended because you dropped it.
 
 **Try:** paste *"my friend says Voltamp looks good"* — Voltamp lands in the queue with your
@@ -281,31 +330,60 @@ words attached, so in three months you can see where the idea came from.
 
 ---
 
-### Tab 1 — Holdings: *what is it worth?*
+### Always on top — Needs you
+
+**What it is:** a short list of everything on the page waiting for a decision from you, most
+pressing first, each with a button that takes you to it:
+
+```
+Needs you (3)
+  ⊙ BHARTIARTL has no place in the framework yet            Companies →
+  ⊙ Zerodha is waiting for you to start reading it            Sources →
+  ⌖ DIXON was named by Yadnya Investment Academy — worth a look  Decisions →
+```
+
+Pressing **Companies →** opens that tab, scrolls to the exact row, and briefly rings it so your
+eye lands on it.
+
+**Why it exists:** before this, *"1 company needs your agreement"* lived in the third tab and *"1
+channel waiting for you"* inside a closed panel at the bottom of it. The only way to learn what
+needed you was to open everything. Now the page tells you.
+
+**When nothing is waiting, it isn't there at all.** That is the normal state — and the answer to
+"do I need to do anything today?"
+
+---
+
+### Tab 1 — Holdings: *what do I own, and what is it worth?*
 
 This is the tab you'll open most. It is also the one you should *act* on least.
 
 **What you see, top to bottom:**
 
-1. **The totals** — *Invested* (₹1,03,925), *Current value*, gain/loss. If any holding has no
-   price yet, the total says so rather than counting it as zero.
-2. **Corporate actions** — a banner if a split or bonus is announced on something you hold. When
-   one is pending, that holding's gain/loss is marked unreliable (a 1:1 bonus halves the price
-   overnight; without this, Kaynes would show −50% one morning).
-3. **Crypto, separately** — shown apart because under Indian tax law (s.115BBH) a crypto loss
-   cannot be set against any other gain. One netted total would show a position the tax code
-   does not allow.
-4. **Return** — money-weighted and time-weighted, side by side (Part 2 explains the difference).
-5. **Where the money is** — a bar split by asset class.
-6. **Over time** — invested vs value, drawn only where a price was actually observed. Where no
-   price existed, the line has a gap rather than a guess.
-7. **The holdings table** — every position, sortable. **Click a row** to open its detail:
-   each lot, how many days until each becomes long-term for tax, what selling today would
-   mean, and for SpaceX the split between the stock's move and the rupee's.
+1. **A warning, only if needed** — a split or bonus announced on something you hold (with
+   **Apply to my holding**), or holdings with no price yet. These sit above the numbers because
+   they make the numbers wrong until dealt with: a 1:1 bonus halves the price overnight, and
+   without the warning Kaynes would show −50% one morning.
+2. **The summary card:**
+   - **What it is worth today** — the big number, with the gain or loss under it
+     (*▼ ₹951 (−0.92%) on paper*).
+   - **Put in** (₹1,03,925), **Taken out as gain** (realised), and **Crypto, kept apart** —
+     crypto is counted in what you own but never netted into one gain, because under Indian
+     tax law (s.115BBH) a crypto loss can't be set against anything else.
+   - **Your money, per year** (XIRR) and **Your picks, last 12 months** (TWR), side by side —
+     Part 2 explains why these are different numbers.
+   - **Where the money is** — one bar split by asset class, with each class's value.
+3. **Holdings** — every position, sortable by clicking a column. The **Share** column shows each
+   holding's slice of the book. Yellow tags flag *pending* splits or a *possible unrecorded
+   split*. **Click a row** to open its detail: each lot, days until each becomes long-term for
+   tax, and for SpaceX the split between the stock's move and the rupee's. On a phone the table
+   becomes one card per holding.
+4. **Over time** — what you put in against what it was worth, drawn only where a price was
+   actually observed. Choose 3M / 6M / 1Y / 3Y / All in its header. Closeable.
 
-**How to read it well:** glance, don't stare. The Holdings tab shows you *prices*, and prices
-move daily for reasons that have nothing to do with your thesis. The decisions that matter are
-in the other tabs.
+**How to read it well:** glance, don't stare. This tab shows *prices*, and prices move daily for
+reasons that have nothing to do with your thesis. The decisions that matter are in the other
+tabs.
 
 **Ask the assistant:**
 - *"What's my portfolio worth?"* — totals, and which holdings are unpriced or stale
@@ -314,79 +392,90 @@ in the other tabs.
 
 ---
 
-### Tab 2 — Decisions: *what should I do?*
+### Tab 2 — Decisions: *what needs deciding?*
 
-Three panels. Everything here is waiting on you for a yes, a no, or a not-yet.
+Top to bottom in order of urgency: what needs you now, then leads, then the history of what
+already happened (closed).
+
+#### A condition fired (red, only when it happens)
+
+If something you wrote down as *"this would prove me wrong"* has happened, a red box sits at the
+very top: which company, what the condition was, the figure now against the figure written down.
+This outranks everything on the page. Part 6 says what to do.
 
 #### Suggestions
 
-**What it shows:** open suggestions (rare), decided ones, and — collapsed — *the ones the rules
-refused*, with which rule refused each.
+**The normal state is one line:** *"Nothing suggested right now. That is the usual answer, and
+usually the right one."* On a typical night every company is refused — usually because they are
+good businesses at bad prices. That is the rules working. An analyst who finds something to buy
+every day is not an analyst.
 
-**What a suggestion looks like** (an illustration — none is open today):
+**When a suggestion arrives, it looks like this** (an illustration — none is open today):
 
 ```
-APARINDS: start a position        ₹9,375 · 12 shares
-                                  74% confident · 270 days · Q3
+APARINDS  [Start a position]  [Quality, and the story running]      ▬▬▬▬▬▬▬▭ 74%
+₹9,375 · 12 shares · over 270 days                                   confident
 
-Apar Industries clears B1.1, which blocks 6 of the ten imperatives.
-What is good: return on capital 29.2% average; cash conversion 1.28.
-Suggested at ₹782.40 — that price is frozen onto this record.
+Apar Industries clears B1.1, which blocks 6 of the ten imperatives. …
 
-WHAT WOULD PROVE THIS WRONG
- • Return on capital falls below 12% in the next annual filing.
- • Less than 60 paise of each rupee of profit arrives as cash.
- • The price falls below ₹586.80 without the accounts explaining it.
+⚠ What would prove it wrong               ◎ What it predicts will happen
+  Return on capital falls below 12% …        Return on capital stays at or above 15%
+  The price falls below ₹586.80 …            Profit in the next annual filing is higher …
 
-WHAT IT IS CLAIMING
- • Return on capital stays at or above 15%.
- • Profit in the next annual filing is higher than the ₹X on file now.
+[⚠ 2 red flags against it]   Suggested at ₹782.40 — that price is frozen onto this record.
 
-[ Why — in your own words. Required. ]
-[ Approve ]  [ Reject ]
+Your decision, and why — in your own words
+[ Required. e.g. the price is fine but I already hold enough of this theme ]
+[ Approve ]  [ Reject ]     Approving moves no money — buy it yourself, then record it.
 ```
 
-**The reason box is required.** Both buttons stay disabled until you write something. That is
-not politeness: your reasons are the only data that ever reveals what kinds of suggestion you
-keep turning down.
-
-**The normal state is "Nothing is suggested right now."** On a typical night all twelve
-companies are refused — usually because they are good businesses at bad prices. That is the
-rules working. An analyst who finds something to buy every day is not an analyst.
+**The reason box is required.** Both buttons stay disabled until you write something — your
+reasons are the only data that ever reveals what kinds of suggestion you keep turning down.
 
 **Approving** records the decision and puts the position in the *system's* paper book. It does
 **not** buy anything and does not touch your ledger. If you then buy, record it yourself.
 
-#### Written about lately
-
-**What it shows:** themes (bottlenecks) that sources have been talking about, *but only ones
-your book is exposed to* — with which of your holdings and queued companies sit on each.
-
-**Why:** a video titled *"Why defence manufacturing is the decade's trade"* names no company.
-This panel turns it into "you hold nothing on defence manufacturing; two queued companies sit on
-it". It is a list to read, never a reason to act.
-
 #### Worth a look (the research queue)
 
-**What it shows:** companies a source named that you don't follow — who named them, what was
-said (the actual words), how many times, how long it has waited.
+**What it shows:** companies a source named that you don't follow — who named them, the actual
+words (the quote), how many times, how long it has waited, and a trust tag: **filing** (green,
+the company's own word), **press** (grey) or **commentary** (yellow). Once its filings have been
+read, a box shows where it would sit in the framework and a **Business** bar.
 
 **Your three buttons per company:**
 
 | Button | What it does | When to use it |
 |---|---|---|
-| **Read its filings** | Runs the company through the same four steps a holding gets: placement, filings, price, score | You're curious and want the numbers |
-| **Follow it** | Adds it to your watchlist: priced daily, scored nightly, eligible for suggestions | The numbers look worth following |
-| **Not interested** | Dismisses it — you record *why* | It's not for you |
+| **Read its filings** | Places it in the framework, reads its filings, fetches a price, scores it — once | You're curious and want the numbers |
+| **Follow it** | Adds it to your watchlist: priced daily, scored nightly, eligible for suggestions, listed on **Companies** | The numbers look worth following |
+| **Not interested** | Opens a box right under that company asking *why* | It's not for you |
 
-**Why "not interested" asks for a reason:** because the queue exists to measure your sources.
-A dismissal with a reason tells you, later, whether the channel was naming poor companies or you
+**Why "not interested" asks for a reason:** the queue exists to measure your sources. A
+dismissal with a reason tells you, later, whether the channel was naming poor companies or you
 were being too strict.
 
-**Real example:** Dixon Technologies is in your queue because a Hindi video titled *"2 Small Cap
-Stocks | Parimal Ade"* named it — the title named nobody; the spoken words named Syrma, Kaynes
-and Dixon. The excerpt shows the original words: *"Don टेक्नोलॉजीस"* (speech recognition heard
-"Dixon" as "Don"; the transliteration caught it; the exchange's list confirmed it).
+**Real example:** Dixon Technologies is here because a Hindi video titled *"2 Small Cap Stocks |
+Parimal Ade"* named it — the title named nobody; the spoken words named Syrma, Kaynes and Dixon.
+The quote shows the original words: *"Don टेक्नोलॉजीस"* (speech recognition heard "Dixon" as
+"Don"; the transliteration caught it; the exchange's list confirmed it).
+
+#### Written about lately
+
+Themes (bottlenecks) your sources have been talking about, each with orange **you hold …** tags
+for your holdings on that theme and grey **waiting: …** tags for queued companies. A video
+titled *"Why defence manufacturing is the decade's trade"* names no company; this turns it into
+"here's what you hold on it". A list to read, never a reason to act.
+
+#### Refused by the rules (closed)
+
+Every suggestion the rules blocked, summarised in its header — *"40 refusals across 12 companies
+· mostly the price"*. Open it to see **which rule** (a bar per rule, with counts) and **the
+latest refusal per company**, with the rule's own explanation. It's here so you can judge the
+rules; a rule whose cost you never see is a rule you can't tell is working.
+
+#### Decided (closed)
+
+Past approvals and rejections, each with the reason you wrote.
 
 **Ask the assistant:**
 - *"Did it suggest anything? Why not?"* — each refusal with its rule
@@ -396,87 +485,157 @@ and Dixon. The excerpt shows the original words: *"Don टेक्नोलॉ�
 
 ---
 
-### Tab 3 — Framework: *what is each company judged against?*
+### Tab 3 — Companies: *how does each company I follow score?*
 
-Reference material. You consult it when a company is being assessed, not every day.
+Every company you follow — held or watchlist — with its place in the framework and what that
+is worth. You consult it when assessing a company, and once a month.
 
-#### Framework
+#### Companies that need you (yellow, only when there are some)
 
-**What it shows:** *"version 2 · 12 companies · 31 bottlenecks"*. Press **Show** to open every
-company, each with:
+A company scores **zero** until you agree where it sits — the guard against a machine talking
+itself into believing a random small-cap matters to India. Anything waiting is listed first,
+with what you can do right there:
 
-- **Its place** — which bottleneck it sits on, the structural score (out of 10), and whether you
-  have agreed. **Agree** if the placement is right; **Move it** if it belongs elsewhere.
-- **Business and price** — the quality score with every component and its reason:
+- **… agree where the framework puts it** → **Review** opens that company so you can read it
+  and press **Agree with this placement**.
+- **… re-confirm where it sits** → agreements expire after a year; **Review**, then agree again
+  or move it.
+- **… has no place in the framework yet** → this happens when you **Follow** a company before
+  its filings were read. Two ways out:
+  - **Suggest a place** — the assistant reads what sources said about it and picks one of the
+    31 bottlenecks (or none, if it isn't sure — it says why). It costs a little of your monthly
+    AI budget.
+  - **Place it myself** — choose the bottleneck from a list, or **Outside the framework**.
+
+  Either way the company then waits for your agreement, like every other.
+
+#### Companies you follow
+
+One row per company. Without opening anything you can read, left to right:
 
 ```
-Business and price  7 of 9 measurable                 2 years of filings of 5 possible · Q1
-
-return on equity    2/2   at or above 15% in 2 of 2 year(s) read
-return on capital   2/2   29.2% average over 2 years read
-profit into cash    2/2   1.28 of profit arrived as cash
-debt                1/1   net debt is 0.1× earnings
-retained earnings    —    needs five years of market value
-margin of safety    0/2   40% ABOVE a worth of 26× owner earnings
+› APARINDS  Apar Industries
+  [watchlist]  B1.1 · Power Transmission & HVDC
+      Fit ▬▬▬ 7/10   Business ▬▬▬ 7/9   [Quality, and the story running]   [206% above worth]   [⚠ 2 red flags]
 ```
 
-- **Red flags** — each shown as a small tag; amber means it is standing.
+| Part | Question it answers |
+|---|---|
+| **Fit** | Does India need what this company does? (the structural score, out of 10 — *"0 until agreed"* if you haven't agreed yet) |
+| **Business** | Is it a good business, at a fair price? (out of what could be measured) |
+| **The verdict chip** | Which box it's in — green Q1, blue Q3, red Q2/Q4 (never a buy), grey *too little read to judge* |
+| **Price against worth** | How far the price sits from what the framework would pay: green if well below, yellow if above |
+| **Red flags** | How many of the ten warning signs are standing |
 
-**How to read a component — three different marks for three different facts:**
+Above the list: filters — **All · Held · Watchlist · Needs you** — and a count of companies in
+each box. Companies waiting for you are sorted to the top, then your holdings.
+
+**Click a row to open the full reading:**
+
+- **Does India need what it does?** — each part of the structural score as a bar, with its
+  reason: *Breadth 4/4 — blocks 6 of the ten imperatives*, *Crisis 0/2 — no named shock
+  accelerates this*, and so on.
+- **Is it a good business, at a fair price?** — each test as a bar with its reason, and how many
+  years of filings were read (and why not more).
+- **Red flags** — each by name (*Price ran ahead of profit*, *Sharp swings in the market's
+  mood*…) with ⚠ for yes, ✓ for no, ◌ for not answered, and the evidence under it.
+- **Agree with this placement** / **Move it** at the bottom.
+
+**Three marks for three different facts** in the business tests:
 
 | Mark | Means | What you can do |
 |---|---|---|
-| `2/2`, `0/2` | measured | nothing — it's a fact |
-| `—` | not read yet (filing missing, or too new) | wait; it fills itself |
-| `n/a` | this test does not describe this kind of company | nothing — it is not a gap |
+| a bar with `2/2`, `0/2` | measured | nothing — it's a fact |
+| **not read** | the filing isn't in yet (missing, or too new) | wait; it fills itself |
+| **does not apply** | this test does not describe this kind of company | nothing — it is not a gap |
 
-HDFC Bank shows `n/a` for return on capital, cash conversion and debt — because deposits are a
-bank's raw material, not its debt — and is measured instead on **cost to income**,
+HDFC Bank shows **does not apply** for return on capital, profit into cash and debt — deposits
+are a bank's raw material, not its debt — and is measured instead on **cost to income**,
 **provisions** and **funding spread**, which do describe a lender.
 
-**The depth note under each company** tells you *why* a reading is thin, and it matters which:
+**The years line tells you *why* a reading is thin**, and it matters which:
 
 - *"1 of 3 possible years read; the exchange's filings do not reach further back"* (Kaynes) —
   the data exists somewhere but isn't machine-readable yet.
 - *"listed too recently for more than 1 full year to exist"* (Sai Life, listed Dec 2024) —
-  nothing can hurry this; the verdict arrives by itself when the next annual filing lands.
+  nothing can hurry this; the verdict arrives when the next annual filing lands.
 
-#### What it reads
+#### The framework itself (closed)
 
-**What it shows:** every source (with its trust tier), the box to **add a channel**, what those
-sources named lately, and how each source has actually performed.
+The map: the ten things India must build, the 31 bottlenecks in the way, how many of the ten
+each one unblocks, and which of your companies sit on each.
 
-**Adding a channel:** paste anything from the address bar — `youtube.com/@channel`, a handle,
-or a channel id. It arrives **switched off**, waiting for you to press **Start reading it**.
-Pasting a link is not the same act as deciding to be influenced by it.
+**Ask the assistant:**
+- *"Why is Kaynes scored like that?"* — every component and its reason, the depth note, the box
+- *"Is HDFC Bank any good by your measures?"*
+
+---
+
+### Tab 4 — Sources: *what is it reading, and is it worth reading?*
+
+#### Where it reads from
+
+Every source, waiting ones first (highlighted, with **Start reading it**), then the ones being
+read (a green **reading** tag and a switch), then the ones you've switched off. Each has a trust
+tag: **filing**, **press** or **commentary** — commentary alone can never carry a suggestion,
+whatever it said.
+
+**Adding a channel:** at the bottom, paste anything from the address bar — `youtube.com/@channel`,
+a handle, or a channel id — with an optional note on why, and press **Add**. It arrives
+**switched off**, waiting at the top for you to press **Start reading it**. Pasting a link is
+not the same act as deciding to be influenced by it.
+
+**Switching one off** keeps everything it ever said; it just stops being read.
+
+#### Heard in the last month
+
+Every company a source named, held or not, with **for it** / **against it** tags where the source
+took a side, and an orange **you hold it** tag on your own holdings — so bad news about what you
+own is never filtered out.
 
 **Why every mention is kept, even of companies you ignored:** judge a channel only on the ideas
 you acted on and you measure your own filter, not the channel. Forty names, three looked at, one
 that worked reads as 33% instead of 2.5%. The skipped ones are the denominator.
 
+#### Each source's record
+
+Per source: how many companies it named, how many it took a side on, and how often that side
+turned out right — shown as **—** until at least 20 calls have settled, because a hit rate over
+six reads exactly like one over six hundred.
+
 **Ask the assistant:**
-- *"Why is Kaynes scored like that?"* — every component and its reason, the depth note, the box
-- *"Is HDFC Bank any good by your measures?"*
 - *"What did my channels say this week?"* / *"Which of my sources is actually worth reading?"*
 
 ---
 
-### Tab 4 — Scorecard: *is any of this working?*
+### Tab 5 — Scorecard: *is any of this working?*
 
 A tab you open **on purpose, monthly**. Not daily, and never right after a stock you passed on
 has gone up — reading this casually trains worse judgement, not better.
 
+#### Before any real money
+
+The six go/no-go criteria, written down before any could be measured. Each has a mark: **✓** met
+(green), **✗** not met (red), **◌** not testable yet. The header sums them up — *"1 of 6 met · 1
+not met · 4 not testable yet"*. *"Not yet" is never "no".* Part 10 covers each.
+
 #### Against the alternative
 
-Your book against index funds (Nifty 50 and S&P 500, via funds you could actually have bought)
-over the same window. If part of your book has no index counterpart — crypto, say — it tells
-you what share, so you don't mistake a crypto move for stock-picking skill.
+Your book and **the same mix in index funds** as two big numbers side by side, and a chip saying
+how far ahead or behind you are — *"behind by 53.9 points"* — over the window you pick (1M / 3M /
+1Y). Below: each index fund on its own, and a blue note when part of your book (crypto, funds)
+has no index counterpart, so you can see how much of the gap is crypto rather than
+stock-picking.
 
-Right now, over one year, your book is well behind the index. The panel also states what share
-of the book has no index counterpart, so you can see how much of that gap is crypto rather than
-stock-picking — exactly the kind of fact this panel exists to put in front of you.
+#### How its predictions are doing
 
-#### The books
+Every idea — even refused ones — writes down checkable predictions. This shows four questions:
+*Do the things it predicts come true? When it says 80%, is it right 80% of the time? When
+something disproved an idea, did anything happen? How often did you agree?* While a measure is
+still collecting its sample, you see a progress bar — **0 of 20** — instead of a figure; the
+figure appears only once the sample is there.
+
+#### The books, side by side (closed)
 
 Several paper portfolios, all valued at the same prices at the same moment:
 
@@ -490,16 +649,11 @@ Several paper portfolios, all valued at the same prices at the same moment:
 Read in aggregate, a year in, these answer the questions that matter: *were the rules protecting
 me or obstructing me? Were my rejections good calls?*
 
-#### Looking back
+#### Looking back (closed)
 
-The weekly, monthly and quarterly reviews, generated automatically: decisions made, what was
-blocked and why, which predictions are about to settle, how the queue is doing, how your
-sources performed, and the benchmark. The monthly one is your agenda for Part 7.
-
-#### Before any real money
-
-The six go/no-go criteria, written down before any could be measured. Each reads **met**,
-**not met**, or **not yet** — and *"not yet" is never "no"*. Part 10 covers these.
+The weekly, monthly and quarterly reviews, written automatically; the newest opens first. Each
+has decisions made, what was blocked and why, conditions close to firing, the queue, the budget,
+and how your sources did. The monthly one is your agenda for Part 7.
 
 **Ask the assistant:**
 - *"Am I beating the index?"*
@@ -508,22 +662,27 @@ The six go/no-go criteria, written down before any could be measured. Each reads
 
 ---
 
-### Tab 5 — Records: *what is on the record?*
-
-#### Foreign holdings — Schedule FA
-
-SpaceX is a foreign asset, so your income-tax return needs a calendar-year disclosure: the
-peak value, the closing value, income received. This panel computes it from the ledger, and
-counts coverage against the days you actually **held** it (not the whole year) — so "priced on
-97 of 97 days held" rather than a misleading "97 of 365".
+### Tab 6 — Records: *what is on the record?*
 
 #### Transactions
 
-Every entry in the ledger, newest first, and **Record one** to add a buy, sell, dividend or fee.
-Charges (brokerage, STT, stamp duty, GST) are computed for you from the rates in force.
+Every entry in the ledger, newest first, grouped by month — each with a coloured tag (**Bought**,
+**Sold**, **Dividend**…), the amount and the date. **Record one** (top right) adds a buy, sell,
+SIP, dividend, bonus or split; it shows you the charges it computed (brokerage, STT, stamp duty,
+GST) and waits for **Record it**.
 
-**To correct a mistake:** don't look for an edit button — there isn't one. Record the correct
-entry; it supersedes the old one, and both stay visible with the history showing you fixed it.
+**To correct a mistake:** there is no edit button, on purpose. Press the **↺** on the entry. It
+asks first — *"Reverse bought 13 HDFCBANK on Aug 12?"* — with **Reverse it** and **Keep it**. A
+reversing entry is added; the original stays in the record, struck through. Then record the
+correct entry.
+
+#### Foreign holdings — Schedule FA
+
+SpaceX is a foreign asset, so your income-tax return needs a calendar-year disclosure: initial,
+peak and closing value, and income received — pick the year in the header. Coverage is counted
+against the days you actually **held** it (not the whole year). A blue note reminds you these
+use the exchange rate recorded with each price; the return wants SBI's TT buying rate, and every
+figure names its day so you can look that up.
 
 **Ask the assistant:**
 - *"I bought 3 GE Vernova at 2,340 today"* → it shows you what it understood, costed, and waits
@@ -554,7 +713,7 @@ It replies with what it understood — quantity, price, date, the charges it com
 and asks you to confirm. Nothing is written until you do. Do the same for GE Vernova, HDFC
 Bank, Sai Life, both HDFC funds, SpaceX and the four coins.
 
-**Check:** Holdings tab. Invested should match what your broker says you paid. If it doesn't,
+**Check:** Holdings tab. **Put in** should match what your broker says you paid. If it doesn't,
 you have a missing or duplicate entry — find it now, not in six months.
 
 ### Step 2 — Let the prices arrive (automatic, overnight)
@@ -563,16 +722,20 @@ You do nothing. Stocks get NSE's official close at 19:00; funds get AMFI's NAV; 
 rupee rate come from Twelve Data; coins from CoinGecko. History back-fills itself on the first
 run.
 
-**Check the next morning:** Holdings shows *Current value* with no "unpriced" note. If one
+**Check the next morning:** Holdings shows *What it is worth today* with no yellow "no price
+yet" warning above it. If one
 holding stays unpriced, ask the assistant *"which holdings have no price?"*.
 
 ### Step 3 — Place each company in your framework (15 minutes)
 
-**Framework tab → Show.** Each company has a proposed place — a bottleneck — that scores
-**nothing until you agree**. Go through them one at a time:
+**Companies tab.** Each company has a proposed place — a bottleneck — that scores **nothing
+until you agree**. The ones waiting are listed first, in a yellow box, and the tab shows a
+count. Go through them one at a time — **Review** opens each:
 
-- Placement right? **Agree.**
+- Placement right? **Agree with this placement.**
 - Wrong bottleneck? **Move it.**
+- *"has no place in the framework yet"*? That's a company you followed before its filings were
+  read. Press **Suggest a place**, or **Place it myself** — then agree as above.
 - Not a structural play at all (HDFC Bank is a quality bank, not an unblocker of a national
   imperative)? That's fine — its structural score will be low, and that is the framework being
   honest rather than flattering your largest holding.
@@ -584,13 +747,14 @@ nationally essential.
 
 ### Step 4 — Choose what it reads (10 minutes)
 
-**Framework tab → What it reads.** The five NSE feeds arrive already switched on — a company
+**Sources tab.** The five NSE feeds arrive already switched on — a company
 filing with the exchange is the company's own word, so there's no judgement call there.
 
 Channels are different. For each channel you trust:
 
-1. Paste its address into **Add channel**, with a note on why it's worth reading.
-2. It appears switched off. Press **Start reading it**.
+1. Paste its address into **Add a YouTube channel** (at the bottom of the list), with a note
+   on why it's worth reading, and press **Add**.
+2. It appears at the top, highlighted and switched off. Press **Start reading it**.
 
 **Choose channels that name Indian companies.** Measured on the three this started with: two
 spoke Hindi about markets in general, and one taught valuation with American examples — across
@@ -628,8 +792,8 @@ everything free — prices, filings, the deterministic matching — carries on.
 
 ### Step 7 — Read what it says about your book (15 minutes)
 
-**Framework tab → Show**, and read every company's card. Don't act on anything. Just learn to
-read it. For your four stocks today:
+**Companies tab.** Read each row, then click it open and read the full reading. Don't act on
+anything. Just learn to read it (Part 4 has the key). For your four stocks today:
 
 | | Score | Box | What it's telling you |
 |---|---|---|---|
@@ -638,14 +802,14 @@ read it. For your four stocks today:
 | **Kaynes** | 1 of 9 | Borderline | One year of earnings readable; 169% above its worth |
 | **Sai Life** | 3 of 9 | Borderline | Listed Dec 2024 — only one year can exist yet |
 
-And read each company's depth note. Knowing *why* a reading is thin is half of reading it.
+And read each company's years line. Knowing *why* a reading is thin is half of reading it.
 
 ### Step 8 — The first night
 
 At 21:00 the evening run scores everything and applies the nine rules. Almost certainly:
 nothing suggested, everything refused, no notification. The next morning, **Decisions →
-Suggestions** says *"Nothing is suggested right now"*, and the refused list shows each company's
-rule.
+Suggestions** says *"Nothing suggested right now"*, and **Refused by the rules** (closed, lower
+down) says in its header how many were refused and mostly why.
 
 **And predictions start that night.** Even for refused ideas, each thesis's predictions are
 frozen with a deadline. Ask the assistant *"what has it predicted?"* the next day — you'll see
@@ -663,7 +827,7 @@ them, each marked *"from a blocked idea"*.
 
 | When | What happens | What you do |
 |---|---|---|
-| Morning | Overnight: prices in, feeds read, filings checked | Glance at **Holdings** if you like |
+| Morning | Overnight: prices in, feeds read, filings checked | Open the page: if there is no **Needs you** box, nothing needs you. Glance at **Holdings** if you like |
 | During the day | Channels and the exchange are read five times, the last at 23:10 | Nothing |
 | Whenever you hear something | — | Drop it in the **Inbox** |
 | Whenever you buy or sell | — | Record it (chat is fastest) |
@@ -771,12 +935,14 @@ Aim to leave the queue shorter than you found it. A queue that only grows gets a
 
 ### 3. Check the framework (5 minutes)
 
-**Framework → Show.** Anything marked as needing re-confirmation — a placement expires rather
-than standing for ever — gets **Agree** or **Move it**. Newly followed companies get placed.
+**Companies → Needs you** (the filter). Anything marked **re-confirm** — a placement expires
+after a year rather than standing for ever — gets **Agree with this placement** or **Move it**.
+Newly followed companies with no place get **Suggest a place** or **Place it myself**.
 
 ### 4. Judge your sources (5 minutes)
 
-**Framework → What it reads.** For each channel, look at what it named and how those names did.
+**Sources → Heard in the last month** and **Each source's record.** For each channel, look at
+what it named and how those names did.
 A channel that named thirty companies, none of which you followed, is either poor or not
 aligned with your framework — either way, consider switching it off and trying another. This is
 the whole reason every mention is recorded.
@@ -787,8 +953,8 @@ the whole reason every mention is recorded.
 1. **Against the alternative** — am I beating the index fund? (Early on: probably not, and
    that's information.)
 2. **The books** — what did the rules block, and how did those ideas do? What did I turn down?
-3. **Predictions** — ask the assistant *"which predictions settled this month, and how many came
-   true?"*
+3. **How its predictions are doing** — the progress bars toward the sample each measure needs;
+   ask the assistant *"which predictions settled this month, and how many came true?"*
 
 Resist drawing conclusions from one month. You're looking for patterns over quarters.
 
@@ -846,8 +1012,8 @@ never disagree. Ask in plain words; you don't need these exact phrasings.
 
 ### What it will not do from chat, and why
 
-- **Agree to a framework placement, approve a source, or follow a company.** These are
-  structural claims about your theory. They stay on the page where you can see exactly what
+- **Place a company, agree to a framework placement, approve a source, or follow a company.**
+  These are structural claims about your theory. They stay on the page where you can see exactly what
   you're agreeing to.
 - **Invent your reason for a decision.** If you don't give one, it asks.
 - **Write anything in one step.** The ledger is your word, and a decision is the row the system

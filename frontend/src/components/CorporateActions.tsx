@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, Split } from "lucide-react";
 
+import { Section } from "@/components/investments/kit";
 import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api";
 import type { CorporateAction } from "@/lib/api";
@@ -21,9 +22,10 @@ import { formatDateFull, formatQuantity } from "@/lib/format";
  * action, offered early or offered when the job could not read the announcement.
  */
 
+/* ⚠ Both open states wear the caution tone: each is a holding whose figures are wrong until
+   something is done, whether that is one click (PENDING) or a hand entry (NEEDS_REVIEW). */
 function statusTone(status: CorporateAction["status"]): string {
-  if (status === "NEEDS_REVIEW") return "border-amber-500/40 bg-amber-500/5";
-  if (status === "APPLIED") return "border-border bg-card";
+  if (status === "PENDING" || status === "NEEDS_REVIEW") return "border-caution/45 bg-caution/5";
   return "border-border bg-card";
 }
 
@@ -61,13 +63,14 @@ export default function CorporateActions({
       {open.map((a) => (
         <div
           key={a.id}
-          className={`rounded-xl border p-4 ${statusTone(a.status)}`}
+          id={`item-${a.id}`}
+          className={`scroll-mt-4 rounded-xl border p-4 ${statusTone(a.status)}`}
         >
           <div className="flex items-start gap-2">
             {a.status === "NEEDS_REVIEW" ? (
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-caution" aria-hidden="true" />
             ) : (
-              <Split className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <Split className="mt-0.5 size-4 shrink-0 text-caution" aria-hidden="true" />
             )}
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium">
@@ -137,12 +140,16 @@ export default function CorporateActions({
       ))}
 
       {applied.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="flex items-center gap-1.5 text-sm font-medium">
-            <Check className="size-3.5 text-muted-foreground" />
-            Recently applied
-          </p>
-          <ul className="mt-2 space-y-1">
+        <Section
+          icon={Check}
+          memory="holdings.applied"
+          defaultOpen={false}
+          title="Recently applied"
+          summary={`${applied.length} split${applied.length === 1 ? "" : "s"} or bonus${
+            applied.length === 1 ? "" : "es"
+          } applied to your holdings — open to check them`}
+        >
+          <ul className="space-y-1">
             {applied.map((a) => (
               <li key={a.id} className="text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">{a.symbol}</span>{" "}
@@ -152,7 +159,7 @@ export default function CorporateActions({
               </li>
             ))}
           </ul>
-        </div>
+        </Section>
       )}
 
       {error && (

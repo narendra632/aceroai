@@ -394,6 +394,42 @@ def propose_mapping(
     return mapping
 
 
+def place(
+    db: Session,
+    instrument: Instrument,
+    *,
+    spec: dict,
+    framework_version_id: uuid.UUID,
+    b_bottleneck: str | None,
+    off_framework: bool = False,
+    rationale: str | None = None,
+    proposed_by: str = "USER",
+) -> AbMapping:
+    """Give a followed company its first place in the framework — unapproved, like every other.
+
+    ⚠ Found on the live book: a company followed straight from the research queue, before its
+    filings were read, has no mapping at all. The page said it needed agreement and offered a
+    list it was not in, and nothing anywhere could give it one. Moving a company needs a
+    mapping to move; this is the step before that.
+
+    ⚠ Refused for a company that already has a place. Correcting a placement is `remap`, which
+    supersedes the old mapping and says so; letting this write over one would make a
+    correction look like a first placement.
+    """
+    if live_mapping(db, instrument.id) is not None:
+        raise Invalid(f"{instrument.symbol} already has a place in the framework; move it instead")
+    return propose_mapping(
+        db,
+        instrument,
+        b_bottleneck=None if off_framework else b_bottleneck,
+        spec=spec,
+        framework_version_id=framework_version_id,
+        proposed_by=proposed_by,
+        rationale=rationale,
+        off_framework=off_framework,
+    )
+
+
 def approve_mapping(db: Session, mapping: AbMapping, *, note: str | None = None) -> AbMapping:
     """Agree with a proposed mapping. This is the one click that lets it score."""
     if mapping.superseded_by_id is not None:

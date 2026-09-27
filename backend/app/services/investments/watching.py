@@ -329,6 +329,9 @@ class Measure:
     value: Decimal | None
     n: int
     detail: str
+    #: The sample this measure waits for before it reports, where it waits for one — so the
+    #: page can draw progress towards it rather than parse "0 of 20" out of a sentence.
+    needed: int | None = None
 
     @property
     def is_reportable(self) -> bool:
@@ -362,6 +365,7 @@ def claim_accuracy(db: Session) -> Measure:
             None,
             n,
             f"{n} of {MIN_OBSERVATIONS} resolved claims needed before this means anything",
+            needed=MIN_OBSERVATIONS,
         )
     # ⚠ The share from ideas the gates refused is stated, never hidden. Most claims will come
     # from blocked ideas for as long as the market is expensive, and a reader who thought this
@@ -374,6 +378,7 @@ def claim_accuracy(db: Session) -> Measure:
         (Decimal(true) / Decimal(n)).quantize(Decimal("0.001")),
         n,
         f"{true} of {n} specific assertions came true{share}",
+        needed=MIN_OBSERVATIONS,
     )
 
 
@@ -409,6 +414,7 @@ def calibration(db: Session) -> Measure:
             len(scored),
             f"{len(scored)} of {MIN_OBSERVATIONS} settled theses needed; a calibration curve "
             "over fewer says more about the sample than about the system",
+            needed=MIN_OBSERVATIONS,
         )
     brier = sum(((c - outcome) ** 2 for c, outcome in scored), ZERO) / Decimal(len(scored))
     return Measure(
@@ -417,6 +423,7 @@ def calibration(db: Session) -> Measure:
         len(scored),
         f"Brier {brier:.3f} over {len(scored)} theses — lower is better, and 0.250 is what "
         "saying 50% to everything achieves",
+        needed=MIN_OBSERVATIONS,
     )
 
 
